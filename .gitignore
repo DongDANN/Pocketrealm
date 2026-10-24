@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-ssr
+dev-dist
+coverage
+playwright-report
+test-results
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example
+docs/art-preview/_tmp
