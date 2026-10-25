@@ -404,12 +404,15 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
   const bonus = economyMods(next, forgeTotals(meta.forge)).embersBonus;
   const gained = Math.max(1, Math.round(((reward * (100 + bonus)) / 100) * fatigue * heatMult));
   next = { ...next, embersEarned: next.embersEarned + gained };
-  ledger.push({
-    key: `delve:floor:${next.runId}:${floor}`,
-    type: 'delve:floor',
-    xp: 10,
-    sparks: Math.max(1, Math.round(heatMult)),
-  });
+  // The Daily Challenge has its own settlement at the end; it never mines the main ledger.
+  if (!next.daily) {
+    ledger.push({
+      key: `delve:floor:${next.runId}:${floor}`,
+      type: 'delve:floor',
+      xp: 10,
+      sparks: Math.max(1, Math.round(heatMult)),
+    });
+  }
   next = pushLog(
     next,
     'reward',
@@ -421,17 +424,25 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
       1,
       Math.round(((CLEAR_BONUS[next.hollowId] * (100 + bonus)) / 100) * fatigue * heatMult),
     );
-    const bankedAll = bankEmbers(meta, next.embersEarned + clearBonus, ctx.today);
-    meta = settleRunEnd(bankedAll.meta, next);
-    meta.clearedHollows = [...new Set([...meta.clearedHollows, next.hollowId])];
-    meta.runsCleared += 1;
-    meta.lastClearDate = { ...meta.lastClearDate, [next.hollowId]: ctx.today };
     next = {
       ...next,
       embersEarned: next.embersEarned + clearBonus,
       result: 'cleared',
       pendingChoice: null,
     };
+    if (next.daily) {
+      next = pushLog(
+        next,
+        'end',
+        `Daily Challenge cleared through floor ${floor}. Reward settles when the run is stored.`,
+      );
+      return { run: next, meta, ledger, ended: true };
+    }
+    const bankedAll = bankEmbers(meta, next.embersEarned, ctx.today);
+    meta = settleRunEnd(bankedAll.meta, next);
+    meta.clearedHollows = [...new Set([...meta.clearedHollows, next.hollowId])];
+    meta.runsCleared += 1;
+    meta.lastClearDate = { ...meta.lastClearDate, [next.hollowId]: ctx.today };
     ledger.push({
       key: `delve:clear:${next.runId}`,
       type: 'delve:clear',
@@ -479,6 +490,14 @@ function endRun(
   today: string,
 ): { run: RunState; meta: DelveMeta } {
   const next = { ...run, result, pendingChoice: null };
+  // A Daily run is isolated from permanent progress: no Embers bank, no counters, no materials.
+  if (next.daily) {
+    const label = result === 'retreated' ? 'Retreat' : 'Faint';
+    return {
+      run: pushLog(next, 'end', `Daily Challenge ${label.toLowerCase()}: run over.`),
+      meta,
+    };
+  }
   const settled = settleRunEnd(meta, next);
   if (result === 'retreated') {
     const { meta: m, banked } = bankEmbers(settled, next.embersEarned, today);
@@ -496,6 +515,21 @@ function endRun(
     run: pushLog(next, 'end', `Faint: ${banked} of ${kept} Embers banked (${pct}%).`),
     meta: m,
   };
+}
+
+/** Leave the Hollow on purpose: bank every Ember earned, keep the run in history. */
+export function retreatRun(
+  run: RunState,
+  meta: DelveMeta,
+  today: string,
+): { run: RunState; meta: DelveMeta } {
+  if (run.result !== 'active') return { run, meta };
+  return endRun(
+    pushLog(run, 'choice', 'Retreat sounded the lantern; the companion starts home.'),
+    meta,
+    'retreated',
+    today,
+  );
 }
 
 function shopItems(

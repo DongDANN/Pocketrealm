@@ -54,6 +54,8 @@ Last updated: 2026-10-25
       only; Firefox, WebKit, real phones and screen readers remain Gate 5/6 and MANUAL_TEST items.**
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
       cosmetics/realm, weekly review, month summary, insights.
+      **4a data controller, worker transport and controller tests done; 4b screens, 4c scene/audio,
+      4d e2e pending.**
 - [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
       reminders, error states, manifest shortcuts.
 - [ ] Gate 6 — Polish/ship: a11y, reduced motion, Lighthouse, vercel.json, README,
@@ -697,3 +699,51 @@ everything below runs in `npx playwright test` against the production build and 
   VoiceOver/TalkBack/NVDA output, real-device safe areas, and a slow-network update flow are Gate
   5/6 and MANUAL_TEST work; none are claimed here. Drag/select interactions, long-press, and
   export on iOS are not covered by e2e.
+
+### Gate 4a — Delve controller, worker transport and guarded writes (2026-10-25)
+
+The Delve now has a data-facing controller that a screen can call without knowing about batches,
+wallets, daily settlement or worker threading. Core stays pure and clock-free; this layer injects
+`today`/`now`, turns one player action into one guarded write, and reconciles Lantern Oil against
+the reward ledger.
+
+- **Wallet:** `syncDelveWallet` starts a fresh wallet at the ledger's oil total, then pays only the
+  difference between the ledger total and the stored `oilGranted` watermark. A legacy row without
+  the watermark adopts the ledger total without a windfall. Capacity is `200 + Forge lamp + 25
+review buff`; losing the buff clamps the lamp instead of hiding oil. The wallet is never written
+  by a read of budgeting data.
+- **Controller (`src/data/delve.ts`):** `startDelve`, `startDailyDelve`, `stepDelve`,
+  `chooseDelve`, `retreatDelve`, `applyCatchUp`, Forge/tree/Workshop/card/building actions, Realm
+  milestones, signals, snapshot and history. Starting combines the persisted quest seed with the
+  run counter; Hollow, Heat and build locks are checked before a write, and a second active run is
+  refused.
+- **Guarded writes (`src/data/delveStore.ts`):** `createRun` writes step zero, `commitBatch` only
+  accepts a forward step, and `commitChoice` accepts a same-index choice resolution or an ending
+  only when the stored run was actually waiting (or a camp fork just opened). All three share one
+  transaction and the existing idempotent reward ledger. `saveMetaWallet` writes wallet-only meta
+  actions, and `boundedOil` honors Forge/review capacity above the legacy 200 cap.
+- **Daily Challenge:** floor and clear ledger hooks are suppressed for daily runs, and
+  `endRun` leaves counters, materials, Embers and Hollow clears alone. Settlement happens exactly
+  once in the batch that ends the run: `finishDailyRun` now refuses a second settlement, the
+  controller adds one `delve:daily` reward row, and the run keeps its local personal best.
+- **Catch-up:** `applySteps` now adopts a same-index camp fork before stopping, so a fork cannot be
+  lost and strand the run; chunking yields after each chunk and stops on a pending choice. Daily
+  catch-up is time-bound only (no oil), a dry standard lamp consumes elapsed time instead of
+  banking it, a pending choice pauses the clock, backwards clocks grant nothing, and a pre-clock
+  run cannot claim a 12-hour backlog. The browser path is a module Web Worker
+  (`src/data/workers/delveCatchup.worker.ts`) with per-chunk progress; Node and failed transports
+  fall back to the same pure `runCatchUpJob`.
+- **Autopilot policy:** `src/core/delve/policy.ts` owns the shipped policy and a strict normalizer;
+  `src/ui/lib/delvePolicy.ts` stores it in guarded localStorage with the same fallback.
+- **Tests:** new `tests/data-delve-controller.test.ts` (28 tests) covers wallet reconciliation,
+  start/step/retreat, camp forks and choices, a full Daily settlement with no permanent progress,
+  catch-up applied/dry/pending/fork/backwards/pre-clock cases, Forge, Habit Cards, Realm
+  milestones and Heat. The existing daily test now asserts the once-only settlement guard.
+- **Verification:** `npm run typecheck` **verified** clean; `npx vitest run` **verified** 593/593
+  across 58 files; `npm run lint` **verified** clean; `prettier --check .` **verified** clean;
+  `npm run build` **verified** (641 kB JS, 29 kB CSS, 40 precache entries). The >500 kB warning
+  still stands until the Delve scene is lazily split in Gate 4c.
+- **Partially verified:** the worker compiles and its pure job is tested, but it is not yet in a
+  browser bundle because the app does not import the controller until Gate 4b; browser worker
+  transport and real-device timing are Gate 4d/5 work. No screen or e2e coverage for these APIs is
+  claimed yet.

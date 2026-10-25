@@ -45,11 +45,12 @@ export function finishDailyRun(
   | { meta: DelveMeta; embers: number; sparks: number; floor: number; best: boolean }
   | { error: string } {
   if (run.result === 'active') return { error: 'The run is still active.' };
+  if (meta.daily?.settled) return { error: 'Daily challenge already settled.' };
   const floor = Math.max(1, Math.trunc(run.floor));
   const { meta: m, banked } = bankEmbers(meta, floor * 2, today);
   const prev = meta.dailyBest ?? 0;
   return {
-    meta: { ...m, dailyBest: Math.max(prev, floor) },
+    meta: { ...m, daily: { ...m.daily, settled: true }, dailyBest: Math.max(prev, floor) },
     embers: banked,
     sparks: floor,
     floor,

@@ -359,19 +359,21 @@ export function buyTreeNode(
   meta: DelveMeta,
   buildId: BuildId,
   nodeId: string,
-): { bought: boolean; meta: DelveMeta } {
+): { bought: boolean; meta: DelveMeta; reason?: string } {
   const b = buildById(buildId);
-  if (!b) return { bought: false, meta };
+  if (!b) return { bought: false, meta, reason: 'Unknown build.' };
   const state = buildState(meta, buildId);
-  if (state.tree.includes(nodeId)) return { bought: false, meta };
+  if (state.tree.includes(nodeId)) return { bought: false, meta, reason: 'Already learned.' };
   const branch = b.treeBranches.find((br) => br.nodes.some((n) => n.id === nodeId));
   const index = branch?.nodes.findIndex((n) => n.id === nodeId) ?? -1;
-  if (index < 0) return { bought: false, meta };
+  if (index < 0) return { bought: false, meta, reason: 'Unknown node.' };
   // Sequential branch prerequisite: all earlier nodes in the branch must be bought.
   const missing = branch!.nodes.slice(0, index).filter((n) => !state.tree.includes(n.id));
-  if (missing.length > 0) return { bought: false, meta };
+  if (missing.length > 0) {
+    return { bought: false, meta, reason: 'Learn the earlier nodes in this branch first.' };
+  }
   const cost = NODE_COSTS[index];
-  if (meta.embers < cost) return { bought: false, meta };
+  if (meta.embers < cost) return { bought: false, meta, reason: 'Not enough Embers.' };
   const next = { tree: [...state.tree, nodeId], spent: state.spent + cost };
   return {
     bought: true,

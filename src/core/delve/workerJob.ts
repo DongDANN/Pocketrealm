@@ -26,8 +26,15 @@ export interface CatchUpJobResponse {
   logs: string[];
 }
 
-/** Run a whole catch-up synchronously; used by the worker and by Node tests alike. */
-export function runCatchUpJob(req: CatchUpJobRequest): CatchUpJobResponse {
+/**
+ * Run a whole catch-up synchronously; used by the worker and by Node tests alike. `onProgress` is
+ * called after every chunk, so a worker can post a determinate progress bar without changing the
+ * simulation or the returned patch.
+ */
+export function runCatchUpJob(
+  req: CatchUpJobRequest,
+  onProgress?: (chunk: CatchUpResult) => void,
+): CatchUpJobResponse {
   const chunkSize = req.chunkSize ?? 32;
   const logs: string[] = [];
   const progress: CatchUpResult[] = [];
@@ -47,6 +54,7 @@ export function runCatchUpJob(req: CatchUpJobRequest): CatchUpJobResponse {
     for (const chunk of catchUpChunks(req.run, req.ctx, req.maxSteps, chunkSize)) {
       result = chunk;
       progress.push(chunk);
+      onProgress?.(chunk);
     }
     logs.push(
       `applied ${result.applied} steps, spent ${result.oilSpent} oil, result ${result.run.result}.`,

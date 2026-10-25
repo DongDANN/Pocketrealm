@@ -8,6 +8,7 @@ export * from './signals';
 export * from './autopilot';
 export * from './catchup';
 export * from './engine';
+export * from './policy';
 export * from './workshop';
 export * from './buildings';
 export * from './mastery';

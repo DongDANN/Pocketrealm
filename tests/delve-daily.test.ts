@@ -109,11 +109,16 @@ describe('daily steps and rewards', () => {
     expect(done.floor).toBe(3);
     expect(done.best).toBe(true);
     expect(done.meta.dailyBest).toBe(3);
+    expect(done.meta.daily.settled).toBe(true);
 
-    const again = finishDailyRun(done.meta, { ...run, floor: 2 }, '2026-10-25');
+    const replay = { ...done.meta, daily: { date: '2026-10-25', played: true } };
+    const again = finishDailyRun(replay, { ...run, floor: 2 }, '2026-10-25');
     if ('error' in again) throw new Error(again.error);
     expect(again.best).toBe(false);
     expect(again.meta.dailyBest).toBe(3);
+
+    const twice = finishDailyRun(done.meta, { ...run, floor: 2 }, '2026-10-25');
+    expect('error' in twice).toBe(true);
   });
 
   it('respects the daily Ember cap and rejects active runs', () => {

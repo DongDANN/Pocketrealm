@@ -188,7 +188,7 @@ export interface DelveMeta {
   /** Enemy species sighted at least once (codex progress). */
   codex: string[];
   /** Daily Challenge: the local date of the record and whether the attempt was used. */
-  daily: { date: LocalDate; played: boolean };
+  daily: { date: LocalDate; played: boolean; settled?: boolean };
   /** Deepest floor reached in any Daily Challenge (local personal best). */
   dailyBest: number;
   /** Clock defense: highest wall-clock ms ever seen. */

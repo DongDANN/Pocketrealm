@@ -47,6 +47,11 @@ export interface DelveMetaRow {
    * ledger and spent by the caller — so the wallet lives on the row next to the meta it funds.
    */
   oil: number;
+  /**
+   * Total oil the ledger had granted when this wallet was last synced. The wallet is topped up by
+   * the difference, so a habit logged while the Delve screen was closed can never be paid twice.
+   */
+  oilGranted?: number;
   updatedAt: number;
 }
 
