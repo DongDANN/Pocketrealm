@@ -10,7 +10,24 @@ import { px } from '../../src/art/px';
 import { buildWarden } from '../../src/art/companion';
 import { FLAME_FRAMES, TORCH } from '../../src/art/tiles';
 import { UI_ASSETS } from '../../src/art/ui';
-import { composeRoomPreview, rootfallScene } from '../../src/art/scenes/rootfall';
+import { composeRoomPreview, rootfallScene, SCENE_H, SCENE_W } from '../../src/art/scenes/rootfall';
+import {
+  composeRealm,
+  groundAt,
+  periodForHour,
+  plotBox,
+  REALM_BUILDINGS,
+  type RealmPeriod,
+} from '../../src/art/scenes/realm';
+import {
+  ascend,
+  coverage,
+  impact,
+  puff,
+  shockwave,
+  slash,
+  type Effect,
+} from '../../src/art/effects';
 import { AFFIXES } from '../../src/core/delve/data/affixes';
 import { ELEMENTS } from '../../src/core/delve/data/elements';
 import { STATUSES } from '../../src/core/delve/data/statuses';
@@ -411,6 +428,9 @@ const PREVIEW_PNGS: PngSpec[] = [
   { file: 'delve-hollow-3.png' },
   { file: 'delve-shapes.png' },
   { file: 'delve-glyphs.png' },
+  { file: 'delve-stages.png' },
+  { file: 'realm-diorama.png' },
+  { file: 'delve-effects.png' },
 ];
 
 const hollowSize = (hollow: 1 | 2 | 3) =>
@@ -426,6 +446,9 @@ const PREVIEW_GIFS: GifSpec[] = [
   { file: 'anim-hollow-1-idle.gif', frames: hollowSize(1), width: 128, height: 128 },
   { file: 'anim-hollow-2-idle.gif', frames: hollowSize(2), width: 128, height: 128 },
   { file: 'anim-hollow-3-idle.gif', frames: hollowSize(3), width: 128, height: 128 },
+  { file: 'anim-realm.gif', frames: 12, width: 640, height: 360 },
+  { file: 'anim-effect-slash.gif', frames: 4, width: 128, height: 128 },
+  { file: 'anim-effect-impact.gif', frames: 5, width: 128, height: 128 },
 ];
 
 const UI_PNGS: PngSpec[] = UI_ASSETS.map(({ key, pix }) => ({
@@ -486,6 +509,137 @@ function validateGif(path: string, spec: GifSpec): ArtIssue[] {
   return issues;
 }
 
+const REALM_LEVELS: [string, Record<string, number>][] = [
+  ['bare', {}],
+  ['part', { treasury: 1, library: 1, smithy: 1 }],
+  ['built', { treasury: 2, library: 2, smithy: 2, observatory: 2, workshop: 2 }],
+];
+
+const PERIOD_HOURS: [number, RealmPeriod][] = [
+  [0, 'night'],
+  [4, 'night'],
+  [5, 'dawn'],
+  [7, 'dawn'],
+  [8, 'day'],
+  [16, 'day'],
+  [17, 'dusk'],
+  [20, 'dusk'],
+  [21, 'night'],
+  [23, 'night'],
+];
+
+/** The five effects the battle scene can play, each with the shortest useful reel. */
+function effectEntries(): { spec: FrameSpec; effect: Effect }[] {
+  const made: [string, Effect, number][] = [
+    ['effect.slash', slash(C.frost1), 4],
+    ['effect.impact', impact(C.amber2), 5],
+    ['effect.shockwave', shockwave(C.rose2), 4],
+    ['effect.ascend', ascend(C.moss2), 5],
+    ['effect.puff', puff(C.ink500), 4],
+  ];
+  return made.map(([key, effect, minFrames]) => ({
+    effect,
+    spec: { key, frames: effect.frames, width: 32, height: 32, minFrames, distinctFrames: true },
+  }));
+}
+
+/**
+ * The Realm diorama and the effect strips. What is checked here is what a screenshot cannot tell
+ * apart from a bug: that the same inputs give the same pixels, that the island surface is a single
+ * continuous curve the actors can be stood on, and that an effect thins out instead of ending solid.
+ */
+export function sceneIssues(): ArtIssue[] {
+  const issues: ArtIssue[] = [];
+  const warden = buildWarden().idle[0]!;
+
+  for (const period of ['dawn', 'day', 'dusk', 'night'] as RealmPeriod[]) {
+    for (const [label, levels] of REALM_LEVELS) {
+      for (const frame of [0, 2, 5, 8]) {
+        const key = `realm.${period}.${label}.f${frame}`;
+        const actors = { companion: warden, companionX: 152 };
+        const once = composeRealm(frame, 0, period, levels, actors);
+        const twice = composeRealm(frame, 0, period, levels, actors);
+        if (Buffer.compare(Buffer.from(once.data), Buffer.from(twice.data)) !== 0) {
+          issues.push({
+            key,
+            message: 'is not deterministic: the same inputs drew different pixels',
+          });
+        }
+        if (once.w !== SCENE_W || once.h !== SCENE_H) {
+          issues.push({ key, message: `is ${once.w}x${once.h}, expected ${SCENE_W}x${SCENE_H}` });
+        }
+        const bad = once.data.find((value) => value > MAX_INDEX);
+        if (bad !== undefined) issues.push({ key, message: `uses palette index ${bad}` });
+        if (once.data.some((value) => value === 0)) {
+          issues.push({ key, message: 'leaves a hole through to the page behind it' });
+        }
+      }
+    }
+  }
+
+  for (const [hour, want] of PERIOD_HOURS) {
+    const got = periodForHour(hour);
+    if (got !== want)
+      issues.push({ key: `realm.hour${hour}`, message: `maps to ${got}, expected ${want}` });
+  }
+
+  for (const depth of [-6, 0, 9]) {
+    for (let x = 0; x < SCENE_W; x++) {
+      const y = groundAt(x, depth);
+      if (y < 0 || y >= SCENE_H) {
+        issues.push({
+          key: `realm.ground.x${x}.${depth}`,
+          message: `returns row ${y}, off the canvas`,
+        });
+      }
+    }
+  }
+  for (let d = 1; d <= 140; d++) {
+    if (groundAt(160 - d, 0) !== groundAt(160 + d, 0)) {
+      issues.push({
+        key: `realm.ground.symmetric`,
+        message: `row ${160 - d} and ${160 + d} disagree at depth 0`,
+      });
+      break;
+    }
+  }
+  if (!(groundAt(160, -4) < groundAt(160, 6))) {
+    issues.push({ key: 'realm.ground.depth', message: 'depth does not move down the band' });
+  }
+
+  const boxes = REALM_BUILDINGS.map((id) => ({ id, box: plotBox(id) }));
+  for (const { id, box } of boxes) {
+    if (box.x < 0 || box.y < 0 || box.x + box.w > SCENE_W || box.y + box.h > SCENE_H) {
+      issues.push({ key: `realm.plot.${id}`, message: 'has a tap box that leaves the canvas' });
+    }
+  }
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!.box;
+      const b = boxes[j]!.box;
+      if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+        issues.push({
+          key: `realm.plot.${boxes[i]!.id}`,
+          message: `tap box overlaps ${boxes[j]!.id}, so one tap could hit two buildings`,
+        });
+      }
+    }
+  }
+
+  for (const { spec, effect } of effectEntries()) {
+    issues.push(...validateFrames(spec));
+    const peak = Math.max(...effect.frames.map((_, i) => coverage(effect, i)));
+    const last = coverage(effect, effect.frames.length - 1);
+    if (last >= peak) {
+      issues.push({
+        key: spec.key,
+        message: 'ends as solid as its busiest frame, so it pops instead of fading',
+      });
+    }
+  }
+  return issues;
+}
+
 export function previewCounts(): { pngs: number; gifs: number } {
   return { pngs: PREVIEW_PNGS.length, gifs: PREVIEW_GIFS.length };
 }
@@ -509,6 +663,7 @@ export function validateArt(root = process.cwd()): ArtIssue[] {
     ...artSpecs().flatMap(validateFrames),
     ...speciesIssues(),
     ...uiIssues(),
+    ...sceneIssues(),
     ...validateExports(root),
   ];
 }

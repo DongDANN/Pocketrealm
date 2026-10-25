@@ -442,3 +442,21 @@ export function dissolve(src: Pixmap, amount: number, seed = 29): void {
 export function colors(hexes: readonly string[]): number[] {
   return hexes.map(colorIndex);
 }
+
+/**
+ * Nearest-neighbour enlargement by a whole number. Elites and bosses reuse the 32x32 family at 2x
+ * rather than authoring a second sprite, and integer factors are the only scale the style lock allows.
+ */
+export function scalePixmap(pix: Pixmap, factor: number): Pixmap {
+  if (!Number.isInteger(factor) || factor < 1) throw new Error('Scale must be a positive integer');
+  if (factor === 1) return pix;
+  const out = createPixmap(pix.w * factor, pix.h * factor);
+  for (let y = 0; y < pix.h; y++) {
+    for (let x = 0; x < pix.w; x++) {
+      const c = pix.data[y * pix.w + x]!;
+      if (!c) continue;
+      fillRect(out, x * factor, y * factor, factor, factor, c);
+    }
+  }
+  return out;
+}

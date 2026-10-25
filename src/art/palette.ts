@@ -152,26 +152,31 @@ export const ELEMENT_RAMPS: Record<Element, readonly string[]> = {
 };
 
 export interface HollowPalette {
+  /** Ordered `stoneDark, deep, stone, stoneLit` — the four tones a stage is built from. */
   readonly bg: readonly string[];
   readonly accent: readonly string[];
   readonly light: string;
 }
 
+/**
+ * One hue family per Hollow, so the room reads as a place before it reads as a background:
+ * moss and lantern amber in the Warren, soot and embers in the Vault, violet in the Deep.
+ */
 export const HOLLOW_PALETTES: Record<'hollow1' | 'hollow2' | 'hollow3', HollowPalette> = {
   hollow1: {
-    bg: ['#0e0d17', '#151322', '#1d1b2e', '#224a39'],
+    bg: ['#0e0d17', '#151322', '#224a39', '#396f4d'],
     accent: [RAMPS.moss[2], RAMPS.teal[2], RAMPS.amber[3]],
     light: RAMPS.amber[2],
   },
   hollow2: {
-    bg: ['#0e0d17', '#151322', '#2d3f7b', '#465fab'],
-    accent: [RAMPS.frost[2], RAMPS.cyan[2], RAMPS.violet[2]],
-    light: RAMPS.cyan[1],
+    bg: ['#151322', '#0e0d17', '#7f2820', '#bd4329'],
+    accent: [RAMPS.ember[1], RAMPS.amber[3], RAMPS.gold[1]],
+    light: RAMPS.amber[1],
   },
   hollow3: {
-    bg: ['#08070d', '#151322', '#44256d', '#712c54'],
-    accent: [RAMPS.ember[2], RAMPS.rose[2], RAMPS.gold[1]],
-    light: RAMPS.ember[0],
+    bg: ['#151322', '#27243c', '#44256d', '#683a9c'],
+    accent: [RAMPS.violet[1], RAMPS.rose[2], RAMPS.gold[1]],
+    light: RAMPS.violet[1],
   },
 };
 

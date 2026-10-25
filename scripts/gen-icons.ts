@@ -1,5 +1,6 @@
 import { lanternMark } from '../src/art/brand';
-import { scalePixmap, savePixmap } from './lib/png';
+import { scalePixmap } from '../src/art/px';
+import { savePixmap } from './lib/png';
 
 const out = 'public/icons';
 const base = lanternMark(32, false);

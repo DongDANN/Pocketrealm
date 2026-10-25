@@ -2,7 +2,7 @@ import { deflateSync } from 'node:zlib';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { colorHex } from '../../src/art/palette';
-import { blit, createPixmap, fillRect, type Pixmap } from '../../src/art/px';
+import { blit, createPixmap, fillRect, scalePixmap, type Pixmap } from '../../src/art/px';
 import { drawText, measureText, GLYPH_H } from '../../src/art/font5x7';
 
 const CRC_TABLE = (() => {
@@ -75,19 +75,6 @@ export function savePixmap(path: string, pix: Pixmap): void {
 export function saveRGBA(path: string, w: number, h: number, rgba: Uint8Array): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, encodePNG(w, h, rgba));
-}
-
-export function scalePixmap(pix: Pixmap, factor: number): Pixmap {
-  if (!Number.isInteger(factor) || factor < 1) throw new Error('Scale must be a positive integer');
-  const out = createPixmap(pix.w * factor, pix.h * factor);
-  for (let y = 0; y < pix.h; y++) {
-    for (let x = 0; x < pix.w; x++) {
-      const c = pix.data[y * pix.w + x]!;
-      if (!c) continue;
-      fillRect(out, x * factor, y * factor, factor, factor, c);
-    }
-  }
-  return out;
 }
 
 export interface SheetOptions {

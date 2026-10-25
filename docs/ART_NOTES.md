@@ -162,6 +162,56 @@ rays became a smudge, `mark`'s ring and ticks merged, `vampiric` read as a goble
 peanut, `thorned` read as a squiggle. All six were redrawn with per-part dark rims and fewer, chunkier
 elements. `chill` also gained a ledge so it is not the same triangle as the `gale` gem.
 
+## Gate 4c-4: the realm diorama and the two live Canvas scenes
+
+The scene layer stopped being a contact sheet and became two components: `src/ui/game/BattleScene.tsx`
+(the Delve run panel) and `src/ui/game/RealmDiorama.tsx` (the top of the Realm screen). Both are behind
+`React.lazy`, both compose at art resolution (320x180) into a pixmap and scale by a whole number at draw
+time, and both are `role="img"` with a sentence of alt text — the text log next to them says the same
+thing in words, so nothing is only available as a picture.
+
+**What the diorama is allowed to show.** A plot with no building on it is a lantern post and a claim
+stake, not a translucent ghost of the treasury, and the second storey appears only after the upgrade is
+paid for. `composeRealm` takes the levels the player actually has and nothing else; the component owns no
+game state, only where the companion walks. Five transparent buttons sit over the plots and each one
+selects that building and scrolls its card into view — the picture is a control surface, not a poster.
+
+**Light follows the clock, not the mood.** `periodForHour` picks dawn/day/dusk/night, and after sundown
+the plot lanterns and the windows that really exist light up. The halo anchors come from a `WINDOWS`
+table keyed to the same coordinates the painters draw, so a glow never floats over blank wall. Two bugs
+came out of reviewing that at 1x:
+
+- The treasury's windows never lit — `drawTreasury` took a `glass` argument and ignored it, so the
+  building was painted with the daytime glazing at midnight.
+- Lantern halos were added to the ground layer, where `addLight` skips transparent pixels. A lantern
+  hangs above the turf, so the halo was being dropped into a hole. Halos now go on the composed frame,
+  where the air around a lamp is sky and the blob still reads over grass.
+
+Dusk's island underside was `violet3`, a neon purple fighting an orange sunset; it is `rose4` now.
+
+**Review loop.** `scripts/lib/png.ts` encodes and cannot decode, so a rendered scene cannot be cropped out
+of a screenshot: every review image was re-composed from source — all four periods at both build states,
+plus 4x zooms of a bare plot, the smithy and the library at night. That is how the two lighting bugs
+above were found; neither shows up in a type check or a frame-count assertion.
+
+**The validator grew up with it.** `sceneIssues()` in `scripts/lib/art-validate.ts` renders the diorama at
+three build states (bare / part / built) across all four periods and the effect strips, and fails on
+off-palette indices or a frame that never changes. It caught one real defect: `shockwave` ended as solid
+as its busiest frame, so the ring popped off instead of thinning away. It now widens while it dithers
+apart, and its second row belongs only to the young wave.
+
+**Reduced motion is a first-class render path, not a stop.** Both scenes take `reducedMotion`; when it is
+on, no loop is installed, the battle beat is advanced to its last frame and drawn as an outcome, and the
+diorama repaints on state change so a selection still shows. `useReducedMotionPref()` lets the in-app
+setting win over the OS one.
+
+**What the e2e suite now proves about art.** `e2e/delve.spec.ts` reads pixels: the lazy chunk must not be
+fetched before a run starts, the frame must be more than half lit (an empty rectangle measures fine), a
+tap on the far plot must move its card toward the middle of the screen, and under reduced motion the
+frame hash must not move until something changes. Stepping rooms also had to become deterministic — a
+run's floor plan is hashed from freshly minted ids, and one seed in about ten ends the run on a 40-round
+draw in the middle of the step loop.
+
 ## Not verified here — do not claim otherwise
 
 - **Real-device FPS and touch behaviour.** All captures are headless Chromium (desktop 1440x900 and
@@ -172,10 +222,10 @@ elements. `chill` also gained a ledge so it is not the same triangle as the `gal
   watched each loop on a phone.
 - **Perceptual style judgement is one person's.** Three machine reviews cannot substitute for the
   owner's eye — which is why this gate stops for approval instead of continuing into mass production.
-- **The bestiary has never been seen in motion in the battle scene.** The idle reels are GIFs of the
-  generated frames at 4x; the Canvas scene that consumes them is Gate 4c-4. Silhouettes, coverage and
-  clone-distance are measured, and the 1x glyph row is a real 1x render, but nobody has watched these
-  sprites trade blows.
+- **The bestiary in motion has only been seen by headless Chromium.** The battle scene now draws these
+  sprites and trades blows with them, and the e2e suite reads the pixels, but nobody has watched the
+  fight on a phone. Silhouettes, coverage and clone-distance are measured, and the 1x glyph row is a real
+  1x render.
 - **Recipe variety is a judgement call.** The validator proves species are not clones; it does not prove
   six archetypes are the right six, or that `husk` should carry three of the sixteen species.
 - **Colour on real displays.** Everything was judged on one desktop profile; no calibration target.
@@ -184,10 +234,10 @@ elements. `chill` also gained a ledge so it is not the same triangle as the `gal
 
 ```
 npm run typecheck     # clean
-npm test              # 20 passed (art, palette, currency, audio)
-npm run art:sheets    # contact sheets + 6 GIFs + 24 UI PNGs
-npm run art:validate  # PASS - 39 assets / 58 frames
-npm run build         # 40 precache entries, 361.87 KiB
+npm test              # 649 passed across 63 files
+npm run art:sheets    # contact sheets + 12 GIFs + 44 UI PNGs
+npm run art:validate  # PASS - 121 assets / 309 frames
+npm run build         # 87 precache entries, ~991 KiB
 npm run art:shots     # in-app captures, "no page errors"
-npx playwright test   # 25 passed (goldens re-cut after the art changes)
+npx playwright test   # 44 passed (delve-run and realm goldens re-cut for the Canvas scenes)
 ```

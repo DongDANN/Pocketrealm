@@ -577,7 +577,8 @@ export function composeRoomPreview(frame = 2, look = 0): Pixmap {
   return out;
 }
 
-function addLight(base: Pixmap, glow: Pixmap, cx: number, cy: number): void {
+/** Pastes a dithered glow onto stone by blending toward the glow's own palette entry. */
+export function addLight(base: Pixmap, glow: Pixmap, cx: number, cy: number): void {
   const ox = cx - Math.floor(glow.w / 2);
   const oy = cy - Math.floor(glow.h / 2);
   for (let y = 0; y < glow.h; y++) {

@@ -16,6 +16,7 @@ import {
   listTransactions,
 } from '../../data/repos';
 import { useSession } from './session';
+import { usePrefersReducedMotion } from '../hooks/useMediaQuery';
 import { systemClock } from '../lib/systemContext';
 
 /** Earliest date a book can hold, for the all-time facts window. */
@@ -48,6 +49,17 @@ export function useToday(): LocalDate {
 export function useSettings(): Settings | undefined {
   const { db } = useSession();
   return useLiveQuery(() => getSettings(db), [db]);
+}
+
+/**
+ * Whether the app should hold still. The in-app setting wins over the OS one; 'system' asks the OS.
+ * Canvas scenes use this to draw the outcome without the motion, never to hide it.
+ */
+export function useReducedMotionPref(): boolean {
+  const settings = useSettings();
+  const system = usePrefersReducedMotion();
+  const mode = settings?.reducedMotion ?? 'system';
+  return mode === 'on' || (mode === 'system' && system);
 }
 
 export function useCompanion(): Companion | null | undefined {

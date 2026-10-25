@@ -1,6 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { BUILDINGS } from '../src/core/delve/buildings';
 import { COSMETICS } from '../src/core/cosmetics';
-import { completeOnboarding, visibleText } from './helpers';
+import { completeOnboarding, pinClockAndIds, startRun, visibleText } from './helpers';
 
 const cheapestCosmetic = Math.min(...COSMETICS.map((def) => def.price));
 
@@ -40,6 +41,35 @@ async function oil(page: Page): Promise<number> {
   return drops;
 }
 
+/**
+ * A Canvas that never paints still measures correctly, so the scene tests read pixels: the lit share
+ * of the frame and a hash of it. Zero lit pixels means the lazy chunk mounted an empty rectangle.
+ */
+async function scenePaint(canvas: Locator): Promise<{ lit: number; hash: string }> {
+  return canvas.first().evaluate((node) => {
+    const el = node as HTMLCanvasElement;
+    const ctx = el.getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('no 2d context');
+    const { data, width, height } = ctx.getImageData(0, 0, el.width, el.height);
+    let lit = 0;
+    let hash = 2166136261;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3]! > 0 && data[i]! + data[i + 1]! + data[i + 2]! > 24) lit += 1;
+      hash = ((hash ^ (data[i]! + data[i + 1]! * 3 + data[i + 2]! * 7)) * 16777619) >>> 0;
+    }
+    return { lit: lit / (width * height), hash: hash.toString(16) };
+  });
+}
+
+/** Scripts the browser has fetched, so a test can prove a scene really arrived as its own chunk. */
+function scripts(page: Page): string[] {
+  const urls: string[] = [];
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script') urls.push(request.url());
+  });
+  return urls;
+}
+
 /** One peso on the keypad, saved to whatever envelope the Add screen already picked. */
 async function logTinyEntry(page: Page): Promise<void> {
   await page.goto('/add');
@@ -52,6 +82,9 @@ test('a run descends, each room burns a drop of oil, and retreat banks the Ember
   page,
 }) => {
   const errors = watchErrors(page);
+  // A run's floor plan is hashed from freshly minted ids, so without pinning the rooms are a lottery:
+  // one seed ends the run early on a 40-round draw and the step loop is suddenly clicking nothing.
+  await pinClockAndIds(page);
   await completeOnboarding(page, { income: '25000' });
 
   await expect
@@ -228,4 +261,149 @@ test('the realm spends Sparks on looks and never touches the budget', async ({ p
   await openScreen(page, '/', 'Today');
   expect(await visibleText(page, '.safe-amount')).toBe(money);
   expect(errors).toEqual([]);
+});
+
+test('the battle scene arrives as its own chunk and paints the room', async ({ page }) => {
+  const errors = watchErrors(page);
+  const loaded = scripts(page);
+  await pinClockAndIds(page);
+  await completeOnboarding(page, { income: '25000' });
+
+  await openScreen(page, '/delve', 'The Delve');
+  await expect(page.locator('.delve-stage canvas')).toHaveCount(0);
+  expect(
+    loaded.some((url) => /BattleScene/i.test(url)),
+    'the scene is not on the critical path',
+  ).toBe(false);
+
+  await startRun(page);
+  const stage = page.locator('.delve-stage canvas');
+  await expect(stage).toBeVisible();
+  await expect(stage).toHaveAttribute('data-art-width', '320');
+  expect(
+    loaded.some((url) => /BattleScene/i.test(url)),
+    'the chunk is fetched with the run',
+  ).toBe(true);
+
+  // The scene says which room it drew, and it has drawn something.
+  expect(await visibleText(page, '.delve-stage')).toContain('Rootfall Warren');
+  const first = await scenePaint(stage);
+  expect(first.lit, 'the stage is not an empty rectangle').toBeGreaterThan(0.5);
+
+  for (let room = 0; room < 2; room += 1) {
+    const step = page.getByRole('button', {
+      name: /Open the next room|Answer the choice first|The lantern is dry/,
+    });
+    await step.click();
+    await expect(page.locator('.log-line').first()).toBeVisible();
+    await answerIfWaiting(page);
+    await expect
+      .poll(async () => (await scenePaint(stage)).lit, 'the stage keeps painting after a step')
+      .toBeGreaterThan(0.5);
+  }
+  expect(errors).toEqual([]);
+});
+
+test('the island diorama paints what is built and its plots are real controls', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  const loaded = scripts(page);
+  // The island lights itself from the wall clock, so pin it: the assertions below are a day frame.
+  await pinClockAndIds(page, '2026-10-25T13:00:00');
+  await completeOnboarding(page, { income: '25000' });
+
+  await openScreen(page, '/realm', 'The Realm');
+  const island = page.locator('.realm-diorama canvas');
+  await expect(island).toBeVisible();
+  await expect(island).toHaveAttribute('data-art-width', '320');
+  expect(
+    loaded.some((url) => /RealmDiorama/i.test(url)),
+    'the diorama is its own chunk',
+  ).toBe(true);
+
+  const frame = await scenePaint(island);
+  expect(frame.lit, 'the island is not an empty rectangle').toBeGreaterThan(0.5);
+  expect(await visibleText(page, '.realm-diorama')).toContain('realm island');
+
+  // Every plot is a button that says what stands on it, built or not.
+  const plots = page.locator('.pr-realm-plot');
+  await expect(plots).toHaveCount(BUILDINGS.length);
+  const labels = await plots.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('aria-label') ?? ''),
+  );
+  for (const def of BUILDINGS) {
+    expect(
+      labels.some((label) => label.includes(def.name)),
+      `${def.name} plot`,
+    ).toBe(true);
+  }
+  expect(
+    labels.filter((label) => label.includes('not built yet')),
+    'nothing is built yet',
+  ).toHaveLength(BUILDINGS.length);
+
+  // A tap on the far plot aims the companion at it and brings its card into view — not a dead target.
+  const target = BUILDINGS[BUILDINGS.length - 1]!.id;
+  const card = page.locator(`#building-${target}`);
+  const distance = async () => {
+    const box = await card.boundingBox();
+    const viewport = page.viewportSize();
+    if (!box || !viewport) return Number.POSITIVE_INFINITY;
+    return Math.abs(box.y + box.height / 2 - viewport.height / 2);
+  };
+  const before = await distance();
+  await page
+    .getByRole('button', { name: new RegExp(`^${BUILDINGS[BUILDINGS.length - 1]!.name}:`) })
+    .click();
+  await expect
+    .poll(distance, 'the building card to scroll into the middle of the screen')
+    .toBeLessThan(before);
+
+  await expect
+    .poll(async () => (await scenePaint(island)).lit, 'the island still paints after a tap')
+    .toBeGreaterThan(0.5);
+  expect(errors).toEqual([]);
+});
+
+test.describe('reduced motion', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('both scenes hold still and only repaint when something changes', async ({ page }) => {
+    const errors = watchErrors(page);
+    await pinClockAndIds(page);
+    await completeOnboarding(page, { income: '25000' });
+
+    await openScreen(page, '/delve', 'The Delve');
+    await startRun(page);
+    const stage = page.locator('.delve-stage canvas');
+    await expect(stage).toBeVisible();
+    const battle = await scenePaint(stage);
+    expect(battle.lit).toBeGreaterThan(0.5);
+    await page.waitForTimeout(400);
+    expect((await scenePaint(stage)).hash, 'no animation loop under reduced motion').toBe(
+      battle.hash,
+    );
+
+    await openScreen(page, '/realm', 'The Realm');
+    const island = page.locator('.realm-diorama canvas');
+    await expect(island).toBeVisible();
+    const held = await scenePaint(island);
+    expect(held.lit).toBeGreaterThan(0.5);
+    await page.waitForTimeout(400);
+    expect((await scenePaint(island)).hash, 'the island is frozen too').toBe(held.hash);
+
+    // Still frozen, but a selection has to be shown: the bracket is a repaint, not a timer.
+    await page.getByRole('button', { name: /^Treasury: not built yet$/ }).click();
+    await expect
+      .poll(
+        async () => (await scenePaint(island)).hash !== held.hash,
+        'the selection repaints once',
+      )
+      .toBe(true);
+    const bracketed = await scenePaint(island);
+    await page.waitForTimeout(300);
+    expect((await scenePaint(island)).hash, 'and then holds').toBe(bracketed.hash);
+    expect(errors).toEqual([]);
+  });
 });

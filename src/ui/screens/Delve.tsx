@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { C } from '../../art/palette';
 import {
@@ -24,7 +24,7 @@ import { PixelPanel } from '../components/PixelPanel';
 import { PixelText } from '../components/PixelText';
 import { FatalPanel, LoadingPanel } from '../app/gates';
 import { useDelve } from '../app/delve';
-import { useLedger } from '../app/hooks';
+import { useLedger, useReducedMotionPref } from '../app/hooks';
 import {
   HOLLOWS,
   currentRoomKind,
@@ -36,7 +36,13 @@ import {
   upcomingRooms,
 } from '../lib/delveView';
 import { cuesForRun, musicTrackFor } from '../lib/delveSound';
+import { encounterOf, sceneActionFor, type SceneAction } from '../lib/delveScene';
 import { playSfx, playStinger, requestMusic } from '../lib/sound';
+
+/** The Canvas stage is a bonus, not a dependency: it is fetched only while a run is on screen. */
+const BattleScene = lazy(() =>
+  import('../game/BattleScene').then((m) => ({ default: m.BattleScene })),
+);
 
 function buffCopy(run: RunState, metaLevel: number): string {
   return `${run.unit.name} · Lv ${metaLevel} · Heat ${run.heat}`;
@@ -57,6 +63,14 @@ export function Delve() {
   const [heat, setHeat] = useState(0);
   const [confirmRetreat, setConfirmRetreat] = useState(false);
   const [showAllLog, setShowAllLog] = useState(false);
+  const reducedMotion = useReducedMotionPref();
+  /** One beat per resolved step, plus the enemy that beat is about. */
+  const [beat, setBeat] = useState<{
+    action: SceneAction;
+    enemyId: string | null;
+    big: boolean;
+  } | null>(null);
+  const beatToken = useRef(0);
 
   const snapshot = delve.snapshot;
   const buffs = useMemo(() => (snapshot ? computeBuffs(snapshot.signals) : null), [snapshot]);
@@ -96,6 +110,15 @@ export function Delve() {
       if (cue.kind === 'stinger') playStinger(cue.id);
       else playSfx(cue.name);
     }
+    const after = result.run;
+    const action = after ? sceneActionFor(run, after, ++beatToken.current) : null;
+    if (!action || !after) {
+      setBeat(null);
+      return;
+    }
+    // A faint belongs to the enemy that was just standing there, not the one in the room after it.
+    const shown = action.kind === 'enemyFaint' && run ? encounterOf(run) : encounterOf(after);
+    setBeat({ action, enemyId: shown.enemyId, big: shown.boss });
   };
 
   const start = async () => {
@@ -350,6 +373,18 @@ export function Delve() {
             <p className="panel-note">
               <PixelText text={buffCopy(run, run.companionLevel)} color={C.paper3} pixelScale={2} />
             </p>
+            <div className="delve-stage">
+              <Suspense fallback={<div className="delve-stage-slot" aria-hidden="true" />}>
+                <BattleScene
+                  hollow={run.hollowId}
+                  enemyId={beat?.enemyId ?? encounterOf(run).enemyId}
+                  big={beat?.big ?? encounterOf(run).boss}
+                  action={beat?.action ?? null}
+                  reducedMotion={reducedMotion}
+                  alt={`${hollowName(run.hollowId)}, floor ${run.floor}: ${roomKindLabel(currentRoomKind(run))} room`}
+                />
+              </Suspense>
+            </div>
             <Gauge
               value={hpPercent(run) / 100}
               label={`Companion HP, ${run.unit.hp} of ${run.unit.maxHp}`}

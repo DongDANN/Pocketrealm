@@ -4,7 +4,7 @@ Read this first. Updated at every gate. Status labels: **verified** (a command/t
 and passed), **partially verified** (some checks run), **not run** (no evidence), **not possible
 here** (needs a real device / deployment).
 
-Last updated: 2026-10-25
+Last updated: 2026-10-26
 
 ## Environment reality check (Gate 0)
 
@@ -52,12 +52,13 @@ Last updated: 2026-10-25
       Settings, toasts/companion reactions.
       **3a pure logic, 3b the data layer, 3c the screens, 3d committed browser coverage. Chromium
       only; Firefox, WebKit, real phones and screen readers remain Gate 5/6 and MANUAL_TEST items.**
-- [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
+- [x] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
       cosmetics/realm, weekly review, month summary, insights.
       **4a data controller and worker transport, 4b the twelve game screens plus committed browser
       coverage and goldens, 4c-1 the route/vendor chunk split, 4c-2 the chiptune soundtrack and its
-      gesture gate; 4c-3 scene art and 4c-4 the lazy Canvas battle scene, 4d the rest of e2e
-      pending.**
+      gesture gate, 4c-3 the sixteen-species bestiary and nineteen glyphs, 4c-4 the two lazy Canvas
+      scenes (battle stage and realm diorama), 4d the e2e sweep and goldens. Chromium only, at
+      390×844 @ DPR 3 — real-device FPS, touch parallax and haptics are MANUAL_TEST/Gate 5 items.**
 - [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
       reminders, error states, manifest shortcuts.
 - [ ] Gate 6 — Polish/ship: a11y, reduced motion, Lighthouse, vercel.json, README,
@@ -916,3 +917,69 @@ instead of drawn by hand — because the thing that had to be provable was not "
   a screen. Whether six archetypes are the right six, and whether the generated species hold up next
   to the hand-authored Tollbug in the same frame, are judgement calls the measurements cannot make.
   Haptics, the lazy Canvas battle scene and the Realm diorama remain open.
+
+### Gate 4c-4 — The two live Canvas scenes, and the island that shows what you paid for (2026-10-26)
+
+The art stopped being a contact sheet and became two components. `src/ui/game/BattleScene.tsx` renders the
+Delve run panel's room and plays one beat per resolved step; `src/ui/game/RealmDiorama.tsx` renders the
+floating island at the top of the Realm screen. Both are `React.lazy`, both compose at art resolution
+(320×180) into a pixmap and scale by a whole number at draw time, and both keep the text log beside them —
+the picture is never the only place a fact lives.
+
+- **The seam is one function.** `src/ui/lib/delveScene.ts` turns `(before, after, token)` into a
+  `SceneAction` (playerAttack / enemyAttack / playerHurt / enemyHurt / enemyFaint / playerFaint / heal /
+  loot) by diffing the run state the engine already returned. The screen owns no combat logic and the
+  scene owns no game state: the same diff drives the audio cue in `cuesForRun`, so the hit lands on the
+  frame the sound fires. A fresh run returns `null` — the stage shows the room instead of attacking it.
+- **What the diorama is allowed to show.** An unbuilt plot is a lantern post and a claim stake, not a
+  translucent ghost of the treasury, and the second storey appears only after the upgrade is paid for.
+  Levels come from `meta.buildingLevels`; the only thing the component decides for itself is where the
+  companion walks. Five transparent buttons sit over the plots (`plotBox(id)` is exported from the scene
+  so the hit areas and the art cannot drift apart), each labelled `Treasury: not built yet` or
+  `Smithy level 2`, and each one selects that building and scrolls its card into view.
+- **Light follows the clock.** `periodForHour` picks dawn/day/dusk/night from `systemHour()`, and after
+  sundown the plot lanterns and the windows that actually exist light up. The halo anchors come from a
+  `WINDOWS` table keyed to the same coordinates the painters call `windowAt`, so a glow never floats over
+  blank wall.
+- **Three defects only a 1x render could show.** `drawTreasury` accepted a `glass` argument and ignored
+  it, so the treasury's windows were painted with daytime glazing at midnight. Lantern halos were added to
+  the ground layer, where `addLight` skips transparent pixels — a lantern hangs above the turf, so every
+  halo was dropped into a hole; they now go on the composed frame. Dusk's island underside was `violet3`,
+  a neon purple fighting an orange sunset, and is `rose4`.
+- **The validator grew a scene check.** `sceneIssues()` renders the diorama at bare/part/built across all
+  four periods plus the effect strips, and fails on off-palette indices or a frame that never changes. It
+  caught `shockwave` ending as solid as its busiest frame — the ring popped off instead of thinning away.
+  It now widens while its tips dither apart.
+- **Reduced motion is a render path, not a stop.** Both scenes take the flag: no loop is installed, the
+  battle beat is advanced to its last frame and drawn as an outcome, and the diorama repaints on state
+  change so a selection still shows. `useReducedMotionPref()` (in `src/ui/app/hooks.ts`) lets the in-app
+  setting win over the OS one, which the OS-only hook could not.
+- **The diorama was 50px off-centre.** Measured in the browser: canvas 320 CSS px inside a 370 CSS px
+  host, left-aligned. `margin-inline: auto` on the wrapper centres it, and overflows to 0 on a narrow
+  phone so the left edge stays reachable — `justify-content: center` in a scroll container clips it.
+- **New tests.** `tests/art-realm.test.ts` (8: period boundaries, plot anchors sit on the ground they
+  belong to, bare vs built differ only inside their own plot boxes, night lights windows that day leaves
+  dark, palette lock, `sceneIssues()` clean), `tests/art-effects.test.ts` (8: strip frame counts,
+  particles are seeded not random, `stepParticle` lifetime, `drawParticle` blink), `tests/ui-delve-scene.test.ts`
+  (10: every action kind is derived from a real state diff, a fresh run produces no beat, a faint belongs
+  to the enemy that was just standing there). Browser side, `e2e/delve.spec.ts` now reads pixels: the
+  lazy chunk must not be fetched before a run starts, the frame must be more than half lit (an empty
+  rectangle measures fine), a tap on the far plot must move its card toward the middle of the screen, and
+  under reduced motion the frame hash must not move until something changes.
+- **A flake that was art's fault to find.** "a run descends…" failed once in a full-suite run and passed
+  four times in isolation. The cause is in the run, not the UI: a floor plan is hashed from freshly minted
+  ids, so the rooms are a lottery, and one seed in about ten ends the run on a 40-round draw in the middle
+  of the step loop. The three run-driving tests now call `pinClockAndIds` — the same reason the goldens
+  need it — and the diorama test pins a day hour so its lit fraction is measured on a day frame.
+- **Verification:** `npm run typecheck` **verified** clean; `npm run lint` **verified** clean;
+  `prettier --write` applied; `npx vitest run` **verified** 649/649 across 63 files;
+  `npm run art:validate` **verified** PASS — 121 assets / 309 frames, 16 preview PNGs, 12 GIFs,
+  44 UI PNGs; `npx playwright test` **verified** 44/44 (one worker, production preview, 3.5m);
+  `npm run build` **verified** clean.
+  `delve-run` and `realm` goldens were re-cut (each gained a scene) and reviewed at 3x before accepting.
+- **Not verified / still open:** nobody has watched these scenes on a phone — every capture is headless
+  Chromium at 390×844 @ DPR 3, so real-device FPS, touch parallax and the 12 fps tick under load are
+  MANUAL_TEST items. The 19 combat glyphs from 4c-3 are still not on a screen: statuses live inside a
+  single fight in `combat.ts` and never persist onto `CombatUnitState`, so there is no list to render —
+  showing them means either engine state the balance tests have not accounted for, or drawing them in the
+  battle scene over a room's affixes. Recorded as a Gate 6 gameplay-clarity item rather than invented here.

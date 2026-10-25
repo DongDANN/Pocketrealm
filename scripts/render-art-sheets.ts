@@ -4,13 +4,21 @@
  */
 import { mkdirSync } from 'node:fs';
 import { C, MASTER_PALETTE, RAMPS, UI } from '../src/art/palette';
-import { blit, createPixmap, fillRect, setPx, type Pixmap } from '../src/art/px';
+import { blit, createPixmap, fillRect, scalePixmap, setPx, type Pixmap } from '../src/art/px';
 import { drawText, GLYPHS } from '../src/art/font5x7';
 import { buildWarden } from '../src/art/companion';
 import { buildTollbug, silhouette } from '../src/art/enemies';
 import { bestiaryIds, critterRecipe, enemyFrames } from '../src/art/critters';
 import { BOSSES, ELITES, ENEMIES } from '../src/core/delve/data/enemies';
 import { composeRoomPreview } from '../src/art/scenes/rootfall';
+import { composeStage } from '../src/art/scenes/hollow';
+import {
+  composeRealm,
+  periodForHour,
+  REALM_BUILDINGS,
+  type RealmPeriod,
+} from '../src/art/scenes/realm';
+import { ascend, coverage, impact, puff, shockwave, slash, type Effect } from '../src/art/effects';
 import {
   AFFIX_ICONS,
   BUTTON_DISABLED,
@@ -34,7 +42,7 @@ import {
   ledgerPanel,
   STATUS_ICONS,
 } from '../src/art/ui';
-import { savePixmap, scalePixmap } from './lib/png';
+import { savePixmap } from './lib/png';
 import { saveGif } from './lib/gif';
 import {
   FLAME_FRAMES,
@@ -801,6 +809,208 @@ function shapeSheet(): Pixmap {
   return sheet;
 }
 
+/**
+ * The three battle stages, empty, at 2x. Judged as flats: does each Hollow read as a different place
+ * before any sprite stands in it, and is the middle of the frame clear of decoration the actors would
+ * have to fight.
+ */
+function stageSheet(): Pixmap {
+  const names: Record<1 | 2 | 3, string> = {
+    1: 'ROOTFALL WARREN',
+    2: 'CINDER VAULT',
+    3: 'UMBRAL DEEP',
+  };
+  const warden = buildWarden().idle[0]!;
+  const bug = buildTollbug().idle[0]!;
+  const width = 656;
+  const height = 40 + 3 * 2 * (360 + 34);
+  const sheet = createPixmap(width, height, C.ink800);
+  titleBlock(sheet, 'BATTLE STAGES', '320X180 AT 2X - EMPTY, THEN LIT WITH ACTORS', width);
+  ([1, 2, 3] as const).forEach((hollow, index) => {
+    const base = 40 + index * 2 * 394;
+    const note =
+      hollow === 1
+        ? 'CAPS LEAN, DUST SINKS, LANTERN AMBER'
+        : hollow === 2
+          ? 'CUT STONE, EMBERS RISE, CYAN LIGHT ON WARM SOOT'
+          : 'HUNG MASONRY, SPORES DRIFT, EMBER LIGHT';
+    label(sheet, 8, base, `HOLLOW ${hollow} - ${names[hollow]} - STAGE`, C.amber3);
+    blit(sheet, scalePixmap(composeStage(hollow, 4), 2), 8, base + 14);
+    label(sheet, 8, base + 372, note, C.steel1);
+    const lit = base + 394;
+    label(sheet, 8, lit, `HOLLOW ${hollow} - ACTORS AT 1X, LIGHT PULLED BACK`, C.amber3);
+    blit(
+      sheet,
+      scalePixmap(composeStage(hollow, 4, 0.4, { companion: warden, enemy: bug }, 1), 2),
+      8,
+      lit + 14,
+    );
+    label(
+      sheet,
+      8,
+      lit + 372,
+      'PARALLAX +0.4 - SILHOUETTES MUST STAY READABLE OVER THE LIGHT',
+      C.steel1,
+    );
+  });
+  return sheet;
+}
+
+const PERIODS: readonly RealmPeriod[] = ['dawn', 'day', 'dusk', 'night'];
+const ALL_BUILT: Record<string, number> = Object.fromEntries(REALM_BUILDINGS.map((id) => [id, 2]));
+const ALL_BARE: Record<string, number> = Object.fromEntries(REALM_BUILDINGS.map((id) => [id, 0]));
+
+function sceneCell(
+  sheet: Pixmap,
+  scene: Pixmap,
+  x: number,
+  y: number,
+  scale: number,
+  caption: string,
+  note: string,
+): void {
+  label(sheet, x, y, caption, C.amber3);
+  const s = scalePixmap(scene, scale);
+  blit(sheet, s, x, y + 14);
+  label(sheet, x, y + 14 + s.h + 6, note, C.steel1);
+}
+
+/**
+ * The Realm diorama. Two things are being judged here: whether the four skies are distinguishable
+ * without a single gradient, and whether an unbuilt plot reads as *a plot* rather than as a hole in
+ * the ground — the honest state, since a building appears only when the ledger earns it.
+ */
+function realmSheet(): Pixmap {
+  const warden = buildWarden().idle[0]!;
+  const width = 1300;
+  const bandH = 396;
+  const height = 70 + bandH * 4 + 260;
+  const sheet = createPixmap(width, height, C.ink800);
+  titleBlock(
+    sheet,
+    'REALM DIORAMA',
+    '320X180 - FOUR HAND-PICKED SKIES - PLOTS ARE LANTERNS UNTIL THE LEDGER BUILDS THEM',
+    width,
+  );
+  PERIODS.forEach((period, i) => {
+    const y = 70 + (i % 2) * bandH;
+    const x = 8 + Math.floor(i / 2) * 652;
+    sceneCell(
+      sheet,
+      composeRealm(4, 0, period, ALL_BUILT, { companion: warden, companionX: 152 }),
+      x,
+      y,
+      2,
+      `${period.toUpperCase()} - ALL FIVE BUILT AT LEVEL 2`,
+      'THE ISLAND AND THE BUILDINGS SHARE THE SKY TONES; NO LIGHT SOURCE IS A GRADIENT.',
+    );
+  });
+  PERIODS.forEach((period, i) => {
+    const y = 70 + 2 * bandH + (i % 2) * bandH;
+    const x = 8 + Math.floor(i / 2) * 652;
+    sceneCell(
+      sheet,
+      composeRealm(4, 0, period, ALL_BARE, { companion: warden, companionX: 152 }),
+      x,
+      y,
+      2,
+      `${period.toUpperCase()} - NOTHING BUILT`,
+      'A LANTERN POST ON A CLEARED PAD. THIS IS DAY ONE AND IT MUST NOT LOOK BROKEN.',
+    );
+  });
+  // progression, at the size it ships
+  const steps: [string, Record<string, number>][] = [
+    ['0 BUILT', ALL_BARE],
+    ['TREASURY', { treasury: 1 }],
+    ['LIB + TREAS + FORGE', { treasury: 1, library: 1, smithy: 1 }],
+    ['ALL FIVE', { treasury: 2, library: 2, smithy: 2, observatory: 2, workshop: 2 }],
+  ];
+  label(
+    sheet,
+    8,
+    70 + 4 * bandH,
+    'PROGRESSION - 1X - DUSK - THE STATE THE SCREEN STARTS IN',
+    C.amber3,
+  );
+  steps.forEach(([caption, levels], i) => {
+    const x = 8 + i * 324;
+    blit(
+      sheet,
+      composeRealm(6, 0, 'dusk', levels, { companion: warden, companionX: 152 }),
+      x,
+      70 + 4 * bandH + 14,
+    );
+    label(sheet, x, 70 + 4 * bandH + 200, caption, C.steel1);
+  });
+  label(
+    sheet,
+    8,
+    70 + 4 * bandH + 224,
+    `HOURS 0-4 -> ${periodForHour(3).toUpperCase()}; 5-7 -> ${periodForHour(6).toUpperCase()}; 8-16 -> ${periodForHour(12).toUpperCase()}; 17-20 -> ${periodForHour(18).toUpperCase()}`,
+    C.steel2,
+  );
+  label(
+    sheet,
+    8,
+    70 + 4 * bandH + 240,
+    'PARALLAX IS INTEGER: SKY -2, ISLAND -4, FOREGROUND -8 AT FULL LEAN.',
+    C.steel2,
+  );
+  return sheet;
+}
+
+/**
+ * The combat strips on the flat they will be blitted over. Each frame gets its own panel so a strip
+ * that is empty on frame 3 — which is what a bad fade-out looks like — is visible immediately.
+ */
+function effectsSheet(): Pixmap {
+  const warden = buildWarden().idle[0]!;
+  const rows: [string, Effect, number][] = [
+    ['SLASH - LIGHT ELEMENT', slash(C.frost1), 5],
+    ['SLASH - HEAVY', slash(C.ember2, C.amber1), 5],
+    ['IMPACT - HIT', impact(C.amber2), 5],
+    ['IMPACT - FAINT', impact(C.violet3, C.rose1), 5],
+    ['SHOCKWAVE - BOSS SLAM', shockwave(C.steel1), 5],
+    ['ASCEND - HEAL', ascend(C.moss2), 5],
+    ['PUFF - LUNGE DUST', puff(C.ink400), 5],
+  ];
+  const width = 1160;
+  const height = 76 + rows.length * 148 + 60;
+  const sheet = createPixmap(width, height, C.ink800);
+  titleBlock(
+    sheet,
+    'COMBAT EFFECTS',
+    '32X32 STRIPS AT 4X - PLAYED ONCE OVER THE ACTOR, NEVER LOOPS',
+    width,
+  );
+  rows.forEach(([caption, effect, pad], row) => {
+    const y = 76 + row * 148;
+    label(sheet, 16, y, `${caption} - ${effect.frames.length} FRAMES @ ${effect.fps}FPS`, C.amber3);
+    effect.frames.forEach((frame, i) => {
+      const x = 16 + i * (128 + pad);
+      fillRect(sheet, x, y + 14, 128, 128, C.ink500);
+      blit(sheet, scalePixmap(warden, 2), x + 32, y + 32);
+      blit(sheet, scalePixmap(frame, 4), x, y + 14);
+      label(sheet, x + 2, y + 146, `F${i} ${coverage(effect, i)}PX`, C.steel1);
+    });
+  });
+  label(
+    sheet,
+    16,
+    height - 40,
+    'THE ACTOR BEHIND EACH FRAME IS THE WARDEN AT 2X: AN EFFECT THAT HIDES IT IS TOO THICK.',
+    C.steel1,
+  );
+  label(
+    sheet,
+    16,
+    height - 24,
+    'DEBRIS IS HASH-SEEDED PARTICLES, NOT A STRIP, SO A REPLAYED RUN THROWS THE SAME PIXELS.',
+    C.steel2,
+  );
+  return sheet;
+}
+
 savePixmap(`${OUT}/palette.png`, paletteSheet());
 savePixmap(`${OUT}/font.png`, fontSheet());
 savePixmap(`${OUT}/companion-contact.png`, companionSheet());
@@ -814,6 +1024,9 @@ savePixmap(`${OUT}/delve-hollow-2.png`, rosterSheet(2));
 savePixmap(`${OUT}/delve-hollow-3.png`, rosterSheet(3));
 savePixmap(`${OUT}/delve-shapes.png`, shapeSheet());
 savePixmap(`${OUT}/delve-glyphs.png`, glyphSheet());
+savePixmap(`${OUT}/delve-stages.png`, stageSheet());
+savePixmap(`${OUT}/realm-diorama.png`, realmSheet());
+savePixmap(`${OUT}/delve-effects.png`, effectsSheet());
 
 const wardenGif = buildWarden();
 const tollbugGif = buildTollbug();
@@ -846,5 +1059,32 @@ saveGif(
 saveGif(`${OUT}/anim-hollow-1-idle.gif`, idleReel(1), 140);
 saveGif(`${OUT}/anim-hollow-2-idle.gif`, idleReel(2), 140);
 saveGif(`${OUT}/anim-hollow-3-idle.gif`, idleReel(3), 140);
+const realmWarden = buildWarden().idle[0]!;
+saveGif(
+  `${OUT}/anim-realm.gif`,
+  Array.from({ length: 12 }, (_, i) =>
+    scalePixmap(
+      composeRealm(
+        i,
+        0,
+        'dusk',
+        { treasury: 2, library: 1, smithy: 1 },
+        { companion: realmWarden, companionX: 152 },
+      ),
+      2,
+    ),
+  ),
+  110,
+);
+saveGif(
+  `${OUT}/anim-effect-slash.gif`,
+  slash(C.frost1).frames.map((frame) => scalePixmap(frame, 4)),
+  45,
+);
+saveGif(
+  `${OUT}/anim-effect-impact.gif`,
+  impact(C.amber2).frames.map((frame) => scalePixmap(frame, 4)),
+  40,
+);
 
 console.log('Wrote contact sheets and animated GIFs to', OUT);

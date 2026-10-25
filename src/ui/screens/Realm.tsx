@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { useMemo } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { C } from '../../art/palette';
 import { cosmeticOverlay, cosmeticSwatch } from '../../art/cosmetics';
 import { speciesIdleFrames } from '../../art/species';
@@ -16,8 +16,15 @@ import { AppHeader } from '../components/AppHeader';
 import { LoadingPanel } from '../app/gates';
 import { useSession } from '../app/session';
 import { useDelve } from '../app/delve';
-import { useLedger } from '../app/hooks';
+import { useLedger, useReducedMotionPref } from '../app/hooks';
+import { periodForHour, type RealmBuilding } from '../../art/scenes/realm';
+import { systemHour } from '../lib/systemContext';
 import { say } from '../lib/toast';
+
+/** The diorama pulls the whole art module in behind it, so it is not on the critical path. */
+const RealmDiorama = lazy(() =>
+  import('../game/RealmDiorama').then((m) => ({ default: m.RealmDiorama })),
+);
 
 const KINDS: { kind: CosmeticKind; label: string }[] = [
   { kind: 'hat', label: 'Hats' },
@@ -30,7 +37,24 @@ export function Realm() {
   const { db, ctx } = useSession();
   const delve = useDelve();
   const ledger = useLedger();
+  const reducedMotion = useReducedMotionPref();
   const state = useLiveQuery(() => loadCosmeticState(db), [db]);
+  const [focus, setFocus] = useState<RealmBuilding | null>(null);
+  const [celebrate, setCelebrate] = useState<RealmBuilding | null>(null);
+  const clearTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(clearTimer.current), []);
+
+  /** A build is worth one sparkle, not a confetti cannon; it clears itself after a couple of seconds. */
+  const flashBuild = (id: RealmBuilding) => {
+    setFocus(id);
+    setCelebrate(id);
+    window.clearTimeout(clearTimer.current);
+    clearTimer.current = window.setTimeout(() => setCelebrate(null), 2400);
+    document.getElementById(`building-${id}`)?.scrollIntoView({ block: 'center' });
+  };
+
+  const levels = delve.snapshot?.meta.buildingLevels ?? {};
 
   const worn = useMemo(() => {
     const equipped = state?.companion?.equipped ?? {};
@@ -62,9 +86,37 @@ export function Realm() {
     );
   };
 
+  const unlock = async (id: RealmBuilding) => {
+    if ((await delve.unlockBuilding(id))?.ok) flashBuild(id);
+  };
+
+  const upgrade = async (id: RealmBuilding) => {
+    if ((await delve.upgradeBuilding(id))?.ok) flashBuild(id);
+  };
+
+  const lookAt = (id: RealmBuilding) => {
+    setFocus(id);
+    document.getElementById(`building-${id}`)?.scrollIntoView({ block: 'center' });
+  };
+
   return (
     <main className="shell app-shell">
       <AppHeader title="The Realm" backTo="/delve" />
+
+      <div className="realm-diorama">
+        <Suspense fallback={<div className="delve-stage-slot" aria-hidden="true" />}>
+          <RealmDiorama
+            levels={levels}
+            period={periodForHour(systemHour())}
+            companion={companion !== null}
+            focus={focus}
+            celebrate={celebrate}
+            reducedMotion={reducedMotion}
+            alt="The realm island, drawn with the buildings unlocked so far."
+            onSelect={lookAt}
+          />
+        </Suspense>
+      </div>
 
       <PixelPanel className="delve-panel" tone="paper">
         <div className="realm-scene">
@@ -163,11 +215,11 @@ export function Realm() {
         </p>
         <div className="choice-stack">
           {BUILDINGS.map((def) => {
-            const bLevel = delve.snapshot?.meta.buildingLevels?.[def.id] ?? 0;
+            const bLevel = levels[def.id] ?? 0;
             const maxed = bLevel >= def.maxLevel;
             const cost = def.cost(Math.max(0, bLevel - 1));
             return (
-              <div className="delve-choice" key={def.id}>
+              <div className="delve-choice" key={def.id} id={`building-${def.id}`}>
                 <div className="delve-choice-copy">
                   <PixelText
                     text={`${def.name} · ${bLevel}/${def.maxLevel}`}
@@ -196,7 +248,7 @@ export function Realm() {
                   <PixelButton
                     variant="secondary"
                     disabled={delve.busy}
-                    onClick={() => void delve.unlockBuilding(def.id)}
+                    onClick={() => void unlock(def.id as RealmBuilding)}
                   >
                     <PixelText text="Unlock" color={C.paper0} pixelScale={2} />
                   </PixelButton>
@@ -205,7 +257,7 @@ export function Realm() {
                     <PixelButton
                       variant="secondary"
                       disabled={delve.busy}
-                      onClick={() => void delve.upgradeBuilding(def.id)}
+                      onClick={() => void upgrade(def.id as RealmBuilding)}
                     >
                       <PixelText text="Upgrade" color={C.paper0} pixelScale={2} />
                     </PixelButton>

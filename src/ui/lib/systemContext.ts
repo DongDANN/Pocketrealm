@@ -15,6 +15,11 @@ export function systemClock(): Clock {
   };
 }
 
+/** Local hour of the day, for art that changes with the sky rather than with the ledger. */
+export function systemHour(): number {
+  return new Date(Date.now()).getHours();
+}
+
 function hex(bytes: Uint8Array): string {
   let out = '';
   for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
