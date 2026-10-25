@@ -47,9 +47,11 @@ test('art preview starts paused when reduced motion is requested', async ({ page
 
 test('art preview sprites expose frame counts to assistive tech', async ({ page }) => {
   await page.goto('/art');
-  const labels = await page
-    .locator('.sprite-art canvas')
-    .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('aria-label') ?? ''));
+  const canvases = page.locator('.sprite-art canvas');
+  await expect(canvases).toHaveCount(5);
+  const labels = await canvases.evaluateAll((nodes) =>
+    nodes.map((n) => n.getAttribute('aria-label') ?? ''),
+  );
   expect(labels).toHaveLength(5);
   for (const label of labels) {
     expect(label).toMatch(/ animation, [2-9] frames$/);
@@ -57,8 +59,8 @@ test('art preview sprites expose frame counts to assistive tech', async ({ page 
   expect(labels.some((label) => label.startsWith('Mossling Warden'))).toBe(true);
 });
 
-test('home links to the art preview', async ({ page }) => {
-  await page.goto('/');
+test('the foundation page links to the art preview', async ({ page }) => {
+  await page.goto('/mock/foundation');
   await page.getByRole('link', { name: 'Watch the art move' }).click();
   await expect(page).toHaveURL(/\/art$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Rootfall, in motion' })).toBeVisible();

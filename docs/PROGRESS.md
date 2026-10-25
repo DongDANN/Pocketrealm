@@ -48,10 +48,10 @@ Last updated: 2026-10-25
       export/import validation + auto-backup, ledger persistence, period close, recurring on open.
       **2a/2b schema+migrations+repos+ledger+atomic batches, 2c export/import, 2d period close and
       recurring-on-open. Browser IndexedDB itself stays a Gate 5 item.**
-- [ ] Gate 3 — Core screens in retro kit: onboarding, Today, Add, Envelopes, Goals, History,
+- [x] Gate 3 — Core screens in retro kit: onboarding, Today, Add, Envelopes, Goals, History,
       Settings, toasts/companion reactions.
-      **3a pure logic, 3b the data layer, and 3c the screens are done. The screens were walked in
-      Chromium with a real IndexedDB; the committed e2e specs for them (3d) are next.**
+      **3a pure logic, 3b the data layer, 3c the screens, 3d committed browser coverage. Chromium
+      only; Firefox, WebKit, real phones and screen readers remain Gate 5/6 and MANUAL_TEST items.**
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
       cosmetics/realm, weekly review, month summary, insights.
 - [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
@@ -644,3 +644,56 @@ paper panels, the pixel gauges, and the fixed bottom navigation.
   coverage beyond 390×844, keyboard focus order, screen-reader output and install behaviour are
   Gate 3d/5/6 work; none are claimed here.
 - **Not possible here:** iOS/Android install and real screen readers remain MANUAL_TEST items.
+
+### Gate 3d — Committed browser coverage for the real book (2026-10-25)
+
+The screens now have repeatable browser tests that start from a blank browser profile, complete
+real onboarding, and use IndexedDB like a person would. The throwaway walk from Gate 3c is retired;
+everything below runs in `npx playwright test` against the production build and preview server.
+
+- **New shared helper:** `completeOnboarding(page, { income, currency, companionName })` fills the
+  real form, opens the book, and waits for the Today heading, so every spec begins from a known
+  book. Locators use roles and labels, not bitmap pixels.
+- **`e2e/app.spec.ts` (new, 4 tests):**
+  1. first run redirects to onboarding, a ₱25,000 book shows Tala, the Essentials jar at
+     ₱12,500.00 left and ₱25,000.00 safe, survives reload, and raises no page errors;
+  2. the common path from launch takes exactly three taps (Add, ₱250 quick amount, Save), lands
+     the toast and spent-today strip, and moves the jar to ₱250.00 left;
+  3. overspend and transfer: a ₱1,000 entry against a ₱500 jar shows -₱500.00 / 200% used, a ₱50
+     transfer shows -₱550.00 / 210% used, the Jars rows update, and History records the transfer;
+  4. export in one browser context, then import and replace in a second context with a different
+     book: the download parses as 1 transaction / 3 envelopes, the preview reads
+     "1 entries, 3 envelopes, 0 goals", the replace round-trips, and the restored book shows the
+     bakery entry and ₱12,374.50 left.
+- **`e2e/offline.spec.ts` (rewritten):** onboarding and one ₱100 entry online; wait for the service
+  worker and its cache; go offline; cold-reload Today and see the offline status plus the intact
+  jar; add ₱50 offline and see spent-today and the jar move; a fresh tab still reads the same book;
+  back online. A second test proves a fresh tab sees a just-created book without reload tricks.
+- **`e2e/layout.spec.ts` (rewritten):** the style lock now audits the real routes (`/`, `/add`,
+  `/envelopes`, `/goals`, `/history`, `/settings` after onboarding) as well as the public mocks:
+  every visible string is a canvas using the master palette, every rendered canvas has integer
+  backing dimensions, no screen overflows horizontally, and envelope names never overlap their
+  amounts. Six viewports: 360@1x, 390@2x, 390@3x, 768@1.5x, 1280@1.25x, 1440@1x.
+- **Updated specs:** `today.spec.ts` and `art-preview.spec.ts` keep their prototype coverage and
+  now test the real `/mock/foundation` links; `visual.spec.ts` goldens shoot `/mock/today`, the
+  signed-off prototype, so the real-book layouts cannot silently alter the style-lock goldens.
+- **Three narrow-screen defects found only by looking at 360 px:**
+  1. Settings' "Ask for persistent storage" and "Delete this book for good" canvases forced a
+     380 px scroll width. Pixel buttons now cap at 100% and wrap, and those labels wrap at 18/16.
+  2. The import label's "Choose a backup file to import" canvas (358 px) spilled outside its
+     292 px panel, and "Budget period starts on day" overflowed its field. Both wrap at 20.
+  3. On Jars and Today at 360, "ESSENTIAL" and "₱12,500.00 LEFT" painted over each other. The
+     envelope head now wraps, with the amount right-aligned on its own line; a new assertion fails
+     the layout spec on any name/amount overlap.
+- **One flaky test fixed:** the art-preview a11y test read sprite canvases before their mount
+  effect ran. It now waits for all five canvases before reading their frame-count labels.
+- **Goldens:** the three Today goldens (390, 390 keypad, 1440) were regenerated after the Gate 3c
+  restyle (roomier rows, smaller Delve orb) and inspected; the art-preview golden is unchanged.
+- **Verification:** `npx playwright test` **verified** 32/32 in Chromium at the committed viewports;
+  `npm run typecheck` **verified** clean; `npx vitest run` **verified** 565/565 across 57 files;
+  `npm run lint` **verified** clean; `prettier --check .` **verified** clean; `npm run build`
+  **verified** (the >500 kB warning stands until Gate 4 splits the Delve scene).
+- **Partially verified:** e2e is Chromium-only on Windows. Firefox/WebKit, iOS/Android install,
+  VoiceOver/TalkBack/NVDA output, real-device safe areas, and a slow-network update flow are Gate
+  5/6 and MANUAL_TEST work; none are claimed here. Drag/select interactions, long-press, and
+  export on iOS are not covered by e2e.

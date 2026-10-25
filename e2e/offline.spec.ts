@@ -1,10 +1,18 @@
 import { test, expect } from '@playwright/test';
-import { visibleText } from './helpers';
+import { completeOnboarding, visibleText } from './helpers';
 
-test('loads, registers a service worker, and cold-launches offline', async ({ page, context }) => {
-  await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Pocketrealm' })).toBeVisible();
-  await expect.poll(() => visibleText(page, '.lede')).toContain('A calm budget companion');
+test('cold-launches offline with the book intact and keeps logging entries', async ({
+  page,
+  context,
+}) => {
+  await completeOnboarding(page, { income: '1000' });
+
+  await page.getByRole('link', { name: 'Add an entry' }).click();
+  await page.getByRole('button', { name: 'Amount ₱100.00' }).click();
+  await page.getByRole('textbox', { name: 'Note', exact: true }).fill('Sunrise bread');
+  await page.getByRole('button', { name: 'Save entry' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
+  expect(await visibleText(page, '.safe-meta')).toContain('Spent today ₱100.00');
 
   await page.waitForFunction(async () => {
     if (!('serviceWorker' in navigator)) return false;
@@ -19,11 +27,35 @@ test('loads, registers a service worker, and cold-launches offline', async ({ pa
 
   await context.setOffline(true);
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Pocketrealm' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
   await expect.poll(() => visibleText(page, '[role="status"]')).toContain('Working offline');
+  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+    'aria-label',
+    '₱400.00 left',
+  );
+
+  await page.getByRole('link', { name: 'Add an entry' }).click();
+  await page.getByRole('button', { name: 'Amount ₱50.00' }).click();
+  await page.getByRole('button', { name: 'Save entry' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
+  expect(await visibleText(page, '.safe-meta')).toContain('Spent today ₱150.00');
+  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+    'aria-label',
+    '₱350.00 left',
+  );
 
   const fresh = await context.newPage();
   await fresh.goto('/');
-  await expect(fresh.getByRole('heading', { name: 'Pocketrealm' })).toBeVisible();
+  await expect(fresh.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
+  expect(await visibleText(fresh, '.safe-meta')).toContain('Spent today ₱150.00');
   await context.setOffline(false);
+});
+
+test('a fresh tab sees the same book on this device', async ({ page, context }) => {
+  await completeOnboarding(page, { income: '500' });
+  const fresh = await context.newPage();
+  await fresh.goto('/');
+  await expect(fresh.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
+  expect(await visibleText(fresh, '.safe-amount')).toContain('₱500.00');
+  await fresh.close();
 });

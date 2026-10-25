@@ -153,9 +153,11 @@ a {
 
 .pixel-button {
   min-height: 44px;
+  max-width: 100%;
   margin-top: 8px;
   padding: 10px 18px;
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -909,13 +911,16 @@ a {
 
 .envelope-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 8px;
+  gap: 2px 8px;
   font-size: 0.76rem;
 }
 
 .envelope-head .money {
+  flex: 0 0 auto;
+  margin-left: auto;
   color: var(--amber);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;

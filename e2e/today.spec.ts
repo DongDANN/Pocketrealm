@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { visibleText } from './helpers';
 
 test('defaults to PHP and stores a display-only currency preference', async ({ page }) => {
-  await page.goto('/today');
+  await page.goto('/mock/today');
   const picker = page.getByLabel('Display currency');
   const safeAmount = page.locator('.safe-amount > canvas');
   await expect(picker).toHaveValue('PHP');
@@ -27,7 +27,7 @@ test('defaults to PHP and stores a display-only currency preference', async ({ p
 });
 
 test('number pad logs a mock expense and closes with Escape', async ({ page }) => {
-  await page.goto('/today');
+  await page.goto('/mock/today');
   const trigger = page.getByRole('button', { name: 'Log expense' });
   await trigger.click();
   const dialog = page.getByRole('dialog');
@@ -67,7 +67,7 @@ test('audio context waits for the sound toggle', async ({ page }) => {
       },
     });
   });
-  await page.goto('/today');
+  await page.goto('/mock/today');
   const created = () =>
     page.evaluate(() => (window as unknown as { __audioCreated?: number }).__audioCreated ?? 0);
   expect(await created()).toBe(0);
@@ -80,7 +80,7 @@ test('audio context waits for the sound toggle', async ({ page }) => {
 });
 
 test('the room animates and moves with the pointer', async ({ page }) => {
-  await page.goto('/today');
+  await page.goto('/mock/today');
   const canvas = page.locator('.today-stage canvas');
   const sample = () => canvas.evaluate((node) => (node as HTMLCanvasElement).toDataURL());
   const first = await sample();
@@ -92,15 +92,15 @@ test('the room animates and moves with the pointer', async ({ page }) => {
   await expect.poll(sample, { timeout: 5_000 }).not.toBe(before);
 });
 
-test('home links to the Today mock', async ({ page }) => {
-  await page.goto('/');
+test('the foundation page links to the Today mock', async ({ page }) => {
+  await page.goto('/mock/foundation');
   await page.getByRole('link', { name: 'Open the Today mock' }).click();
-  await expect(page).toHaveURL(/\/today$/);
+  await expect(page).toHaveURL(/\/mock\/today$/);
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
 });
 
 test('the readable text toggle swaps the bitmap face for the system face', async ({ page }) => {
-  await page.goto('/today');
+  await page.goto('/mock/today');
   await expect(page.locator('.today-wordmark')).toHaveAttribute('aria-label', 'TODAY');
   await page.getByRole('button', { name: 'Readable text: off' }).click();
 
@@ -120,7 +120,7 @@ test.describe('reduced motion', () => {
   test.use({ reducedMotion: 'reduce' });
 
   test('freezes the room, Warden and parallax', async ({ page }) => {
-    await page.goto('/today');
+    await page.goto('/mock/today');
     expect(await visibleText(page, '.hero-note')).toContain('Reduced motion is on');
     const room = page.locator('.today-stage canvas');
     const warden = page.locator('.companion-art canvas');

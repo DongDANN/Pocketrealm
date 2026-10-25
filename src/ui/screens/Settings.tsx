@@ -268,7 +268,12 @@ export function Settings() {
         </label>
         <label className="field">
           <span className="field-label">
-            <PixelText text="Budget period starts on day" color={C.paper3} pixelScale={2} />
+            <PixelText
+              text="Budget period starts on day"
+              color={C.paper3}
+              pixelScale={2}
+              wrap={20}
+            />
           </span>
           <select
             className="currency-select wide-select"
@@ -426,7 +431,12 @@ export function Settings() {
               })();
             }}
           >
-            <PixelText text="Ask for persistent storage" color={C.paper0} pixelScale={2} />
+            <PixelText
+              text="Ask for persistent storage"
+              color={C.paper0}
+              pixelScale={2}
+              wrap={18}
+            />
           </PixelButton>
         </div>
       </PixelPanel>
@@ -447,7 +457,12 @@ export function Settings() {
           />
         </PixelButton>
         <label className="pixel-button secondary link-button wide" htmlFor="import-file">
-          <PixelText text="Choose a backup file to import" color={C.paper0} pixelScale={2} />
+          <PixelText
+            text="Choose a backup file to import"
+            color={C.paper0}
+            pixelScale={2}
+            wrap={20}
+          />
         </label>
         <input
           id="import-file"
@@ -690,7 +705,7 @@ export function Settings() {
             })();
           }}
         >
-          <PixelText text="Delete this book for good" color={C.ink900} pixelScale={2} />
+          <PixelText text="Delete this book for good" color={C.ink900} pixelScale={2} wrap={16} />
         </PixelButton>
       </PixelPanel>
 
