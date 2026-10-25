@@ -38,7 +38,7 @@ Last updated: 2026-10-25
       **Owner approved 2026-10-25 ("start generating the remaining assets").**
 - [x] Gate 1 — Core logic headless: money, periods, envelopes, safe-to-spend, rollover,
       recurring, rewards ledger, XP/levels, streaks/rest tokens, quests, achievements, insights.
-- [ ] Gate 1.5 — Delve engine headless: RNG, maps, auto-battle, boons/relics, Autopilot, oil,
+- [x] Gate 1.5 — Delve engine headless: RNG, maps, auto-battle, boons/relics, Autopilot, oil,
       budget buffs, catch-up clock defense, Embers/Forge, ledger, sim:delve + persona tuning.
 - [ ] Gate 1.6 — Advanced Delve MUSTs: builds + skill trees, skills/statuses/elements,
       Habit Cards, affixes, boss phases + Boss Study, boon levels/fusions/fair offers,
@@ -137,3 +137,48 @@ Verification:
 - `npm run lint` / `npm run format:check` — **verified** clean.
 
 No UI in this gate; screens consume these helpers starting Gate 3. Delve begins next (Gate 1.5).
+
+### Gate 1.5 — Delve engine headless (2026-10-25)
+
+Built: the pure, deterministic Delve core in `src/core/delve` — no React, DOM, IndexedDB, or clock
+reads. Seeded branching maps (3–5 rows × 2–3 cols, hash(userSeed, hollow, floor), elites from
+floor 4, 2-enemy skirmishes from floor 5 at 25%), deterministic auto-battle (SPD order, ATK vs DEF,
+LUCK crits, boss telegraph one round before the mechanic lands, 40-round cap = safe draw),
+40 boons / 20 relics with tag bonuses at 3 and 5 and a hard 8-slot cap, choice points plus a
+logged Autopilot (tag-priority boon picks, route preferences, HP-aware rest/elite avoidance,
+retreat threshold, per-hollow boss level gates), Lantern Oil (1 per room step; free trickle and
+habit grants only, 120/day grant cap, 200 storage cap — oil is never bought or minted from money),
+BudgetSignals buffs capped at +15% power and never penalties, clock defense (30 s minimum step,
+12 h catch-up cap, backwards clock = 0), Embers + the 7-node Forge tree, idempotent
+`delve:floor:<runId>:<n>` / `delve:clear:<runId>` ledger events (Delve XP capped 30/day),
+faint/retreat Ember banking (100% / 60%, relic-safebox 70%) with a 50 Embers/day refinement cap,
+same-day re-clear fatigue (25%), and `sim:delve` — four personas (Trickle, Casual, Habit,
+Optimizer) run through the real engine.
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 166/166 across 17 files. Includes: stepwise == chunked catch-up
+  property over seeds × hollows × oils × chunk sizes; determinism replays; camp-mode choice flows;
+  ledger uniqueness; oil/Ember/fatigue caps; a 40-round draw test; boss telegraph tests; and the
+  §6.10 persona sim (5 seeds × 60 days each) asserting H1 windows, the Embers ratio, and
+  first-attempt faint rates.
+- `npm run lint` / `npm run format:check` — **verified** clean.
+- `npm run sim:delve -- --days 60` — **verified** (final tuning below; SPEC §6.10 targets met).
+
+§6.10 targets vs measured (5 seeds averaged, Autopilot: balanced route, retreat ≤50% HP,
+boss gates H1≥3 / H2≥6 / H3≥8):
+
+| Target (§6.10) | Trickle | Casual | Habit | Optimizer |
+| --- | --- | --- | --- | --- |
+| H1 clear: 14–21d / 5–8d / 3–5d / ≥2d | 12d | 7d | 4d | 4d |
+| First-attempt faint "about 25–40%" | 26% | 38% | 27% | 22% |
+| Optimizer ≤2.5× Trickle Embers/day | — | — | — | 1.86× |
+
+H2 first clears: optimizer 23d, habit 30d, casual 42d, trickle 59d. H3: optimizer 50d (no faints
+on first-clear attempts after the scale cap; the deep-hollow numbers have tiny samples and are
+recorded, not asserted). Tuning notes: floor scaling caps at floor 6 (×1.85) so late floors
+plateau instead of exploding; elites and the H1 boss were softened so L3–4 first-clear dives are
+tense but winnable; the pre-boss Rest retreats below a hollow's boss gate instead of throwing
+unwinnable dives at the boss. Two engine bugs were found and fixed by the tests (fork path
+off-by-one that silently walked column 0; camp-mode choice resolution clearing fresh offers).

@@ -28,9 +28,9 @@ const DAILY_COUNT_CAPS: Readonly<Record<string, number>> = {
   goal: 3,
 };
 
-/** Daily XP caps per exact type. */
+/** Daily XP caps per exact type or type-group prefix (e.g. all `delve:*` share one cap). */
 const DAILY_XP_CAPS: Readonly<Record<string, number>> = {
-  'delve:floor': 30,
+  delve: 30,
 };
 
 export function grant(events: readonly RewardEvent[], spec: GrantSpec): GrantResult {
@@ -44,10 +44,12 @@ export function grant(events: readonly RewardEvent[], spec: GrantSpec): GrantRes
     if (used >= countCap) return { events: next, granted: false, skippedReason: 'cap' };
   }
 
-  const xpCap = DAILY_XP_CAPS[spec.type];
+  const xpKey =
+    DAILY_XP_CAPS[spec.type] !== undefined ? spec.type : (spec.type.split(':')[0] ?? '');
+  const xpCap = DAILY_XP_CAPS[xpKey];
   if (xpCap !== undefined) {
     const usedXp = next
-      .filter((e) => e.type === spec.type && e.at === spec.at)
+      .filter((e) => e.at === spec.at && (e.type === xpKey || e.type.startsWith(`${xpKey}:`)))
       .reduce((sum, e) => sum + e.xp, 0);
     if (usedXp + spec.xp > xpCap) return { events: next, granted: false, skippedReason: 'cap' };
   }
