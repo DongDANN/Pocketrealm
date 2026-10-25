@@ -123,6 +123,33 @@ export interface DeleteOutcome {
 }
 
 /**
+ * Undo for a delete: the row comes back and, if it was goal work, so does the contribution. The
+ * ledger is left alone — the keys are spent, so a restore can never mint a second reward.
+ */
+export async function restoreLogged(
+  db: PocketDb,
+  id: string,
+  ctx: WriteContext,
+): Promise<DeleteOutcome | null> {
+  return db.transaction('rw', db.transactions, db.goals, async () => {
+    const current = await db.transactions.get(id);
+    if (!current || current.deletedAt === undefined) return null;
+    let goal: Goal | undefined;
+    if (current.goalId !== undefined) {
+      const existing = await db.goals.get(current.goalId);
+      if (existing) {
+        goal = { ...existing, saved: existing.saved + current.amount };
+        await db.goals.put(goal);
+      }
+    }
+    const transaction: Transaction = { ...current, updatedAt: ctx.clock.now() };
+    delete transaction.deletedAt;
+    await db.transactions.put(transaction);
+    return { transaction, ...(goal ? { goal } : {}) };
+  });
+}
+
+/**
  * Soft delete, plus the money a goal contribution moved. Rewards are never clawed back: SPEC 6.1
  * says nothing is lost, and the spent key simply stops the same entry from paying again.
  */

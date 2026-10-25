@@ -70,7 +70,7 @@ export function Foundation({ needRefresh }: Props) {
           </li>
         </ul>
         <div className="foundation-actions">
-          <Link className="pixel-button link-button" to="/today">
+          <Link className="pixel-button link-button" to="/mock/today">
             <PixelText text="Open the Today mock" color={C.ink900} pixelScale={2} />
           </Link>
           <Link className="pixel-button secondary link-button" to="/art">

@@ -50,8 +50,8 @@ Last updated: 2026-10-25
       recurring-on-open. Browser IndexedDB itself stays a Gate 5 item.**
 - [ ] Gate 3 — Core screens in retro kit: onboarding, Today, Add, Envelopes, Goals, History,
       Settings, toasts/companion reactions.
-      **3a pure logic and 3b the data layer behind it are done and mutation-checked; the screens
-      themselves (3c) and their browser verification (3d) are not.**
+      **3a pure logic, 3b the data layer, and 3c the screens are done. The screens were walked in
+      Chromium with a real IndexedDB; the committed e2e specs for them (3d) are next.**
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
       cosmetics/realm, weekly review, month summary, insights.
 - [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
@@ -582,3 +582,65 @@ what a reward is worth.
   51 files; `npm run lint` **verified** clean; `prettier --check .` **verified** clean. Atomicity is
   **verified** only against `fake-indexeddb` — real IndexedDB rollback in a browser is a Gate 5 item.
 - **Not possible here:** nothing user-facing. No screen calls any of this yet — that is Gate 3c.
+
+### Gate 3c — The screens, in the retro kit, on real data (2026-10-25)
+
+The app is now a working book rather than a mock. First run opens onboarding, and every later route
+reads and writes the same IndexedDB through the Gate 3b functions. The Gate 0.5 style lock was not
+relaxed: every route was audited for CSS-rendered copy and every screen keeps the bitmap face, the
+paper panels, the pixel gauges, and the fixed bottom navigation.
+
+- **Routes:** `/` Today, `/onboarding`, `/add` (also `?edit=<id>`), `/envelopes`,
+  `/envelopes/:id`, `/goals`, `/history`, `/settings`. The style-lock prototypes stayed at
+  `/mock/foundation`, `/mock/today` and `/art`; the old `/today` redirects to `/mock/today`, and an
+  unknown route returns `/`. The shell owns the update banner, offline strip and toast host.
+- **Onboarding** is one skippable page, not a wizard: currency (peso-first, display-only, chosen
+  independently of language), locale and date language, income, period start day, starter template
+  with a live envelope preview, the three original species with sprites, and the companion name.
+  `completeOnboarding()` writes all of it in one transaction; only the amount and the name can stop
+  it, and both say exactly what to fix.
+- **Today** shows the safe-to-spend hero, the period range, spent today, oil/streak/level, the
+  envelope strip with guardian states, the animated companion and its mood, check-in, and the six
+  rotating quest chips. Every value comes from `useTodayBoard()`; no arithmetic lives in the screen.
+- **Add** preselects the most recently used envelope, today's date and Expense. Whole-unit quick
+  amounts (₱50 through ₱1,000) plus Save complete a common entry in two taps inside the screen, or
+  three from launch; the number pad remains for exact amounts. Income, transfer, optional note,
+  date, and recurrence are all on the same screen. The toast now reports only what that entry earned
+  (see the ledger bug below), and edits never mint a reward.
+- **Envelopes / envelope detail** show allowance, carry, spent, remaining, percent and state in
+  words as well as colour, plus the guardian line. Detail covers rename, allowance, rollover, a
+  validated transfer to another envelope, the 25 newest entries, and archive/restore.
+- **Goals** covers creation with an optional due date, contribution (optionally from an envelope),
+  weekly pacing copy, progress gauges and the completion celebration. **History** covers text and
+  amount search, envelope and date filters, per-day totals, edit, and delete with a visible Undo.
+- **Settings** covers money and language, readable-text toggle, motion, theme preview, sound,
+  rest-token copy, persistent-storage request and usage, export, validated import (merge or replace
+  with a preview and typed replace confirmation) with an auto-backup, install help, About and
+  disclaimer, and typed-confirmation delete-everything.
+- **Two real defects found by using the app, not by the type checker:**
+  1. **Rest tokens invented a streak before the book existed.** A first-ever entry on a fresh book
+     showed a 3-day streak, because the backward walk spent both monthly tokens into the empty past.
+     Rest tokens now only bridge gaps between active days; a new book starts at 1. The pure test and
+     the data-layer fixture were corrected, and a new test pins the first-day case.
+  2. **The Add toast summed the whole reward ledger.** It reported `+24 oil` for an entry that paid
+     +4, because `GrantResult.events` is the entire updated ledger, not just the new row. It now sums
+     the last row of each granted result; the daily trickle no longer leaks into an entry's toast.
+- **Layout fixes found in the 390 px screenshots:** the header wordmark is hidden on phones so it
+  cannot overlap the title (back labels remain, and the link keeps its accessible name); species
+  cards are full-width rows on phones and three columns only from 640 px; goal names and amounts
+  stack instead of colliding; the privacy mark was enlarged; onboarding preview keys no longer
+  repeat.
+- **Verification:** `npm run typecheck` **verified** clean; `npx vitest run` **verified** 565/565
+  across 57 files; `npm run lint` **verified** clean; `prettier --check .` **verified** clean;
+  `npm run build` **verified** (641 kB JS, 29 kB CSS, 40 precache entries; the >500 kB warning is
+  accepted until the Delve screen is lazily split in Gate 4).
+- **Browser walk (Chromium, 390×844, real IndexedDB):** onboarding → first entry → every screen →
+  envelope transfer → goal creation and contribution → history filter, delete and Undo → export →
+  import preview. **Verified** zero page errors, zero console errors, and zero CSS-rendered text
+  nodes on the six main routes (`/`, `/add`, `/envelopes`, `/goals`, `/history`, `/settings`);
+  currency displayed as ₱ from the first screen.
+- **Partially verified:** that walk was a throwaway script, not yet a committed e2e spec. The old
+  Playwright specs still point at the pre-3c routes and will be replaced in Gate 3d. Viewport
+  coverage beyond 390×844, keyboard focus order, screen-reader output and install behaviour are
+  Gate 3d/5/6 work; none are claimed here.
+- **Not possible here:** iOS/Android install and real screen readers remain MANUAL_TEST items.

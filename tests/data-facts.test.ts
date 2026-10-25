@@ -149,13 +149,14 @@ describe('loadFacts', () => {
   it('counts the rest tokens for every month the book has run through', async () => {
     const db = testDb('facts-tokens');
     const w = ctx();
-    // Activity on the 23rd and the 25th only. The month grants two tokens, and both are spent on
-    // the 24th and the 22nd instead of breaking the run.
+    // Activity on the 21st, 23rd and 25th. The month grants two tokens, spent on the 22nd and 24th
+    // instead of breaking the run.
+    await writeTransaction(db, { kind: 'expense', amount: 1_00, date: '2026-10-21' }, w);
     await writeTransaction(db, { kind: 'expense', amount: 1_00, date: '2026-10-23' }, w);
     await writeTransaction(db, { kind: 'expense', amount: 1_00, date: TODAY }, w);
     const facts = await loadFacts(db, { today: TODAY, window: OCT });
-    expect(facts.streak).toBe(4);
-    expect(facts.longestStreak).toBe(4);
+    expect(facts.streak).toBe(5);
+    expect(facts.longestStreak).toBe(5);
   });
 
   it('starts the token count at the first entry even when it long predates any check-in', async () => {

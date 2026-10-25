@@ -15,6 +15,7 @@ import {
   declareNoSpend,
   deleteLogged,
   logWithReward,
+  restoreLogged,
   trickleOil,
 } from '../src/data/habits';
 import {
@@ -331,5 +332,45 @@ describe('deleteLogged', () => {
     const removed = await deleteLogged(db, logged.transaction.id, context);
     expect(removed?.goal?.saved).toBe(0);
     expect((await getGoal(db, 'g1'))?.saved).toBe(0);
+  });
+});
+
+describe('restoreLogged', () => {
+  it('brings a deleted entry back and puts its contribution back in the goal', async () => {
+    const db = testDb('restore-goal');
+    await saveEnvelope(db, envelope());
+    await fundGoal(db, 100_00);
+    const context = ctx();
+    const logged = await logWithReward(db, expense({ amount: 60_00, goalId: 'g1' }), context);
+    if (!logged.ok) throw new Error('expected the contribution to land');
+    await deleteLogged(db, logged.transaction.id, context);
+
+    const restored = await restoreLogged(db, logged.transaction.id, context);
+    expect(restored?.transaction.deletedAt).toBeUndefined();
+    expect(restored?.goal?.saved).toBe(60_00);
+    const row = await db.transactions.get(logged.transaction.id);
+    expect(row?.deletedAt).toBeUndefined();
+    expect((await getGoal(db, 'g1'))?.saved).toBe(60_00);
+  });
+
+  it('does not pay the log reward twice, because the ledger key is already spent', async () => {
+    const db = testDb('restore-reward');
+    await saveEnvelope(db, envelope());
+    const context = ctx();
+    const logged = await logWithReward(db, expense(), context);
+    if (!logged.ok) throw new Error('expected the entry to land');
+    await deleteLogged(db, logged.transaction.id, context);
+    await restoreLogged(db, logged.transaction.id, context);
+    const logEvents = (await ledgerEvents(db)).filter((event) => event.type === 'log');
+    expect(logEvents).toHaveLength(1);
+  });
+
+  it('refuses to restore an entry that was never deleted, or one that does not exist', async () => {
+    const db = testDb('restore-refuse');
+    await saveEnvelope(db, envelope());
+    const logged = await logWithReward(db, expense(), ctx());
+    if (!logged.ok) throw new Error('expected the entry to land');
+    expect(await restoreLogged(db, logged.transaction.id, ctx())).toBeNull();
+    expect(await restoreLogged(db, 'nope', ctx())).toBeNull();
   });
 });

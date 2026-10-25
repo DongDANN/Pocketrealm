@@ -32,6 +32,38 @@ export function currencySubunit(code: CurrencyCode): string {
   return getCurrency(code).subunit;
 }
 
+/** Regions whose everyday coin is one of the six this app keeps; everything else starts at peso. */
+const REGION_CURRENCY: Readonly<Record<string, CurrencyCode>> = {
+  PH: 'PHP',
+  US: 'USD',
+  GB: 'GBP',
+  SG: 'SGD',
+  IN: 'INR',
+  DE: 'EUR',
+  FR: 'EUR',
+  ES: 'EUR',
+  IT: 'EUR',
+  NL: 'EUR',
+  PT: 'EUR',
+  IE: 'EUR',
+  AT: 'EUR',
+  BE: 'EUR',
+  FI: 'EUR',
+  GR: 'EUR',
+};
+
+/**
+ * A first guess from the device locale, never a stored decision: only an explicit region subtag
+ * counts (`en-PH`, not plain `en`), because guessing a coin the user does not use is worse than the
+ * peso-first default they can change in one tap.
+ */
+export function currencyForLocale(locale: string): CurrencyCode {
+  const rest = locale.replace('_', '-').split('-').slice(1);
+  const region = rest.find((part) => /^[A-Za-z]{2}$/.test(part));
+  if (!region) return DEFAULT_CURRENCY;
+  return REGION_CURRENCY[region.toUpperCase()] ?? DEFAULT_CURRENCY;
+}
+
 export function formatMoney(minor: number, code: CurrencyCode): string {
   const sign = minor < 0 ? '-' : '';
   const abs = Math.abs(Math.trunc(minor));

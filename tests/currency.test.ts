@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CURRENCIES,
+  currencyForLocale,
   currencySubunit,
   currencySymbol,
   DEFAULT_CURRENCY,
@@ -77,5 +78,23 @@ describe('parseAmount', () => {
   it('refuses a value too large to hold as an integer', () => {
     expect(parseAmount('99999999999999')).toBeNull();
     expect(parseAmount('999999999999')).toBe(99_999_999_999_900);
+  });
+});
+
+describe('currencyForLocale', () => {
+  it('reads the region subtag the device actually named', () => {
+    expect(currencyForLocale('en-PH')).toBe('PHP');
+    expect(currencyForLocale('fil-PH')).toBe('PHP');
+    expect(currencyForLocale('en-US')).toBe('USD');
+    expect(currencyForLocale('de-DE')).toBe('EUR');
+    expect(currencyForLocale('en_SG')).toBe('SGD');
+    expect(currencyForLocale('zh-Hant-TW')).toBe('PHP');
+  });
+
+  it('falls back to the peso rather than guessing from a language alone', () => {
+    expect(currencyForLocale('en')).toBe('PHP');
+    expect(currencyForLocale('fr')).toBe('PHP');
+    expect(currencyForLocale('')).toBe('PHP');
+    expect(currencyForLocale('not-a-locale-')).toBe('PHP');
   });
 });

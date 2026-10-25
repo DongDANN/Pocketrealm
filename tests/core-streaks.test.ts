@@ -12,12 +12,20 @@ describe('streaks and rest tokens', () => {
     expect(s.tokenSpends).toEqual([]);
   });
 
-  it('a missed day auto-spends a token and preserves the streak', () => {
-    const s = streakState(['2026-10-24', '2026-10-25'], 1, '2026-10-25');
-    // Oct 23 was missed, but a token covered it.
+  it('a missed day between active days spends a token and preserves the streak', () => {
+    const s = streakState(['2026-10-23', '2026-10-25'], 1, '2026-10-25');
+    // Oct 24 was missed, but a token covered it.
     expect(s.streak).toBe(3);
     expect(s.tokens).toBe(0);
-    expect(s.tokenSpends).toEqual([{ date: '2026-10-23', before: 1, after: 0 }]);
+    expect(s.tokenSpends).toEqual([{ date: '2026-10-24', before: 1, after: 0 }]);
+  });
+
+  it('a token never invents days before the first activity', () => {
+    const s = streakState(['2026-10-25'], 2, '2026-10-25');
+    expect(s.streak).toBe(1);
+    expect(s.longest).toBe(1);
+    expect(s.tokens).toBe(2);
+    expect(s.tokenSpends).toEqual([]);
   });
 
   it('a missed day before the current run started is not a break', () => {

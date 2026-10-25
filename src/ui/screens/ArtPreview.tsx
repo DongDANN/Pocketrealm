@@ -99,7 +99,7 @@ export function ArtPreview() {
   return (
     <main className="shell art-shell">
       <header className="art-top">
-        <Link className="back-link" to="/">
+        <Link className="back-link" to="/mock/foundation">
           <PixelText text="← Pocketrealm" color={C.amber2} pixelScale={2} />
         </Link>
         <p className="art-badge">

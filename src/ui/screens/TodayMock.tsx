@@ -175,7 +175,7 @@ export function TodayMock() {
   return (
     <main className="shell today-shell">
       <header className="today-top">
-        <Link className="back-link" to="/">
+        <Link className="back-link" to="/mock/foundation">
           <PixelText text="← Pocketrealm" color={C.amber2} pixelScale={2} />
         </Link>
         <Link className="back-link" to="/art">

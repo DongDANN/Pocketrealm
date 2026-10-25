@@ -28,6 +28,7 @@ export function streakState(
   today: LocalDate,
 ): StreakState {
   const active = new Set(activeDates);
+  const firstActive = [...active].sort()[0];
   let streak = 0;
   let longest = 0;
   let held = Math.max(0, Math.trunc(tokens));
@@ -52,6 +53,9 @@ export function streakState(
     }
     // Tokens and breaks only apply inside a run; before any activity there is nothing to save.
     if (streak === 0) break;
+    // A token bridges a gap between two active days. It must never invent days before the first
+    // one, or a brand-new book would report a streak longer than the days it has existed.
+    if (firstActive !== undefined && compareDates(cursor, firstActive) < 0) break;
     if (held > 0) {
       tokenSpends.push({ date: cursor, before: held, after: held - 1 });
       held -= 1;
