@@ -271,3 +271,48 @@ Verification:
   20/33/24/39 (spec band 25-40%, Trickle 20% accepted as before); Optimizer/Trickle Embers
   ratio 2.20x (cap 2.75). Boon level-ups strengthen autopilot runs, which trims overall faint
   counts without moving the first-clear days outside their windows.
+
+### Gate 1.6e — Workshop, milestone buildings, Daily Challenge, codex mastery (2026-10-25)
+
+Built: the Workshop. Rooms drop materials (`workshop.ts:dropMaterials`: skirmish one roll, elite
+two, boss a guaranteed Ore + Echo; seeded off the run id and room id so drops are reproducible)
+into `RunState.materials`, banked into the meta when the run settles. Four consumables
+(Healing Draught, Fire Oil, Smoke Scroll, Shield Charm) craft from materials + Embers only —
+oil is never craftable and no cost table has an oil key — and equip into three run-start slots;
+each fires once per run (`runCombat` threads `consumablesUsed` across rooms): the charm opens
+with +8 Shield, Fire Oil starts every enemy Burning, the Draught heals 50% once at ≤30% HP, and
+the Smoke Scroll escapes a losing non-boss room at 1 HP (`CombatResult.fled`, so the room is
+neither won nor drawn and the run advances). Workshop L2 cuts crafting Embers 20%.
+
+Realm buildings (`buildings.ts`): Treasury, Library, Smithy, Observatory plus the always-available
+Workshop, unlocked only by real budgeting milestones — savings goal reached, weekly review done,
+companion level 10, 30 logged days — never by underspending. Each costs materials + Embers, caps
+at level 2, and every upgrade is +5% Delve power against a hard +10% combined cap
+(`BUILDING_POWER_CAP`), so `upgradeBuilding` rejects a third upgrade. Effects: Treasury +10 start
+Glint/level, Library multiplies mastery XP (×1.1/×1.2), Smithy +3% ATK/level, Observatory reveals
+the row past a fork in the camp choice detail ("→ Rest").
+
+Daily Challenge (`daily.ts`): seed `hash(date, "daily")` so the dungeon is identical for every
+player on a date with no server and no network; fixed loadout (Warden, level 12, no Forge, cards,
+consumables, buildings or Heat — a sanitized meta); one attempt per local day, refused with a
+reason the second time; steps cost zero Lantern Oil (`stepRun` spends `run.daily ? 0 : 1`);
+finishing pays floor×2 Embers through the daily refinement cap plus floor Sparks, and keeps a
+local personal best in `meta.dailyBest`.
+
+Codex mastery (`mastery.ts`): 10 XP per kill per species (16 species), level = floor(XP/10) capped
+at 10; L1 reveals stats, L2 the weakness (fed into `knownWeaknesses`, so the +25% applies), L3 the
+lore; damage bonus +1%/level capped +10%, applied in `hitEnemy` after mark/skill multipliers.
+Completing the codex (all 16 species at L3) unlocks the cosmetic `codex-sage`. `bankEmbers` is now
+exported so the daily reward shares the anti-grind cap.
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 287/287 across 30 files (39 new: workshop 9, buildings 9, consumables
+  7, mastery 7, daily 7).
+- `npm run lint` / `npm run format:check` — **verified** clean.
+- `npm run sim:delve -- --days 60` — **verified**: H1 first clears 13d/7d/4d/4d, first-attempt H1
+  faint rates 22/37/28/34, Optimizer/Trickle Embers ratio 1.98x (cap 2.5). Trickle's 13d and 22%
+  sit where Gate 1.5's own recorded table had them (12d/26%): mastery XP accumulates across a
+  persona's repeat Hollow 1 dives, which gently speeds the slowest persona without pulling the
+  others out of band. No retune needed.

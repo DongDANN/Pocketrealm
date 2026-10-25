@@ -228,9 +228,15 @@ function isPassiveFx(fx: SkillDef['fx']): fx is PassiveFx {
 export interface CombatResult {
   won: boolean;
   drawn: boolean;
+  /** Smoke Scroll: the companion escaped a killing blow at 1 HP (no win, no faint). */
+  fled: boolean;
   hpAfter: number;
   maxHp: number;
   rounds: number;
+  /** Enemy species killed (mastery XP; splits count for their species). */
+  kills: string[];
+  /** Consumables spent during this combat (each fires at most once per run). */
+  consumablesUsed: Record<string, boolean>;
   log: RunLogEntry[];
 }
 
@@ -254,6 +260,8 @@ function rollDamage(
 
 interface EnemyState {
   id: string;
+  /** Original enemy id (mastery keys off the species, not the instance). */
+  species: string;
   name: string;
   hp: number;
   maxHp: number;
@@ -293,11 +301,12 @@ function skillMultiplier(
 /** Run one deterministic battle. Companion casts ready skills (most expensive first), else basics. */
 export function runCombat(
   run: RunState,
-  room: { enemies: string[]; affixes?: string[] },
+  room: { kind?: string; enemies: string[]; affixes?: string[] },
   modifiers: CombatModifiers,
   floor: number,
   knownWeaknesses: readonly Element[] = [],
   studiedBosses: readonly string[] = [],
+  mastery: Record<string, number> = {},
 ): CombatResult {
   const rng = combatRng(run.runId, run.stepIndex);
   const log: RunLogEntry[] = [];
@@ -328,6 +337,22 @@ export function runCombat(
   const cooldowns: Record<string, number> = {};
   let statuses: StatusInstance[] = [];
 
+  // Consumables: each fires at most once per run (consumablesUsed carries across combats).
+  const used: Record<string, boolean> = { ...run.consumablesUsed };
+  const hasConsumable = (id: string): boolean => run.consumables.includes(id) && !used[id];
+  let fled = false;
+
+  if (hasConsumable('shield-charm')) {
+    shield += 8;
+    used['shield-charm'] = true;
+    logLine('Shield Charm: +8 Shield.');
+  }
+  const fireOil = hasConsumable('fire-oil');
+  if (fireOil) {
+    used['fire-oil'] = true;
+    logLine('Fire Oil: enemies start Burning.');
+  }
+
   const roomAffixes = room.affixes ?? [];
   const heatAtk = run.heat >= 1 ? 1.1 : 1; // Heat 1+: stronger enemies
   const enemies: EnemyState[] = room.enemies.map((id, i) => {
@@ -339,6 +364,7 @@ export function runCombat(
     const armored = affixes.includes('armored');
     return {
       id: `${id}#${i}`,
+      species: id,
       name: def.name,
       hp: s.hp,
       maxHp: s.hp,
@@ -360,6 +386,9 @@ export function runCombat(
       turnsSinceStun: STUN_RESIST_GRACE,
     };
   });
+  if (fireOil) {
+    for (const e of enemies) e.statuses = applyStatus(e.statuses, 'burn', rng, {});
+  }
 
   const atk = base.atk + modifiers.atk;
   const def = base.def + modifiers.def;
@@ -417,6 +446,8 @@ export function runCombat(
     dmg = Math.round(
       dmg * markMultOf(target) * (skill ? skillMultiplier(target, skill, knownWeaknesses) : 1),
     );
+    const masteryLvl = Math.min(10, Math.floor((mastery[target.species] ?? 0) / 10));
+    if (masteryLvl > 0) dmg = Math.round((dmg * (100 + masteryLvl)) / 100);
     if (target.elite) dmg = Math.round((dmg * (100 + modifiers.eliteDamageBonus)) / 100);
     const absorbed = Math.min(statusShield(target.statuses), dmg);
     if (absorbed > 0) {
@@ -664,8 +695,16 @@ export function runCombat(
           `${e.name} strikes again for ${reduced2 - absorbed2}${absorbed2 > 0 ? ` (shield absorbs ${absorbed2})` : ''}.`,
         );
       }
+      // Smoke Scroll: a killing blow outside a boss room becomes a 1-HP escape.
+      if (hp <= 0 && room.kind !== 'boss' && hasConsumable('smoke-scroll')) {
+        hp = 1;
+        fled = true;
+        used['smoke-scroll'] = true;
+        logLine('Smoke Scroll! You vanish in a puff and escape at 1 HP.');
+        break;
+      }
     }
-    if (enemies.every((e) => e.hp <= 0) || hp <= 0) break;
+    if (enemies.every((e) => e.hp <= 0) || hp <= 0 || fled) break;
 
     // End-of-round ticks: dots/hots fire, durations decrement, cooldowns tick down.
     for (let i = 0; i < enemies.length; i++) {
@@ -714,14 +753,27 @@ export function runCombat(
     statuses = statuses
       .map((s) => ({ ...s, duration: s.id === 'stun' ? s.duration : s.duration - 1 }))
       .filter((s) => s.id === 'stun' || s.duration > 0);
+    // Healing Draught: rescue at or below 30% HP, once per run.
+    if (hasConsumable('healing-draught') && hp > 0 && hp <= Math.round(maxHp * 0.3)) {
+      const heal = Math.round(maxHp * 0.5);
+      hp = Math.min(maxHp, hp + heal);
+      used['healing-draught'] = true;
+      logLine(`Healing Draught: healed ${heal} HP.`);
+    }
+    if (hp <= 0 && room.kind !== 'boss' && hasConsumable('smoke-scroll')) {
+      hp = 1;
+      fled = true;
+      used['smoke-scroll'] = true;
+      logLine('Smoke Scroll! You vanish in a puff and escape at 1 HP.');
+    }
     for (const id of Object.keys(cooldowns)) {
       if (cooldowns[id]! > 0) cooldowns[id]! -= 1;
     }
-    if (enemies.every((e) => e.hp <= 0) || hp <= 0) break;
+    if (enemies.every((e) => e.hp <= 0) || hp <= 0 || fled) break;
   }
 
-  const won = enemies.every((e) => e.hp <= 0) && hp > 0;
-  const drawn = !won && hp > 0;
+  const won = enemies.every((e) => e.hp <= 0) && hp > 0 && !fled;
+  const drawn = !won && !fled && hp > 0;
   let hpAfter = Math.max(0, hp);
   if (won && modifiers.healAfterCombat > 0) {
     const heal = Math.round((maxHp * modifiers.healAfterCombat) / 100);
@@ -730,5 +782,12 @@ export function runCombat(
       logLine(`You recover ${heal} HP after the fight.`);
     }
   }
-  return { won, drawn, hpAfter, maxHp, rounds: round, log };
+  if (hasConsumable('healing-draught') && hpAfter > 0 && hpAfter <= Math.round(maxHp * 0.3)) {
+    const heal = Math.round(maxHp * 0.5);
+    hpAfter = Math.min(maxHp, hpAfter + heal);
+    used['healing-draught'] = true;
+    logLine(`Healing Draught: healed ${heal} HP.`);
+  }
+  const kills = enemies.filter((e) => e.hp <= 0).map((e) => e.species);
+  return { won, drawn, fled, hpAfter, maxHp, rounds: round, kills, consumablesUsed: used, log };
 }

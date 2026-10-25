@@ -23,6 +23,9 @@ import { anyBoonById, fusionById, fusionRecipesFor, type FusionDef } from './dat
 import { forgeTotals } from './forge';
 import { generateFloor, HOLLOW_FLOORS } from './map';
 import { computeBuffs } from './signals';
+import { lookaheadRows, masteryMult } from './buildings';
+import { gainMastery } from './mastery';
+import { addMaterials, dropMaterials } from './workshop';
 import type {
   ChoiceOption,
   DelveMeta,
@@ -53,7 +56,7 @@ export function heatUnlocked(meta: DelveMeta, hollow: HollowId): boolean {
 }
 
 /** Bank Embers into the meta, clamped by the daily refinement cap. */
-function bankEmbers(
+export function bankEmbers(
   meta: DelveMeta,
   amount: number,
   today: string,
@@ -88,6 +91,14 @@ export function emptyMeta(): DelveMeta {
     lastClearDate: {},
     embersDay: '',
     embersToday: 0,
+    materials: { ore: 0, herb: 0, echo: 0 },
+    consumableStock: {},
+    equippedConsumables: [],
+    buildingLevels: {},
+    mastery: {},
+    codex: [],
+    daily: { date: '', played: false },
+    dailyBest: 0,
     maxSeenAt: 0,
     lastStepAt: 0,
   };
@@ -105,6 +116,8 @@ export function newRun(
   const h = Math.max(0, Math.min(HEAT_MAX, Math.trunc(heat)));
   const base = companionBase(companionLevel);
   const plan = generateFloor(userSeed, hollowId, 1, h);
+  const smithy = meta.buildingLevels?.['smithy'] ?? 0;
+  const smithyAtk = smithy > 0 ? Math.round((base.atk + build.profile.atkAdd) * 0.03 * smithy) : 0;
   return {
     runId: `d${hollowId}-${userSeed.toString(16)}-${meta.runsStarted + 1}`,
     userSeed,
@@ -124,7 +137,7 @@ export function newRun(
       name: build.name,
       hp: base.hp + build.profile.hpAdd,
       maxHp: base.maxHp + build.profile.hpAdd,
-      atk: base.atk + build.profile.atkAdd,
+      atk: base.atk + build.profile.atkAdd + smithyAtk,
       def: base.def + build.profile.defAdd,
       spd: base.spd + build.profile.spdAdd,
       luck: base.luck + build.profile.luckAdd,
@@ -138,6 +151,11 @@ export function newRun(
     rerollsLeft: forgeTotals(meta.forge).rerolls ?? 0,
     offerStreak: 0,
     relicFlags: {},
+    consumables: (meta.equippedConsumables ?? []).slice(0, 3),
+    consumablesUsed: {},
+    materials: { ore: 0, herb: 0, echo: 0 },
+    buildings: { ...(meta.buildingLevels ?? {}) },
+    daily: false,
     result: 'active',
     pendingChoice: null,
     log: [],
@@ -151,9 +169,9 @@ interface EconomyMods {
   embersBonus: number;
 }
 
-function economyMods(run: RunState, forge: Record<string, number>): EconomyMods {
+export function economyMods(run: RunState, forge: Record<string, number>): EconomyMods {
   const mods: EconomyMods = {
-    startGlint: forge.startGlint ?? 0,
+    startGlint: (forge.startGlint ?? 0) + (run.buildings?.['treasury'] ?? 0) * 10,
     shopDiscount: 0,
     embersBonus: forge.embersBonus ?? 0,
   };
@@ -220,13 +238,14 @@ function needsFork(run: RunState): boolean {
   return rowDefs.length > 1 && run.path[run.row] === undefined;
 }
 
-function forkOptions(row: readonly RoomDef[]): ChoiceOption[] {
+function forkOptions(row: readonly RoomDef[], lookahead?: string[]): ChoiceOption[] {
   return row.map((r) => {
     const parts: string[] = [];
     if (r.enemies.length > 0) parts.push(`Enemies: ${r.enemies.length}`);
     if (r.affixes && r.affixes.length > 0) {
       parts.push(r.affixes.map((id) => affixById(id)?.name ?? id).join(' + '));
     }
+    if (lookahead) parts.push(`→ ${lookahead.join(' · ')}`);
     return {
       id: r.id,
       label: roomLabel(r),
@@ -403,7 +422,7 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
       Math.round(((CLEAR_BONUS[next.hollowId] * (100 + bonus)) / 100) * fatigue * heatMult),
     );
     const bankedAll = bankEmbers(meta, next.embersEarned + clearBonus, ctx.today);
-    meta = bankedAll.meta;
+    meta = settleRunEnd(bankedAll.meta, next);
     meta.clearedHollows = [...new Set([...meta.clearedHollows, next.hollowId])];
     meta.runsCleared += 1;
     meta.lastClearDate = { ...meta.lastClearDate, [next.hollowId]: ctx.today };
@@ -441,6 +460,18 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
   return { run: next, meta, ledger, ended: false };
 }
 
+/** Bank gathered materials and consume spent consumables when a run ends. */
+function settleRunEnd(meta: DelveMeta, run: RunState): DelveMeta {
+  let m = {
+    ...meta,
+    materials: addMaterials(meta.materials ?? { ore: 0, herb: 0, echo: 0 }, run.materials),
+  };
+  const used = run.consumablesUsed ?? {};
+  const kept = (m.equippedConsumables ?? []).filter((id) => !used[id]);
+  if (kept.length !== m.equippedConsumables.length) m = { ...m, equippedConsumables: kept };
+  return m;
+}
+
 function endRun(
   run: RunState,
   meta: DelveMeta,
@@ -448,8 +479,9 @@ function endRun(
   today: string,
 ): { run: RunState; meta: DelveMeta } {
   const next = { ...run, result, pendingChoice: null };
+  const settled = settleRunEnd(meta, next);
   if (result === 'retreated') {
-    const { meta: m, banked } = bankEmbers(meta, next.embersEarned, today);
+    const { meta: m, banked } = bankEmbers(settled, next.embersEarned, today);
     m.runsRetreated += 1;
     return {
       run: pushLog(next, 'end', `Retreat: ${banked} of ${next.embersEarned} Embers banked.`),
@@ -458,7 +490,7 @@ function endRun(
   }
   const pct = run.relics.includes('relic-safebox') ? 70 : 60;
   const kept = Math.floor((next.embersEarned * pct) / 100);
-  const { meta: m, banked } = bankEmbers(meta, kept, today);
+  const { meta: m, banked } = bankEmbers(settled, kept, today);
   m.runsFainted += 1;
   return {
     run: pushLog(next, 'end', `Faint: ${banked} of ${kept} Embers banked (${pct}%).`),
@@ -542,9 +574,10 @@ function autopilotRest(
 export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   const empty: StepOutcome = { run, meta: ctx.meta, ledger: [], oilSpent: 0, ended: false };
   if (run.result !== 'active' || run.pendingChoice !== null) return empty;
-  if (ctx.oil < 1) return empty;
+  if (ctx.oil < 1 && !run.daily) return empty;
 
   const forge = forgeTotals(ctx.meta.forge);
+  const spent = run.daily ? 0 : 1;
   let next = run;
   const ledger: StepOutcome['ledger'] = [];
 
@@ -552,11 +585,19 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   if (needsFork(next)) {
     const row = next.floorPlan.rows[next.row]!;
     if (ctx.policy.mode === 'camp') {
+      const look = lookaheadRows(ctx.meta);
+      const lookRow =
+        look > 0 && next.row + 1 < next.floorPlan.rows.length
+          ? next.floorPlan.rows[next.row + 1]
+          : undefined;
       next = {
         ...next,
         pendingChoice: {
           kind: 'fork',
-          options: forkOptions(row),
+          options: forkOptions(
+            row,
+            lookRow?.map((r) => roomLabel(r)),
+          ),
           reason: 'Choose a route.',
           stepIndex: next.stepIndex,
         },
@@ -579,27 +620,50 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   if (room.kind === 'skirmish' || room.kind === 'elite' || room.kind === 'boss') {
     const buffs = computeBuffs(ctx.signals);
     const mods = computeModifiers(next, forge, buffs);
+    // Sightings open codex entries before the fight resolves (win, lose, or escape).
+    let stepMeta: DelveMeta = {
+      ...ctx.meta,
+      codex: [...new Set([...(ctx.meta.codex ?? []), ...room.enemies])],
+    };
     const result = runCombat(
       next,
       room,
       mods,
       next.floor,
-      ctx.meta.knownWeaknesses ?? [],
-      ctx.meta.bossKnowledge ?? [],
+      stepMeta.knownWeaknesses ?? [],
+      stepMeta.bossKnowledge ?? [],
+      stepMeta.mastery ?? {},
     );
-    next = { ...next, log: [...next.log, ...result.log] };
+    next = {
+      ...next,
+      log: [...next.log, ...result.log],
+      consumablesUsed: { ...next.consumablesUsed, ...result.consumablesUsed },
+    };
+    if (result.fled) {
+      next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
+      next = pushLog(next, 'info', 'Smoke Scroll: you slip past the room at 1 HP.');
+      const adv = advanceAfterRoom(next, { ...ctx, meta: stepMeta });
+      return {
+        run: adv.run,
+        meta: adv.meta,
+        ledger: [...ledger, ...adv.ledger],
+        oilSpent: spent,
+        ended: adv.ended,
+      };
+    }
     if (result.drawn) {
+      stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
       const ended = endRun(
         { ...next, unit: { ...next.unit, hp: result.hpAfter } },
-        ctx.meta,
+        stepMeta,
         'retreated',
         ctx.today,
       );
-      return { run: ended.run, meta: ended.meta, ledger, oilSpent: 1, ended: true };
+      return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
     }
     if (!result.won) {
       // Boss Study: fainting to a boss permanently reveals its weakness and tells.
-      let faintMeta = ctx.meta;
+      let faintMeta = stepMeta;
       let faintRun = { ...next, unit: { ...next.unit, hp: 0 } };
       if (room.kind === 'boss' && room.enemies.length > 0) {
         const boss = BOSSES.find((b) => b.id === room.enemies[0]);
@@ -617,9 +681,21 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
         }
       }
       const ended = endRun(faintRun, faintMeta, 'fainted', ctx.today);
-      return { run: ended.run, meta: ended.meta, ledger, oilSpent: 1, ended: true };
+      return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
     }
     next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
+    stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
+    // Won fights drop materials, deterministic per run and room.
+    const drops = dropMaterials(next, room);
+    if (drops.ore + drops.herb + drops.echo > 0) {
+      next = { ...next, materials: addMaterials(next.materials, drops) };
+      const parts = [
+        drops.ore > 0 ? `${drops.ore} Ore` : '',
+        drops.herb > 0 ? `${drops.herb} Herb` : '',
+        drops.echo > 0 ? `${drops.echo} Echo` : '',
+      ].filter(Boolean);
+      next = pushLog(next, 'reward', `Materials: +${parts.join(', ')}.`);
+    }
     // Rainy Day Fund: once per run, heal to 50% when HP is at or below 30%.
     if (
       next.relics.includes('relic-rainyday') &&
@@ -642,18 +718,18 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
       // Boons after every elite/treasure, but only ~half of skirmishes (Ember economy guard).
       const offerChance = room.kind === 'skirmish' ? 35 : 80;
       if (offerRng(next, 'offer-chance').int(100) >= offerChance) {
-        const adv = advanceAfterRoom(next, ctx);
+        const adv = advanceAfterRoom(next, { ...ctx, meta: stepMeta });
         return {
           run: adv.run,
           meta: adv.meta,
           ledger: [...ledger, ...adv.ledger],
-          oilSpent: 1,
+          oilSpent: spent,
           ended: adv.ended,
         };
       }
       const offer = grantBoonOffer(next, ctx.policy);
       if (offer.pending) {
-        return { run: offer.run, meta: ctx.meta, ledger, oilSpent: 1, ended: false };
+        return { run: offer.run, meta: stepMeta, ledger, oilSpent: spent, ended: false };
       }
       next = offer.run;
     }
@@ -667,13 +743,13 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
         run: adv.run,
         meta: adv.meta,
         ledger: [...ledger, ...adv.ledger],
-        oilSpent: 1,
+        oilSpent: spent,
         ended: adv.ended,
       };
     }
     const offer = grantBoonOffer(next, ctx.policy);
     if (offer.pending) {
-      return { run: offer.run, meta: ctx.meta, ledger, oilSpent: 1, ended: false };
+      return { run: offer.run, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
     }
     next = offer.run;
   } else if (room.kind === 'shop') {
@@ -691,7 +767,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           stepIndex: next.stepIndex,
         },
       };
-      return { run: next, meta: ctx.meta, ledger, oilSpent: 1, ended: false };
+      return { run: next, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
     }
     const buy = autopilotShop(next, forge);
     const applied = applyShopPurchase(next, buy.itemId, forge);
@@ -719,7 +795,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           stepIndex: next.stepIndex,
         },
       };
-      return { run: next, meta: ctx.meta, ledger, oilSpent: 1, ended: false };
+      return { run: next, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
     }
     const pick = autopilotEvent(next, ctx.policy, {
       options: affordable.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
@@ -742,12 +818,12 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           stepIndex: next.stepIndex,
         },
       };
-      return { run: next, meta: ctx.meta, ledger, oilSpent: 1, ended: false };
+      return { run: next, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
     }
     const rest = autopilotRest(next, ctx.policy);
     if (rest.choice === 'retreat') {
       const ended = endRun(pushLog(next, 'choice', rest.reason), ctx.meta, 'retreated', ctx.today);
-      return { run: ended.run, meta: ended.meta, ledger, oilSpent: 1, ended: true };
+      return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
     }
     if (rest.choice === 'fuse') {
       const fused = applyFusion(next, rest.recipeId!);
@@ -763,7 +839,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
     run: adv.run,
     meta: adv.meta,
     ledger: [...ledger, ...adv.ledger],
-    oilSpent: 1,
+    oilSpent: spent,
     ended: adv.ended,
   };
 }

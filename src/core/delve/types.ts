@@ -13,6 +13,13 @@ export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic';
 
 export type RoomKind = 'skirmish' | 'elite' | 'treasure' | 'rest' | 'shop' | 'event' | 'boss';
 
+/** Run materials dropped by fights and spent at the Workshop. */
+export interface Materials {
+  ore: number;
+  herb: number;
+  echo: number;
+}
+
 /** A status effect instance (on the companion or an enemy). */
 export interface StatusInstance {
   id: string;
@@ -124,6 +131,16 @@ export interface RunState {
   offerStreak: number;
   /** Once-per-run relic flags. */
   relicFlags: Record<string, boolean>;
+  /** Consumables equipped for this run (snapshot of the meta loadout, max 3). */
+  consumables: string[];
+  /** Consumables already spent this run (each triggers at most once). */
+  consumablesUsed: Record<string, boolean>;
+  /** Materials gathered this run (banked into the meta when the run ends). */
+  materials: Materials;
+  /** Realm building levels snapshotted at run start (Treasury/Smithy read these). */
+  buildings: Record<string, number>;
+  /** True for the Daily Challenge: fixed loadout, no oil cost, one attempt per local day. */
+  daily: boolean;
   result: RunResult;
   pendingChoice: PendingChoice | null;
   log: RunLogEntry[];
@@ -158,6 +175,22 @@ export interface DelveMeta {
   /** Daily Ember refinement cap bookkeeping (date + amount banked that day). */
   embersDay: LocalDate;
   embersToday: number;
+  /** Materials gathered from finished runs, spent at the Workshop. */
+  materials: Materials;
+  /** Crafted-but-unequipped consumables. */
+  consumableStock: Record<string, number>;
+  /** Equipped consumables (run-start slots, max 3). */
+  equippedConsumables: string[];
+  /** Realm building levels (0 = locked, 1 = unlocked via a real budgeting milestone). */
+  buildingLevels: Record<string, number>;
+  /** Mastery XP per enemy species (10 XP per kill, level = XP/10, capped at 10). */
+  mastery: Record<string, number>;
+  /** Enemy species sighted at least once (codex progress). */
+  codex: string[];
+  /** Daily Challenge: the local date of the record and whether the attempt was used. */
+  daily: { date: LocalDate; played: boolean };
+  /** Deepest floor reached in any Daily Challenge (local personal best). */
+  dailyBest: number;
   /** Clock defense: highest wall-clock ms ever seen. */
   maxSeenAt: number;
   /** When the last step was applied (ms). */
