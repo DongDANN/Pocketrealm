@@ -16,6 +16,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "sim:delve": "tsx scripts/sim-delve.ts",
+    "sim:golden": "tsx scripts/golden-hashes.ts",
     "art:sheets": "tsx scripts/render-art-sheets.ts && tsx scripts/gen-ui-assets.ts",
     "art:validate": "tsx scripts/validate-art.ts",
     "icons": "tsx scripts/gen-icons.ts",

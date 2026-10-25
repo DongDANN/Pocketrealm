@@ -40,7 +40,7 @@ Last updated: 2026-10-25
       recurring, rewards ledger, XP/levels, streaks/rest tokens, quests, achievements, insights.
 - [x] Gate 1.5 — Delve engine headless: RNG, maps, auto-battle, boons/relics, Autopilot, oil,
       budget buffs, catch-up clock defense, Embers/Forge, ledger, sim:delve + persona tuning.
-- [ ] Gate 1.6 — Advanced Delve MUSTs: builds + skill trees, skills/statuses/elements,
+- [x] Gate 1.6 — Advanced Delve MUSTs: builds + skill trees, skills/statuses/elements,
       Habit Cards, affixes, boss phases + Boss Study, boon levels/fusions/fair offers,
       Heat 1–5, Workshop consumables, milestone buildings, daily challenge, codex/mastery,
       worker catch-up, 10k fuzz, golden runs, Breaker persona.
@@ -316,3 +316,60 @@ Verification:
   sit where Gate 1.5's own recorded table had them (12d/26%): mastery XP accumulates across a
   persona's repeat Hollow 1 dives, which gently speeds the slowest persona without pulling the
   others out of band. No retune needed.
+
+### Gate 1.6f — Integrity: golden runs, 10k fuzz, worker catch-up, Breaker (2026-10-25)
+
+Built: the integrity stack, so every earlier gate becomes falsifiable instead of "it looked right".
+
+`golden.ts` gives the canonical state hash: `canonical()` walks the value with object keys sorted
+recursively (so insertion order can't change a digest), keeps array order, and renders non-finite
+numbers as `!NaN` / `!Infinity` instead of letting them collapse into the same text. `stateHash()`
+combines two 32-bit passes over that text plus its length and head into 16 hex chars. Five
+scenarios are pinned in `tests/delve-golden.test.ts` (seeds 12345/H1/L5, 2654435761/H2/L6,
+777/H3/L8, 4242/H2/L9, 20261025/H3/L12); the run `log` is excluded from the digest so message
+wording can't rot a pin. `npm run sim:golden` reprints the five hashes with their outcomes. Before
+accepting the pins I flipped one hex digit and watched the test fail, so the pins are load-bearing.
+
+`workerJob.ts` is the catch-up boundary the app will run inside a module Web Worker (Gate 4): a
+plain-JSON request (`run`, `ctx`, `maxSteps`, optional `chunkSize`), no clock or DOM access, a
+`progress` array with one entry per chunk so a single `postMessage` can paint a progress bar, and
+human-readable `logs`. `maxSteps <= 0` (clock rewind, or an absence shorter than one step) returns
+an idle result rather than throwing; a throw inside the loop is caught and also returns idle, so a
+worker crash can never half-persist a run.
+
+Fuzz (`tests/delve-fuzz.test.ts`) drives 10,000 seeds through `stepRun`/`resolveChoice` with
+randomized policies (tag order, route, retreat threshold, autopilot vs camp) and asserts the
+integrity invariants after every step: HP/ATK finite, `0 <= hp <= maxHp + 200`, Glint/Embers/
+materials/counters non-negative, `embersToday` inside its cap, boon levels 1–3, building levels 1–2,
+mastery XP 0–100. It also fails on an empty or duplicated choice offer, on a run stuck in >40
+consecutive no-op states, and if the seed sweep doesn't produce **all three endings**
+(cleared/retreated/fainted) — that last check is what stops the fuzz passing vacuously. A 300-seed
+subset re-verifies determinism through `stateHash`. A second 10,000-seed sweep fuzzes `runCombat`
+directly against the enemy and elite pools (round cap respected, HP bounds, no duplicate kills).
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 305/305 across 34 files (18 new: golden 5, fuzz 4, worker 5,
+  Breaker 4).
+- Worker parity is a **real** `node:worker_threads` run, not a stand-in: the fixture
+  `tests/fixtures/catchUp.worker.mjs` registers the same TS loader the parent uses, imports the
+  pure core, executes `runCatchUpJob`, and the test compares the returned `stateHash`, the ledger
+  and the applied count against the main thread (**verified** identical; 242 ms including worker
+  spawn). Chained
+  catch-up over a 12-hour backlog applied **1440 steps in 86 ms** on this machine — **partially
+  verified**: that is desktop Node timing, a mid-range phone is not measured here (MANUAL_TEST.md).
+  The app-side Worker wrapper itself lands in Gate 4, so the browser path is **not verified yet**.
+- Golden pins — **verified** (5/5) and proven sensitive: corrupting one hex digit fails the test.
+- Breaker persona (`scripts/sim-delve.ts`, `--persona breaker`) — **verified**: `buildMaxMeta()`
+  maxes the Forge, every node of all three skill trees, all five buildings to the hard +10% power
+  cap, all 16 species at codex level 10, three unlocked cards and three crafted consumables, then
+  sweeps 3 builds x 3 routes x 3 seeds at Heat 5, Hollow 3, level 20 spending only Trickle's 20
+  free Oil/day. Deepest floor reached: **6/10**, no build/route cleared inside the day, and the CLI
+  exits non-zero if one ever does. A scratch probe over the same sweep compared per-seed/per-build
+  `stateHash`es: they all differ, so the flat "floor 6" is the Oil budget's floor boundary rather
+  than the sweep ignoring its inputs; the test also fails if the sweep never passes floor 1.
+- `npm run lint` / `npm run format:check` — **verified** clean.
+- `npm run sim:delve -- --days 60` — **verified**: H1 first clears 13d/7d/4d/4d, first-attempt H1
+  faint rates 22/37/28/34, Optimizer/Trickle Embers ratio 1.98x, H3 reached only by the Optimizer
+  (50d) — all inside the §6.10 windows.

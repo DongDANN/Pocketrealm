@@ -12,6 +12,8 @@ export * from './workshop';
 export * from './buildings';
 export * from './mastery';
 export * from './daily';
+export * from './golden';
+export * from './workerJob';
 export { BOONS, RELICS, boonById, relicById, RARITY_WEIGHT, MAX_BOON_LEVEL } from './data/boons';
 export type { BoonLike } from './data/boons';
 export { FUSIONS, fusionById, anyBoonById, fusionRecipesFor } from './data/fusions';
@@ -31,6 +33,7 @@ export {
   TREE_NODES_PER_BRANCH,
   NODE_COSTS,
 } from './data/builds';
+export type { BuildDef, BuildId, TreeNodeDef } from './data/builds';
 export { ELEMENTS, elementMultiplier, WEAKNESS_MULT, RESIST_MULT } from './data/elements';
 export {
   STATUSES,

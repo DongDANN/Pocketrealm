@@ -10,13 +10,32 @@
  */
 
 import {
+  BOSSES,
+  BUILDINGS,
+  BUILDS,
+  CARDS,
+  CODEX_SPECIES,
+  CONSUMABLES,
+  ELEMENTS,
+  HEAT_MAX,
+  HOLLOW_FLOORS,
+  FORGE_NODES,
   buyForgeNode,
+  buyTreeNode,
+  cardUnlocked,
+  buildingMilestones,
+  craftConsumable,
   emptyMeta,
-  oilCapacity,
+  equipConsumable,
+  gainMastery,
   newRun,
+  oilCapacity,
   spendOil,
   stepRun,
+  unlockBuilding,
+  upgradeBuilding,
   type AutopilotPolicy,
+  type BoonTag,
   type BudgetSignals,
   type DelveMeta,
   type RunState,
@@ -244,6 +263,172 @@ function report(def: PersonaDef, s: PersonaStats): void {
   );
 }
 
+/** The Breaker sweeps each build with these routes, never retreating on HP. */
+export const BREAKER_ROUTES: readonly AutopilotPolicy['route'][] = ['safe', 'balanced', 'greedy'];
+/** The Breaker probes the level ceiling rather than a fresh account, to find the strongest case. */
+export const BREAKER_LEVEL = 20;
+
+/**
+ * A maximally kitted meta: every Forge node, every talent node on every build, buildings at the
+ * +10% cap, full codex mastery, three unlocked Habit Cards, and a crafted consumable loadout. Used
+ * only by the Breaker probe, so a degenerate build has nowhere to hide.
+ */
+export function buildMaxMeta(): DelveMeta {
+  let meta: DelveMeta = {
+    ...emptyMeta(),
+    embers: 100_000,
+    clearedHollows: [1, 2, 3],
+    materials: { ore: 99, herb: 99, echo: 99 },
+    knownWeaknesses: Object.keys(ELEMENTS) as DelveMeta['knownWeaknesses'],
+    bossKnowledge: BOSSES.map((b) => b.id),
+  };
+  for (const node of FORGE_NODES) {
+    for (let lvl = 0; lvl < node.maxLevel; lvl++) {
+      const r = buyForgeNode(meta.forge, meta.embers, node.id);
+      if (r.bought) meta = { ...meta, forge: r.forge, embers: r.embers };
+    }
+  }
+  for (const build of BUILDS) {
+    for (const branch of build.treeBranches) {
+      for (const node of branch.nodes) {
+        const r = buyTreeNode(meta, build.id, node.id);
+        if (r.bought) meta = r.meta;
+      }
+    }
+  }
+  meta = { ...meta, embers: 100_000, materials: { ore: 99, herb: 99, echo: 99 } };
+  const milestones = buildingMilestones({
+    savingsGoalReached: true,
+    weeklyReviewDone: true,
+    companionLevel: BREAKER_LEVEL,
+    totalLoggedDays: 99,
+  });
+  for (const b of BUILDINGS) meta = unlockBuilding(meta, b.id, milestones).meta;
+  for (const b of BUILDINGS) {
+    for (let lvl = 1; lvl < b.maxLevel; lvl++) {
+      const r = upgradeBuilding(meta, b.id);
+      if (r.ok) meta = r.meta;
+    }
+  }
+  meta = gainMastery(
+    meta,
+    CODEX_SPECIES.flatMap((id) => Array.from({ length: 11 }, () => id)),
+  );
+  meta = {
+    ...meta,
+    cards: CARDS.filter((c) => cardUnlocked(c.id, meta, BREAKER_LEVEL))
+      .slice(0, 3)
+      .map((c) => c.id),
+  };
+  for (const c of CONSUMABLES) {
+    const r = craftConsumable(meta, c.id);
+    if (r.ok) meta = r.meta;
+  }
+  for (const c of CONSUMABLES.slice(0, 3)) {
+    const r = equipConsumable(meta, c.id);
+    if (r.ok) meta = r.meta;
+  }
+  return meta;
+}
+
+export interface BreakerResult {
+  buildId: string;
+  route: AutopilotPolicy['route'];
+  heat: number;
+  /** Floors the hollow needs to clear (10 in Hollow 3). */
+  floorTarget: number;
+  deepestFloor: number;
+  clearedInADay: boolean;
+  steps: number;
+}
+
+/**
+ * Breaker probe (SPEC 6.11 N): with the maxed meta, Heat 5 and Hollow 3, spend only Trickle's free
+ * oil for `days` days and see whether any build clears. A clear inside a day is a balance failure.
+ */
+export function runBreaker(
+  days = 1,
+  seeds: readonly number[] = [0xb1e0001, 0xb1e0002],
+): BreakerResult[] {
+  const out: BreakerResult[] = [];
+  for (const build of BUILDS) {
+    for (const route of BREAKER_ROUTES) {
+      let deepestFloor = 0;
+      let clearedInADay = false;
+      let steps = 0;
+      for (const userSeed of seeds) {
+        let meta = buildMaxMeta();
+        let oil = 0;
+        let now = 1_700_000_000_000;
+        let run: RunState | null = null;
+        const policy: AutopilotPolicy = {
+          mode: 'autopilot',
+          tagPriority: ['fury', 'guard', 'vigor', 'fortune', 'thrift'] as BoonTag[],
+          retreatHpPercent: 0,
+          route,
+        };
+        let clearedToday = false;
+        for (let day = 1; day <= days; day++) {
+          oil = Math.min(oilCapacity(meta, false), oil + dailyOil(PERSONAS.trickle, day));
+          let guard = 0;
+          while (oil > 0 && guard < 500) {
+            guard += 1;
+            if (!run) {
+              run = newRun(userSeed, 3, BREAKER_LEVEL, meta, build.id, HEAT_MAX);
+              meta = { ...meta, runsStarted: meta.runsStarted + 1 };
+            }
+            const ctx: StepContext = {
+              now,
+              oil,
+              oilCapacity: oilCapacity(meta, false),
+              signals: PERSONAS.trickle.signals(day),
+              meta,
+              policy,
+              today: `2026-10-${String(day).padStart(2, '0')}`,
+            };
+            const step = stepRun(run, ctx);
+            if (step.oilSpent === 0 && !step.ended) break;
+            run = step.run;
+            meta = step.meta;
+            oil = spendOil(oil, step.oilSpent);
+            now += 30_000;
+            steps += 1;
+            if (run.floor > deepestFloor) deepestFloor = run.floor;
+            if (run.result !== 'active') {
+              if (day === 1 && run.result === 'cleared') clearedToday = true;
+              run = null;
+              if (oil < 1) break;
+            }
+          }
+        }
+        clearedInADay ||= clearedToday;
+      }
+      out.push({
+        buildId: build.id,
+        route,
+        heat: HEAT_MAX,
+        floorTarget: HOLLOW_FLOORS[3],
+        deepestFloor,
+        clearedInADay,
+        steps,
+      });
+    }
+  }
+  return out;
+}
+
+function reportBreaker(results: BreakerResult[]): boolean {
+  const degenerate = results.filter((r) => r.clearedInADay);
+  for (const r of results) {
+    console.log(
+      `Breaker  | ${r.buildId.padEnd(7)} ${r.route.padEnd(9)} | Heat ${r.heat} Hollow 3 | ` +
+        `deepest floor ${r.deepestFloor}/${r.floorTarget} | ` +
+        `${String(r.steps).padStart(3)} steps | ${r.clearedInADay ? 'CLEARED IN A DAY' : 'no clear'}`,
+    );
+  }
+  return degenerate.length === 0;
+}
+
 // CLI entry: only run the report when executed directly (tests import the runner instead).
 const isCli = process.argv[1]?.includes('sim-delve');
 if (isCli) {
@@ -257,7 +442,8 @@ if (isCli) {
   );
   console.log('');
 
-  const keys = personaArg === 'all' ? Object.keys(PERSONAS) : [personaArg];
+  const keys =
+    personaArg === 'all' ? Object.keys(PERSONAS) : personaArg === 'breaker' ? [] : [personaArg];
   for (const key of keys) {
     const def = PERSONAS[key];
     if (!def) {
@@ -303,5 +489,18 @@ if (isCli) {
       if (attempts > 0) avg.firstAttempts[hollow] = { faints, attempts };
     }
     report(def, avg);
+  }
+
+  if (personaArg === 'all' || personaArg === 'breaker') {
+    console.log('');
+    console.log('Breaker check — every build at max meta, Heat 5 Hollow 3, on Trickle daily oil:');
+    const ok = reportBreaker(runBreaker(1, [0xb1e0001, 0xb1e0002, 0xb1e0003]));
+    if (!ok) {
+      console.error(
+        'Balance check FAILED: a maxed build cleared Heat 5 Hollow 3 within one day of Trickle oil.',
+      );
+      process.exit(1);
+    }
+    console.log('Breaker check passed: no build one-days the deepest Hollow.');
   }
 }
