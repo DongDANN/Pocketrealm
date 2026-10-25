@@ -48,5 +48,17 @@ export default defineConfig({
     target: 'es2022',
     assetsInlineLimit: 0,
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // Vendor code changes far less often than the app, so it earns its own cacheable chunk
+        // instead of riding along with every Pocketrealm release.
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('dexie')) return 'vendor-db';
+          if (id.includes('react') || id.includes('scheduler')) return 'vendor-react';
+          return 'vendor';
+        },
+      },
+    },
   },
 });
