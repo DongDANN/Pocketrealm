@@ -11,3 +11,4 @@ test-results
 .env.*
 !.env.example
 docs/art-preview/_tmp
+docs/art-preview.rar

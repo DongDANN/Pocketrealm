@@ -46,6 +46,8 @@ Last updated: 2026-10-25
       worker catch-up, 10k fuzz, golden runs, Breaker persona.
 - [ ] Gate 2 — Data layer: Dexie schema/migrations, repositories, atomic Delve batches,
       export/import validation + auto-backup, ledger persistence, period close, recurring on open.
+      **2a/2b done (schema+migrations+repos+ledger+atomic batches); 2c export/import and 2d
+      period close / recurring-on-open still open.**
 - [ ] Gate 3 — Core screens in retro kit: onboarding, Today, Add, Envelopes, Goals, History,
       Settings, toasts/companion reactions.
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
@@ -373,3 +375,54 @@ Verification:
 - `npm run sim:delve -- --days 60` — **verified**: H1 first clears 13d/7d/4d/4d, first-attempt H1
   faint rates 22/37/28/34, Optimizer/Trickle Embers ratio 1.98x, H3 reached only by the Optimizer
   (50d) — all inside the §6.10 windows.
+
+### Gate 2a/2b — Data layer: schema, migrations, repositories, ledger, atomic Delve batches (2026-10-25)
+
+New code, all RED-first: `src/data/{migrations,db,seed,repos,ledger,delveStore}.ts` and
+`tests/{data-harness,data-schema,data-migrations,data-repos,data-ledger,data-delve-store}.test.ts`
+(41 new tests) plus 2 new `core-rewards` tests.
+
+- `src/data` is the only layer that knows IndexedDB exists; every row type is a core domain type (or
+  `{ key, value }` around one), so anything stored is JSON-round-trippable and therefore exportable
+  and structurally cloneable into a Worker without a second definition.
+- **Three Dexie 4 traps found and pinned by tests**, each of which would have broken the app in a
+  browser instead of in a test:
+  1. there is no descending index — `-createdAt` parses into an index literally named `-createdAt`
+     and fails the upgrade with "lower version than the existing version" noise. `tests/data-schema`
+     asserts no `-` prefix survives in any store spec, and newest-first is done with
+     `orderBy('createdAt').reverse()`;
+  2. passing a custom `indexedDB` requires also passing `IDBKeyRange` (`MissingAPIError` otherwise),
+     so `openDatabase()` passes both or neither;
+  3. a `Collection` is not thenable, so every `listTransactions` branch ends in `.toArray()`.
+- Migrations run from a **real v1 fixture database** written with the exported `LEGACY_STORES`, not
+  from a comment about the old shape: `occurrenceKey` is backfilled on recurring rows (an existing
+  key is left alone, a non-recurring row gains nothing), the new v2 tables arrive empty, old rows
+  survive, re-opening is a no-op, and a fresh install lands on `SCHEMA_VERSION`.
+- Lantern Oil lives on the `delveMeta` **row**, not in core's `DelveMeta` (core deliberately has no
+  oil field: the ledger grants it, the caller spends it). The v1→v2 upgrade backfills `oil: 0` so a
+  returning runner starts empty instead of doing arithmetic on `undefined` — covered by its own
+  migration test, which was watched to fail (`expected undefined to be +0`) before the backfill.
+- `commitBatch()` writes run state + meta + oil wallet + the ledger rows the engine proposes inside
+  **one** Dexie transaction and refuses a batch whose `stepIndex` does not move forward
+  (`duplicate` when equal, `stale` when lower), so a crash between engine and storage, or a replayed
+  batch after a reload, applies a step exactly once and banks a reward exactly once. Proven by
+  mutation checks, not just by passing: neutralising the step-index guard fails the reopen test, and
+  unwrapping the transaction wrapper fails the rollback test (an injected `rewards.add` rejection
+  leaves the run row, the wallet and the ledger untouched).
+- Step-by-step commits land on **exactly** the same stored run, meta, oil and ledger keys as one
+  merged batch of the same steps (`applySteps` for N steps vs N single-step batches, compared row
+  for row) — the determinism rule from Gate 1.5 survives a round trip through IndexedDB.
+- **Real core bug caught by a data test, fixed TDD-first:** the daily Delve XP cap _skipped_ any
+  grant that would exceed it, so a 60 XP Hollow clear could never be banked at all (the engine
+  proposes it, the ledger threw it away). `grant()` now truncates to the remaining budget — an empty
+  day pays the full 30 cap, and a later grant on a topped-up day is skipped. Two new tests in
+  `tests/core-rewards.test.ts` pin the truncation and the top-up.
+- Verification: `npm run typecheck` **verified** clean; `npm test` **verified** 348/348 across 39
+  files; `npm run lint` and `prettier --check` on the new files **verified** clean.
+- **Partially verified:** storage tests run on `fake-indexeddb` inside Node. That exercises the real
+  Dexie query/upgrade/transaction semantics but not a real browser's IndexedDB — quota-exceeded
+  aborts, upgrade prompts with a second tab open, and `navigator.storage.persist()` behaviour are
+  **not verified here** and are Gate 5 offline e2e work.
+- **Not done yet in Gate 2:** export/import with validation + auto-backup (2c), `closePeriod` and
+  generate-recurring-on-open (2d), and the `src/data/index.ts` barrel. The Gate 2 checklist box
+  stays unticked until those land.

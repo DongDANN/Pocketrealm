@@ -47,17 +47,22 @@ export function grant(events: readonly RewardEvent[], spec: GrantSpec): GrantRes
   const xpKey =
     DAILY_XP_CAPS[spec.type] !== undefined ? spec.type : (spec.type.split(':')[0] ?? '');
   const xpCap = DAILY_XP_CAPS[xpKey];
+  let xp = spec.xp;
   if (xpCap !== undefined) {
     const usedXp = next
       .filter((e) => e.at === spec.at && (e.type === xpKey || e.type.startsWith(`${xpKey}:`)))
       .reduce((sum, e) => sum + e.xp, 0);
-    if (usedXp + spec.xp > xpCap) return { events: next, granted: false, skippedReason: 'cap' };
+    const remaining = xpCap - usedXp;
+    // The cap is a daily budget, not a gate: a 60 XP Hollow clear on an empty day pays the full 30
+    // still available rather than nothing at all.
+    if (remaining <= 0) return { events: next, granted: false, skippedReason: 'cap' };
+    xp = Math.min(xp, remaining);
   }
 
   next.push({
     key: spec.key,
     type: spec.type,
-    xp: spec.xp,
+    xp,
     sparks: spec.sparks,
     ...(spec.oil !== undefined ? { oil: spec.oil } : {}),
     at: spec.at,

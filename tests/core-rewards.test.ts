@@ -60,6 +60,28 @@ describe('reward ledger', () => {
     expect(totalXp(events)).toBe(30);
   });
 
+  it('truncates one big grant to the remaining daily XP budget instead of dropping it', () => {
+    // A Hollow clear pays 60 XP at once. Refusing it outright would make the biggest Delve reward
+    // permanently unreachable, so the cap means "up to 30 today", not "nothing today".
+    const clear = grant([], { ...spec('delve:clear:r1', 'delve:clear', 60), sparks: 10 });
+    expect(clear.granted).toBe(true);
+    expect(clear.events).toHaveLength(1);
+    expect(clear.events[0]).toMatchObject({ xp: 30, sparks: 10 });
+
+    const next = grant(clear.events, spec('delve:floor:r1:2', 'delve:floor', 10));
+    expect(next.granted).toBe(false);
+    expect(next.skippedReason).toBe('cap');
+  });
+
+  it('tops a capped grant up to the remaining budget', () => {
+    let events = grant([], spec('delve:floor:r1:1', 'delve:floor', 10)).events;
+    const partial = grant(events, { ...spec('delve:clear:r1', 'delve:clear', 60), sparks: 10 });
+    expect(partial.granted).toBe(true);
+    expect(totalXp(partial.events)).toBe(30);
+    events = partial.events;
+    expect(totalSparks(events)).toBe(10);
+  });
+
   it('the cap is per local day, not global', () => {
     let events: RewardEvent[] = [];
     for (let i = 1; i <= 8; i++) {
