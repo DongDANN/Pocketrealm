@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   CURRENCIES,
-  DEFAULT_CURRENCY,
+  currencySubunit,
   currencySymbol,
+  DEFAULT_CURRENCY,
   formatMoney,
   getCurrency,
   isCurrencyCode,
@@ -24,6 +25,16 @@ describe('currency preference data', () => {
     expect(isCurrencyCode('PHP')).toBe(true);
     expect(isCurrencyCode('XYZ')).toBe(false);
     expect(isCurrencyCode(null)).toBe(false);
+  });
+
+  it('names the small coin so money errors speak the user’s currency', () => {
+    expect(currencySubunit('PHP')).toBe('centavos');
+    expect(currencySubunit('USD')).toBe('cents');
+    expect(currencySubunit('GBP')).toBe('pence');
+    expect(currencySubunit('INR')).toBe('paise');
+    for (const currency of CURRENCIES) {
+      expect(currencySubunit(currency.code)).not.toBe('');
+    }
   });
 });
 

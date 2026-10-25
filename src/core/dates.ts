@@ -76,3 +76,9 @@ export function isoWeekId(date: LocalDate): string {
   const week = Math.ceil(((utc.getTime() - yearStart.getTime()) / DAY_MS + 1) / 7);
   return `${utc.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 }
+
+/** The Monday-to-Sunday range of the ISO week containing `date`. */
+export function isoWeekBounds(date: LocalDate): { start: LocalDate; end: LocalDate } {
+  const start = addDays(date, 1 - (parseDate(date).getDay() || 7));
+  return { start, end: addDays(start, 6) };
+}

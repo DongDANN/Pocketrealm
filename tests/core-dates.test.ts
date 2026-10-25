@@ -6,6 +6,7 @@ import {
   dateOf,
   daysBetween,
   isLocalDate,
+  isoWeekBounds,
   isoWeekId,
   monthKey,
   parseDate,
@@ -56,6 +57,19 @@ describe('local date helpers', () => {
     expect(isoWeekId('2026-01-01')).toBe('2026-W01');
     expect(isoWeekId('2026-10-19')).toBe('2026-W43'); // Monday
     expect(isoWeekId('2026-10-25')).toBe('2026-W43'); // Sunday of the same week
+  });
+
+  it('gives the Monday-to-Sunday range an ISO week covers', () => {
+    expect(isoWeekBounds('2026-10-25')).toEqual({ start: '2026-10-19', end: '2026-10-25' });
+    expect(isoWeekBounds('2026-10-22')).toEqual({ start: '2026-10-19', end: '2026-10-25' });
+    // A week that straddles the new year keeps one range, so weekly progress cannot split in two.
+    expect(isoWeekBounds('2027-01-01')).toEqual({ start: '2026-12-28', end: '2027-01-03' });
+    for (const date of ['2026-01-01', '2026-10-19', '2026-10-25', '2027-01-01']) {
+      const { start, end } = isoWeekBounds(date);
+      expect(isoWeekId(start)).toBe(isoWeekId(date));
+      expect(isoWeekId(end)).toBe(isoWeekId(date));
+      expect(daysBetween(start, end)).toBe(6);
+    }
   });
 
   it('monthKey slices correctly', () => {

@@ -1,11 +1,11 @@
 /** Currency preference data. Amounts are integer minor units (2 decimals). */
 export const CURRENCIES = [
-  { code: 'PHP', name: 'Philippine peso', symbol: '₱' },
-  { code: 'USD', name: 'US dollar', symbol: '$' },
-  { code: 'EUR', name: 'Euro', symbol: '€' },
-  { code: 'GBP', name: 'British pound', symbol: '£' },
-  { code: 'SGD', name: 'Singapore dollar', symbol: 'S$' },
-  { code: 'INR', name: 'Indian rupee', symbol: '₹' },
+  { code: 'PHP', name: 'Philippine peso', symbol: '₱', subunit: 'centavos' },
+  { code: 'USD', name: 'US dollar', symbol: '$', subunit: 'cents' },
+  { code: 'EUR', name: 'Euro', symbol: '€', subunit: 'cents' },
+  { code: 'GBP', name: 'British pound', symbol: '£', subunit: 'pence' },
+  { code: 'SGD', name: 'Singapore dollar', symbol: 'S$', subunit: 'cents' },
+  { code: 'INR', name: 'Indian rupee', symbol: '₹', subunit: 'paise' },
 ] as const;
 
 export type Currency = (typeof CURRENCIES)[number];
@@ -25,6 +25,11 @@ export function getCurrency(code: CurrencyCode): Currency {
 
 export function currencySymbol(code: CurrencyCode): string {
   return getCurrency(code).symbol;
+}
+
+/** What one hundredth of the coin is called, so amount errors can be written in plain words. */
+export function currencySubunit(code: CurrencyCode): string {
+  return getCurrency(code).subunit;
 }
 
 export function formatMoney(minor: number, code: CurrencyCode): string {

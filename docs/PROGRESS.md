@@ -50,6 +50,8 @@ Last updated: 2026-10-25
       recurring-on-open. Browser IndexedDB itself stays a Gate 5 item.**
 - [ ] Gate 3 — Core screens in retro kit: onboarding, Today, Add, Envelopes, Goals, History,
       Settings, toasts/companion reactions.
+      **3a pure logic and 3b the data layer behind it are done and mutation-checked; the screens
+      themselves (3c) and their browser verification (3d) are not.**
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
       cosmetics/realm, weekly review, month summary, insights.
 - [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
@@ -507,7 +509,7 @@ New code, all RED-first: `src/data/{exportImport,lifecycle}.ts` and
   `activeDates` merges logged entries with check-in and no-spend events (a review is an event about a
   week, not a day of showing up).
 - **Latent bug found while writing the facts tests:** `spentInPeriod()` took a `periodId` string and
-  re-derived the period with the *default* start day, so any user with `periodStartDay` 15 got
+  re-derived the period with the _default_ start day, so any user with `periodStartDay` 15 got
   calendar-month totals. It now takes the period bounds (`{ start, end }`) and is covered by tests
   that place transactions before the 15th and after the close. Nothing else called it, so no other
   behaviour changed.
@@ -523,3 +525,60 @@ New code, all RED-first: `src/data/{exportImport,lifecycle}.ts` and
 - **Not possible here:** none of this is on screen yet. The species art is a part recipe, not a
   drawn sprite — Gate 4 renders it. Nothing calls `buildBudgetFacts` until Gate 3b wires the data
   layer to it.
+
+### Gate 3b — The data layer the screens read and write (2026-10-25)
+
+Five modules, written test-first, so a screen in Gate 3c never holds a transaction and never decides
+what a reward is worth.
+
+- **`data/onboard.ts`** — one call turns an empty device into a book: settings, a template's
+  envelopes, the companion, all inside a single `db.transaction`. It validates _before_ writing and
+  reports every problem at once, in the order the form asks for them, with the amount rule spoken in
+  the user's own coin (`Income must be a whole number of cents, got 12.5` — which is why
+  `core/currency.ts` grew `currencySubunit()`). A second call on a device that already has a
+  companion is refused rather than ignored. `periodStartDay` is capped at 28 so no month can be
+  given a start day that does not exist. `questSeed(db)` hashes the companion id, so two installs
+  get different daily offers from the same pure pool.
+- **`data/habits.ts`** — the screen actions that earn something: log an entry (with its goal
+  contribution and the one-time reach bonus), check in, declare a no-spend day, complete a review,
+  take the free daily oil, delete an entry. Each is one transaction, so an entry and its reward
+  always exist together; rewards are stamped with the day the _action_ happened, never the date
+  written on the entry, so back-dating cannot farm a quiet day's caps. Deleting refunds a goal but
+  floors the balance at zero and refuses a second delete of the same row.
+- **`data/factsStore.ts`** — the only way a screen gets `BudgetFacts`: reads the rows, works out the
+  period's carry-ins, computes rest tokens from `tokenGrants()` (never stored, so a device cannot
+  mint them), and hands the whole picture to the pure builder. `trackedSinceMonth` reads the first
+  logged entry _or_ the first check-in/no-spend, which is why `ACTIVITY_EVENT_TYPES` moved out of
+  `core/facts` and is now shared instead of defined twice.
+- **`data/questsStore.ts`** — `refreshQuests()` scores this install's six offers and writes one row
+  per period. Progress is a high-water mark: a quest that reached its target stays reached even when
+  the facts go quiet, so a claim cannot be lost by spending less on the second glance. `claimQuest()`
+  pays and stamps `claimedAt` in the same transaction, and refuses `unknown` / `in-progress` /
+  `already-claimed`.
+- **`data/achievementsStore.ts`** — `syncAchievements()` writes the badge and its reward in one
+  transaction and returns only what it newly unlocked, so the UI can toast what happened without
+  guessing. Idempotence comes from the ledger key (`ach:<id>`), not from a flag.
+- **`data/openJobs.ts`** — `runOpenJobs()` is the cold start in one call: recurring catch-up, then
+  close ended periods, then the free oil trickle, and only _then_ four fact windows (today, ISO week,
+  month, all history) so an entry generated on this open can finish a quest and pay a badge earned
+  while the app was shut. `core/dates.ts` gained `isoWeekBounds()` because the weekly quest needs the
+  Monday-to-Sunday range, not just the week id.
+- **Mutation checking, per module** (throwaway harnesses under `scripts/`, run then deleted, never
+  committed): onboard 13 mutants killed; `data/habits.ts` 12 of 12; `factsStore` 12 of 13 killed, the
+  survivor provably equivalent; questsStore 13 killed; achievementsStore every behaviour mutant
+  killed; openJobs 14 of 14. Six survivors were accusations against the code or the tests rather
+  than noise, and each is now closed. Two were dead code and were deleted — the redundant target
+  clamp in `refreshQuests` (every quest's own progress function already caps) and the
+  `if (earned.length === 0) return []` fast path in `syncAchievements`. One is equivalent: reading
+  deleted transactions into the facts changes nothing, because `buildBudgetFacts` filters `deletedAt`
+  itself. Three were real coverage gaps and needed new tests, not new code — a goal refund that
+  could go below zero, a second delete of the same entry double-refunding it, the oil trickle key
+  and the caller-named review week. Four more tests had to be rewritten when they passed for the
+  wrong reason: the two-install fixture handed the same companion id to both installs, the ISO-week
+  rollover count was arithmetic I had not checked, the fact-window test needed a start-day-15
+  fixture to discriminate at all, and the daily-window mutant needed a busy week against an empty
+  day before the window oracle could see the difference.
+- Verification: `npm run typecheck` **verified** clean; `npx vitest run` **verified** 477/477 across
+  51 files; `npm run lint` **verified** clean; `prettier --check .` **verified** clean. Atomicity is
+  **verified** only against `fake-indexeddb` — real IndexedDB rollback in a browser is a Gate 5 item.
+- **Not possible here:** nothing user-facing. No screen calls any of this yet — that is Gate 3c.

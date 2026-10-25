@@ -46,7 +46,8 @@ export interface FactsInput {
   };
 }
 
-const ACTIVITY_EVENT_TYPES = new Set(['checkin', 'nospend']);
+/** Reward types that also prove the day was used, and so start the book's token count. */
+export const ACTIVITY_EVENT_TYPES = new Set(['checkin', 'nospend']);
 
 export function buildBudgetFacts(input: FactsInput): BudgetFacts {
   const live = input.transactions.filter((t) => t.deletedAt === undefined);
