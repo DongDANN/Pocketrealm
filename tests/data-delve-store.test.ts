@@ -184,4 +184,23 @@ describe('delve batch store', () => {
     expect(await loadActiveRun(db)).toBeUndefined();
     expect((await loadRun(db, run.runId))?.result).toBe('retreated');
   });
+
+  it('refuses a batch that cannot say where the run stopped', async () => {
+    const meta = emptyMeta();
+    const run = newRun(13, 1, 4, meta);
+    const [first] = walk(run, meta, 200, 1);
+    expect(first).toBeDefined();
+
+    // A step index that is not a number never loses the `<=` comparison, so without a guard it is
+    // accepted and banks a row every later read inherits. A batch with no run id cannot be keyed.
+    await expect(
+      commitBatch(db, { ...first!.batch, run: { ...first!.batch.run, stepIndex: NaN } }),
+    ).rejects.toThrow(/step index/);
+    await expect(
+      commitBatch(db, { ...first!.batch, run: { ...first!.batch.run, runId: '' } }),
+    ).rejects.toThrow(/run id/);
+
+    await expect(db.delveRuns.count()).resolves.toBe(0);
+    expect(await loadMeta(db)).toBeNull();
+  });
 });

@@ -57,6 +57,7 @@ export async function commitBatch(db: PocketDb, batch: DelveBatch): Promise<Comm
 
   return db.transaction('rw', db.delveRuns, db.delveMeta, db.rewards, async () => {
     const previous = await db.delveRuns.get(run.runId);
+    // A run row only ever exists once the first batch landed, so an unseen run is at its start.
     const from = previous?.stepIndex ?? 0;
     if (run.stepIndex <= from) {
       return {
@@ -80,8 +81,10 @@ export async function commitBatch(db: PocketDb, batch: DelveBatch): Promise<Comm
     await db.delveRuns.put(row);
     await db.delveMeta.put({ key: META_KEY, value: meta, oil: clampOil(oil), updatedAt: now });
 
-    const specs = (batch.ledger ?? []).map((entry) => ({ ...entry, at: today }));
-    const results = await grantMany(db, specs);
+    const results = await grantMany(
+      db,
+      (batch.ledger ?? []).map((entry) => ({ ...entry, at: today })),
+    );
     return {
       applied: true,
       stepsApplied: run.stepIndex - from,

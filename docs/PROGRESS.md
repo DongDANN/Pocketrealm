@@ -44,10 +44,10 @@ Last updated: 2026-10-25
       Habit Cards, affixes, boss phases + Boss Study, boon levels/fusions/fair offers,
       Heat 1–5, Workshop consumables, milestone buildings, daily challenge, codex/mastery,
       worker catch-up, 10k fuzz, golden runs, Breaker persona.
-- [ ] Gate 2 — Data layer: Dexie schema/migrations, repositories, atomic Delve batches,
+- [x] Gate 2 — Data layer: Dexie schema/migrations, repositories, atomic Delve batches,
       export/import validation + auto-backup, ledger persistence, period close, recurring on open.
-      **2a/2b done (schema+migrations+repos+ledger+atomic batches); 2c export/import and 2d
-      period close / recurring-on-open still open.**
+      **2a/2b schema+migrations+repos+ledger+atomic batches, 2c export/import, 2d period close and
+      recurring-on-open. Browser IndexedDB itself stays a Gate 5 item.**
 - [ ] Gate 3 — Core screens in retro kit: onboarding, Today, Add, Envelopes, Goals, History,
       Settings, toasts/companion reactions.
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
@@ -406,9 +406,12 @@ New code, all RED-first: `src/data/{migrations,db,seed,repos,ledger,delveStore}.
   **one** Dexie transaction and refuses a batch whose `stepIndex` does not move forward
   (`duplicate` when equal, `stale` when lower), so a crash between engine and storage, or a replayed
   batch after a reload, applies a step exactly once and banks a reward exactly once. Proven by
-  mutation checks, not just by passing: neutralising the step-index guard fails the reopen test, and
-  unwrapping the transaction wrapper fails the rollback test (an injected `rewards.add` rejection
-  leaves the run row, the wallet and the ledger untouched).
+  mutation checks, not just by passing: unwrapping the transaction wrapper fails the rollback test
+  (an injected `rewards.add` rejection leaves the run row, the wallet and the ledger untouched), and
+  the reopen test fails when the `duplicate`/`stale` comparison is neutralised.
+  **Correction, kept on the record:** this section originally also claimed the non-numeric step-index
+  guard was covered by a mutation check. It was not — that guard had no test at all, which is how a
+  deleted copy of it survived in the working copy unnoticed. Gate 2c/2d below has the test-first fix.
 - Step-by-step commits land on **exactly** the same stored run, meta, oil and ledger keys as one
   merged batch of the same steps (`applySteps` for N steps vs N single-step batches, compared row
   for row) — the determinism rule from Gate 1.5 survives a round trip through IndexedDB.
@@ -423,6 +426,60 @@ New code, all RED-first: `src/data/{migrations,db,seed,repos,ledger,delveStore}.
   Dexie query/upgrade/transaction semantics but not a real browser's IndexedDB — quota-exceeded
   aborts, upgrade prompts with a second tab open, and `navigator.storage.persist()` behaviour are
   **not verified here** and are Gate 5 offline e2e work.
-- **Not done yet in Gate 2:** export/import with validation + auto-backup (2c), `closePeriod` and
-  generate-recurring-on-open (2d), and the `src/data/index.ts` barrel. The Gate 2 checklist box
-  stays unticked until those land.
+- **Not done yet in Gate 2 at the time:** export/import with validation + auto-backup (2c) and
+  `closeEndedPeriods` + generate-recurring-on-open (2d). Those landed next, in the same day — see
+  Gate 2c/2d below.
+- **No `src/data/index.ts` barrel:** `src/core` has no barrel either, so every consumer imports the
+  module it needs. Adding one would be an unused second way to import the same things.
+
+### Gate 2c/2d — Export/import, period close, recurring on open (2026-10-25)
+
+New code, all RED-first: `src/data/{exportImport,lifecycle}.ts` and
+`tests/{data-export-import,data-lifecycle}.test.ts` (27 new tests).
+
+- **Export** writes every table except `backups` (a snapshot must not carry its own history) with
+  `app`, `schemaVersion`, `appVersion` and `exportedAt` on the front, as readable 2-space JSON.
+- **Import validates the whole file before it opens a transaction**, per table, with zod: primary
+  keys, indexes, enums, date shape, and money as integer minor units — `amount: 12.5` is refused as
+  corruption, not rounded. Problems come back as `tables.transactions[1].amount` style paths because
+  "your file is invalid" is not something a person can act on. A newer `schemaVersion`, a foreign
+  `app`, an unknown table name and non-JSON text are each refused with nothing written.
+- The backup and every write share **one** transaction, so a replace either lands whole or not at
+  all: a `pre-import` snapshot of the rows that were there is written inside the same commit, and a
+  failure halfway rolls both the data and that backup row back. A rejected file leaves `backups`
+  empty, so the Settings screen cannot fill itself with orphaned snapshots.
+- Merge is **local-wins**: a row whose primary key already exists is skipped, never overwritten, and
+  a merge is backed up too because it changes data just as a replace does. Compound primary keys
+  (`questProgress` is `[questId, periodId]`) are handled through `table.schema.primKey.keyPath`.
+- `closeEndedPeriods()` walks back from the current period and closes every ended period that has no
+  stored summary, oldest first, keyed by `periodId` (= the period's start date) so re-running is
+  inert. Carry-in is derived from the previously stored `PeriodSummary` rather than a balance table —
+  one source of truth, and it cannot disagree with the summary the user was shown. `sweep-to-goal`
+  surpluses are applied to `goal.saved` in the same transaction.
+- **The backwards walk is bounded by the data, not the calendar.** The first version bounded only by
+  "period ended before today", so a fresh open invented 240 empty months going back to 2006. It now
+  stops at the oldest transaction date (deleted rows count: they still prove a month existed, and
+  `closePlan` is what ignores them in the numbers) and at the first already-closed period.
+- `generateRecurringOnOpen()` writes every missed occurrence from one open in a single transaction,
+  is idempotent by `occurrenceKey` (`rec:<ruleId>:<date>`), leaves an occurrence the user logged by
+  hand alone, does not resurrect one they deleted, and only then advances `lastGenerated`.
+- **Two vacuous tests found by mutation checks and rewritten** — the honest part of this gate:
+  1. the recurring atomicity test faked the first `transactions.add` instead of letting it land, so
+     "nothing was written" was true with or without the transaction. It now calls through to the real
+     `add` on the first write and fails (`expected 1 to be +0`) when the transaction is unwrapped;
+  2. the import rollback test first spied on `target.transactions.put`, which is a different handle
+     from the `db.table(name)` the importer writes through, so the injected error never fired and the
+     import reported `ok: true`. Spying on `db.table('transactions')` makes it real; unwrapping the
+     import transaction now fails that test.
+- **One leftover mutation artifact repaired:** while mutation-checking, the
+  `Number.isFinite(run.stepIndex)` guard in `commitBatch()` had been deleted and left deleted in the
+  working copy. Instead of restoring it on faith, a test was written first and watched to fail
+  (`promise resolved "{ applied: true, …(2) }" instead of rejecting`): a `NaN` step index never loses
+  the `<=` comparison, so without the guard a corrupt row is banked and every later read inherits it.
+  The guard was then restored, plus the same test pins the empty-`runId` refusal.
+- Verification: `npm run typecheck` **verified** clean; `npm test` **verified** 376/376 across 41
+  files; `npm run lint` **verified** clean; `prettier --check .` **verified** clean.
+- **Partially verified:** the period-close and recurring jobs are tested against `fake-indexeddb`,
+  which exercises the transaction semantics but not a real browser's quota/abort behaviour. The
+  on-open orchestration (who calls these, in what order, with what UI feedback) is Gate 3/5 work —
+  the functions exist and are proven; nothing calls them yet.
