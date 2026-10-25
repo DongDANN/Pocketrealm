@@ -14,6 +14,7 @@ import {
   offerRng,
 } from './autopilot';
 import { BASE_MODIFIERS, computeModifiers, companionBase, runCombat } from './combat';
+import { affixById } from './data/affixes';
 import { buildById, DEFAULT_BUILD } from './data/builds';
 import { boonById, RELICS, type Boon } from './data/boons';
 import { BOSSES } from './data/enemies';
@@ -63,6 +64,7 @@ export function emptyMeta(): DelveMeta {
     clearedHollows: [],
     builds: {},
     knownWeaknesses: [],
+    bossKnowledge: [],
     cards: [],
     bestFloor: {},
     forge: {},
@@ -200,11 +202,18 @@ function needsFork(run: RunState): boolean {
 }
 
 function forkOptions(row: readonly RoomDef[]): ChoiceOption[] {
-  return row.map((r) => ({
-    id: r.id,
-    label: roomLabel(r),
-    detail: r.enemies.length > 0 ? `Enemies: ${r.enemies.length}` : undefined,
-  }));
+  return row.map((r) => {
+    const parts: string[] = [];
+    if (r.enemies.length > 0) parts.push(`Enemies: ${r.enemies.length}`);
+    if (r.affixes && r.affixes.length > 0) {
+      parts.push(r.affixes.map((id) => affixById(id)?.name ?? id).join(' + '));
+    }
+    return {
+      id: r.id,
+      label: roomLabel(r),
+      detail: parts.length > 0 ? parts.join(' · ') : undefined,
+    };
+  });
 }
 
 function floorStartGlint(run: RunState, forge: Record<string, number>): number {
@@ -469,7 +478,14 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   if (room.kind === 'skirmish' || room.kind === 'elite' || room.kind === 'boss') {
     const buffs = computeBuffs(ctx.signals);
     const mods = computeModifiers(next, forge, buffs);
-    const result = runCombat(next, room, mods, next.floor, ctx.meta.knownWeaknesses ?? []);
+    const result = runCombat(
+      next,
+      room,
+      mods,
+      next.floor,
+      ctx.meta.knownWeaknesses ?? [],
+      ctx.meta.bossKnowledge ?? [],
+    );
     next = { ...next, log: [...next.log, ...result.log] };
     if (result.drawn) {
       const ended = endRun(
@@ -481,12 +497,25 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
       return { run: ended.run, meta: ended.meta, ledger, oilSpent: 1, ended: true };
     }
     if (!result.won) {
-      const ended = endRun(
-        { ...next, unit: { ...next.unit, hp: 0 } },
-        ctx.meta,
-        'fainted',
-        ctx.today,
-      );
+      // Boss Study: fainting to a boss permanently reveals its weakness and tells.
+      let faintMeta = ctx.meta;
+      let faintRun = { ...next, unit: { ...next.unit, hp: 0 } };
+      if (room.kind === 'boss' && room.enemies.length > 0) {
+        const boss = BOSSES.find((b) => b.id === room.enemies[0]);
+        if (boss) {
+          faintMeta = {
+            ...faintMeta,
+            bossKnowledge: [...new Set([...faintMeta.bossKnowledge, boss.id])],
+            knownWeaknesses: [...new Set([...faintMeta.knownWeaknesses, boss.weakness])],
+          };
+          faintRun = pushLog(
+            faintRun,
+            'info',
+            `Boss Study: ${boss.name}'s weakness and tells revealed.`,
+          );
+        }
+      }
+      const ended = endRun(faintRun, faintMeta, 'fainted', ctx.today);
       return { run: ended.run, meta: ended.meta, ledger, oilSpent: 1, ended: true };
     }
     next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };

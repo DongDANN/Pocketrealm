@@ -10,6 +10,7 @@ export * from './catchup';
 export * from './engine';
 export { BOONS, RELICS, boonById, relicById, RARITY_WEIGHT } from './data/boons';
 export { ENEMIES, ELITES, BOSSES, enemyById, scaledStats } from './data/enemies';
+export { AFFIXES, affixById } from './data/affixes';
 export { EVENTS, eventsForHollow } from './data/events';
 export {
   BUILDS,

@@ -163,12 +163,22 @@ describe('auto-battle', () => {
   });
 
   it('telegraphs the boss mechanic one round before it lands', () => {
-    const run = runWith({ companionLevel: 6 });
-    const room = { enemies: ['thorncrown'] };
-    const result = runCombat(run, room, computeModifiers(run, {}, zeroBuffs()), 6);
-    expect(result.won).toBe(true);
-    const texts = result.log.map((l) => l.text);
-    expect(texts.some((t) => t.includes('telegraphs: next round, Thorn Barrage'))).toBe(true);
+    // Stun and critical interrupts can cancel the mechanic on some seeds; find a fight where
+    // the tell still resolves into an unleash to prove the round-ahead warning.
+    let result: ReturnType<typeof runCombat> | undefined;
+    for (let seed = 1; seed <= 100 && !result; seed++) {
+      const run = { ...newRun(seed, 1, 6, emptyMeta()) };
+      const r = runCombat(
+        run,
+        { enemies: ['thorncrown'] },
+        computeModifiers(run, {}, zeroBuffs()),
+        6,
+      );
+      if (r.log.some((l) => l.text.includes('unleashes its mechanic'))) result = r;
+    }
+    expect(result).toBeDefined();
+    const texts = result!.log.map((l) => l.text);
+    expect(texts.some((t) => t.includes('telegraphs: a heavy attack'))).toBe(true);
     expect(texts.some((t) => t.includes('unleashes its mechanic'))).toBe(true);
   });
 

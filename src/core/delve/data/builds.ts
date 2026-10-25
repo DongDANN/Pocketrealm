@@ -35,6 +35,8 @@ export interface SkillHitFx {
   bonusCrit?: number;
   /** Damage multiplier when the target is already burning. */
   bonusIfBurning?: number;
+  /** A critical hit with this skill cancels a boss's telegraphed mechanic. */
+  interruptsTelegraph?: boolean;
 }
 
 export type PassiveFx =
@@ -111,8 +113,8 @@ export const BUILDS: readonly BuildDef[] = [
         energyCost: 4,
         cooldown: 4,
         power: 1.05,
-        effect: 'A steady strike that gains Shield equal to a quarter of the damage dealt.',
-        fx: { shieldPercent: 0.25 },
+        effect: 'A steady frost strike that gains Shield and briefly Chills the target.',
+        fx: { shieldPercent: 0.25, status: 'chill', statusDuration: 2 },
       },
       {
         id: 'warden-shieldbash',
@@ -123,8 +125,8 @@ export const BUILDS: readonly BuildDef[] = [
         energyCost: 4,
         cooldown: 4,
         power: 1.15,
-        effect: 'A heavy bash that briefly Chills the target.',
-        fx: { status: 'chill', statusDuration: 2 },
+        effect: 'A heavy bash that can Stun; a critical bash interrupts boss telegraphs.',
+        fx: { status: 'stun', statusDuration: 1, interruptsTelegraph: true },
       },
       {
         id: 'warden-steadfast',
@@ -191,8 +193,9 @@ export const BUILDS: readonly BuildDef[] = [
         energyCost: 3,
         cooldown: 2,
         power: 1.5,
-        effect: 'A bright burst that Burns the target.',
-        fx: { status: 'burn', statusDuration: 3 },
+        effect:
+          'A bright burst that Burns the target; a critical Flare interrupts boss telegraphs.',
+        fx: { status: 'burn', statusDuration: 3, interruptsTelegraph: true },
       },
       {
         id: 'spark-kindling',
@@ -271,8 +274,8 @@ export const BUILDS: readonly BuildDef[] = [
         energyCost: 4,
         cooldown: 4,
         power: 1.4,
-        effect: 'A fast swipe that often crits.',
-        fx: { bonusCrit: 30 },
+        effect: 'A fast swipe that often crits; a critical swipe interrupts boss telegraphs.',
+        fx: { bonusCrit: 30, interruptsTelegraph: true },
       },
       {
         id: 'broker-bargain',

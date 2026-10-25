@@ -28,13 +28,25 @@ export interface EliteDef extends EnemyDef {
   elite: true;
 }
 
+export interface BossPhase {
+  /** Boss enters this phase when its HP first reaches this percent of max. */
+  hpPercent: number;
+  name: string;
+  /** Study-only detail: shown in the phase log once the boss is studied. */
+  detail: string;
+  /** Mechanic damage multiplier while in this phase. */
+  mechanicMultiplier: number;
+}
+
 export interface BossDef extends EnemyDef {
   boss: true;
-  /** Readable mechanic, telegraphed one round ahead. */
+  /** Readable mechanic, telegraphed one round ahead (name revealed only when studied). */
   mechanic: string;
   /** Every N rounds the boss uses its heavy mechanic attack. */
   mechanicEvery: number;
   mechanicMultiplier: number;
+  /** HP-threshold phases, first to last. */
+  phases?: BossPhase[];
 }
 
 export const ENEMIES: readonly EnemyDef[] = [
@@ -43,7 +55,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Tollbug',
     hollow: 1,
     hp: 25,
-    atk: 8,
+    atk: 9,
     def: 2,
     spd: 6,
     luck: 3,
@@ -56,7 +68,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Mossbite',
     hollow: 1,
     hp: 21,
-    atk: 7,
+    atk: 8,
     def: 1,
     spd: 8,
     luck: 2,
@@ -69,7 +81,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Rootsnarl',
     hollow: 1,
     hp: 33,
-    atk: 11,
+    atk: 12,
     def: 4,
     spd: 4,
     luck: 2,
@@ -82,7 +94,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Sparkmoth',
     hollow: 1,
     hp: 18,
-    atk: 12,
+    atk: 13,
     def: 1,
     spd: 10,
     luck: 6,
@@ -240,6 +252,20 @@ export const BOSSES: readonly BossDef[] = [
     mechanic: 'Thorn Barrage: a heavy volley every 4 rounds (telegraphed the round before).',
     mechanicEvery: 4,
     mechanicMultiplier: 1.3,
+    phases: [
+      {
+        hpPercent: 66,
+        name: 'Bramble Armor',
+        detail: 'her thorns thicken and the barrage hits harder.',
+        mechanicMultiplier: 1.5,
+      },
+      {
+        hpPercent: 33,
+        name: 'Thorn Frenzy',
+        detail: 'she throws everything left; the barrage hits much harder.',
+        mechanicMultiplier: 1.8,
+      },
+    ],
   },
   {
     id: 'ashwrought',
@@ -258,6 +284,20 @@ export const BOSSES: readonly BossDef[] = [
     mechanic: 'Slag Wave: every 5 rounds it hardens, then slams (telegraphed; guard softens it).',
     mechanicEvery: 5,
     mechanicMultiplier: 1.4,
+    phases: [
+      {
+        hpPercent: 66,
+        name: 'Molten Shell',
+        detail: 'its plating runs bright; the slam hits harder.',
+        mechanicMultiplier: 1.6,
+      },
+      {
+        hpPercent: 33,
+        name: 'Cold Forge',
+        detail: 'the dead fire stokes one last time; the slam hits much harder.',
+        mechanicMultiplier: 1.9,
+      },
+    ],
   },
   {
     id: 'umbralmonarch',
@@ -276,6 +316,20 @@ export const BOSSES: readonly BossDef[] = [
     mechanic: 'Siphon: every 5 rounds it drinks the next hit back as health (telegraphed).',
     mechanicEvery: 5,
     mechanicMultiplier: 1.4,
+    phases: [
+      {
+        hpPercent: 66,
+        name: 'Starless Crown',
+        detail: 'the crown closes; the siphon pulls harder.',
+        mechanicMultiplier: 1.6,
+      },
+      {
+        hpPercent: 33,
+        name: 'Devouring Dark',
+        detail: 'the dark between floors opens wide; the siphon pulls much harder.',
+        mechanicMultiplier: 1.9,
+      },
+    ],
   },
 ];
 

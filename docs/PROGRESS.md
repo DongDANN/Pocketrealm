@@ -169,11 +169,11 @@ Verification:
 §6.10 targets vs measured (5 seeds averaged, Autopilot: balanced route, retreat ≤50% HP,
 boss gates H1≥3 / H2≥6 / H3≥8):
 
-| Target (§6.10) | Trickle | Casual | Habit | Optimizer |
-| --- | --- | --- | --- | --- |
-| H1 clear: 14–21d / 5–8d / 3–5d / ≥2d | 12d | 7d | 4d | 4d |
-| First-attempt faint "about 25–40%" | 26% | 38% | 27% | 22% |
-| Optimizer ≤2.5× Trickle Embers/day | — | — | — | 1.86× |
+| Target (§6.10)                       | Trickle | Casual | Habit | Optimizer |
+| ------------------------------------ | ------- | ------ | ----- | --------- |
+| H1 clear: 14–21d / 5–8d / 3–5d / ≥2d | 12d     | 7d     | 4d    | 4d        |
+| First-attempt faint "about 25–40%"   | 26%     | 38%    | 27%   | 22%       |
+| Optimizer ≤2.5× Trickle Embers/day   | —       | —      | —     | 1.86×     |
 
 H2 first clears: optimizer 23d, habit 30d, casual 42d, trickle 59d. H3: optimizer 50d (no faints
 on first-clear attempts after the scale cap; the deep-hollow numbers have tiny samples and are
@@ -219,3 +219,27 @@ Verification:
 - `npm run typecheck` — **verified** clean.
 - `npm test` — **verified** 202/202 across 21 files.
 - `npm run lint` / `npm run format:check` — **verified** clean.
+
+### Gate 1.6c — Affixes, boss phases, Boss Study (2026-10-25)
+
+Built: 8 affixes (Armored +30% DEF, Swift +2 SPD, Vampiric heals half of damage dealt, Splitting
+spawns one half-HP copy on death, Enraged +50% ATK below 30% HP, Thorned reflects 2 per hit,
+Warded starts with 8 Shield, Frenzied strikes twice per round) placed by the floor generator:
+none through floor 3, at most 1 on ordinaries after floor 3 (30% of skirmishes), 1-2 on elites,
+never on bosses; the plan carries affix ids so the map shows elite affixes before you commit.
+Bosses enter harder phases at 66% and 33% HP (mechanic multiplier 1.3/1.5/1.8-style ramps per
+boss) with three counters to telegraphed mechanics: guard-role skills halve the incoming blow,
+a stun during the telegraph interrupts it, and critical Shield Bash / Flare / Glint Swipe cancel
+it. Bastion now Chills (frost) and Shield Bash Stuns (gale) so both statuses exist in combat.
+Boss Study: fainting to a boss permanently records its weakness in the codex and reveals its
+mechanic and phase names in tells; boss stats never change from failures. H1 ordinaries got a
+second +1 ATK to offset the new defensive statuses and keep persona faint rates in the spec band.
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 223/223 across 23 files.
+- `npm run lint` / `npm run format:check` — **verified** clean.
+- `npm run sim:delve -- --days 60` — **verified** after retuning: H1 first clears 17d/7d/4d/4d
+  (Trickle/Casual/Habit/Optimizer) inside all §6.10 windows; first-attempt H1 faints 23/30/32/37
+  (spec target 25-40%); Optimizer/Trickle Embers ratio 2.16x (cap 2.75).

@@ -137,6 +137,8 @@ export interface DelveMeta {
   builds: Record<string, { tree: string[]; spent: number }>;
   /** Elements whose weaknesses the codex has revealed (+25% damage applies). */
   knownWeaknesses: Element[];
+  /** Bosses studied by fainting to them: their weakness and tells are permanently revealed. */
+  bossKnowledge: string[];
   /** Equipped Habit Cards (max 3, priority top to bottom). */
   cards: string[];
   bestFloor: Partial<Record<HollowId, number>>;

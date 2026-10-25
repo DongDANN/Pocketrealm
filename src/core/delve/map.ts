@@ -6,6 +6,7 @@
  */
 
 import { hashCombine, hashString, mulberry32 } from '../rng';
+import { AFFIXES } from './data/affixes';
 import { BOSSES, ELITES, ENEMIES } from './data/enemies';
 import type { FloorPlan, HollowId, RoomDef, RoomKind } from './types';
 
@@ -40,6 +41,25 @@ function weightedKind(rng: { int(n: number): number }, floor: number): RoomKind 
   return 'skirmish';
 }
 
+/** Affix rolls: none through floor 3, at most 1 on ordinaries, 1-2 on elites, never bosses. */
+function pickAffixes(rng: { int(n: number): number }, kind: RoomKind, floor: number): string[] {
+  if (kind === 'elite') {
+    const count = 1 + rng.int(2);
+    const pool = AFFIXES.map((a) => a.id);
+    const out: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const pick = pool[rng.int(pool.length)]!;
+      pool.splice(pool.indexOf(pick), 1);
+      out.push(pick);
+    }
+    return out;
+  }
+  if (kind === 'skirmish' && floor >= 4 && rng.int(100) < 30) {
+    return [AFFIXES[rng.int(AFFIXES.length)]!.id];
+  }
+  return [];
+}
+
 export function generateFloor(userSeed: number, hollowId: HollowId, floor: number): FloorPlan {
   const rng = mulberry32(floorSeed(userSeed, hollowId, floor));
   const rows = 3 + rng.int(3); // 3..5
@@ -69,6 +89,7 @@ export function generateFloor(userSeed: number, hollowId: HollowId, floor: numbe
         id: `f${floor}r${r}c${c}`,
         kind,
         enemies: enemiesOf(kind),
+        affixes: pickAffixes(rng, kind, floor),
         optionSeed: rng.next(),
       });
     }

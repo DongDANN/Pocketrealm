@@ -6,7 +6,10 @@
  * Gate 1.6 layers: the selected build supplies two active skills (energy, cooldowns) and a
  * passive; statuses (burn/poison/chill/stun/mark/regen) tick every round and clear after combat;
  * skill attacks carry an element and hit ±25% weakness/resistance (weakness only once the codex
- * knows it, resistance always).
+ * knows it, resistance always). Affixes (armored/swift/vampiric/splitting/enraged/thorned/
+ * warded/frenzied) modify enemy stats and behavior; bosses enter harder phases at 66%/33% HP
+ * with three counters to telegraphed mechanics: guard skills halve them, stun interrupts them,
+ * and critical interrupts-telegraph skills cancel them. Boss Study reveals names and tells.
  */
 
 import { hashCombine, hashString, mulberry32, type Rng } from '../rng';
@@ -251,9 +254,14 @@ interface EnemyState {
   elite: boolean;
   bossId?: string;
   turn: number;
+  /** Boss phase index reached so far (0 = phase 1). */
+  phaseIndex: number;
   element?: Element;
   weakness: Element;
   resistance: Element;
+  affixes: string[];
+  /** True once a Splitting enemy has spawned its copy. */
+  split: boolean;
   statuses: StatusInstance[];
   turnsSinceStun: number;
 }
@@ -276,10 +284,11 @@ function skillMultiplier(
 /** Run one deterministic battle. Companion casts ready skills (most expensive first), else basics. */
 export function runCombat(
   run: RunState,
-  room: { enemies: string[] },
+  room: { enemies: string[]; affixes?: string[] },
   modifiers: CombatModifiers,
   floor: number,
   knownWeaknesses: readonly Element[] = [],
+  studiedBosses: readonly string[] = [],
 ): CombatResult {
   const rng = combatRng(run.runId, run.stepIndex);
   const log: RunLogEntry[] = [];
@@ -287,6 +296,7 @@ export function runCombat(
   const logLine = (text: string): void => {
     log.push({ step, type: 'combat', text });
   };
+  const studied = (id: string): boolean => studiedBosses.includes(id);
 
   const build = buildById(run.buildId) ?? buildById(DEFAULT_BUILD)!;
   const actives = build.skills.filter((s): s is SkillDef => s.kind === 'active');
@@ -309,26 +319,34 @@ export function runCombat(
   const cooldowns: Record<string, number> = {};
   let statuses: StatusInstance[] = [];
 
+  const roomAffixes = room.affixes ?? [];
   const enemies: EnemyState[] = room.enemies.map((id, i) => {
     const def = enemyById(id)!;
     const elite = ELITES.some((e) => e.id === id);
     const boss = BOSSES.find((e) => e.id === id);
     const s = scaledStats(def, floor, elite, boss !== undefined);
+    const affixes = boss ? [] : roomAffixes;
+    const armored = affixes.includes('armored');
     return {
       id: `${id}#${i}`,
       name: def.name,
       hp: s.hp,
       maxHp: s.hp,
       atk: s.atk,
-      def: s.def,
-      spd: s.spd,
+      def: armored ? s.def + Math.max(1, Math.round(s.def * 0.3)) : s.def,
+      spd: s.spd + (affixes.includes('swift') ? 2 : 0),
       elite,
       bossId: boss?.id,
       turn: 0,
+      phaseIndex: 0,
       element: def.element,
       weakness: def.weakness,
       resistance: def.resistance,
-      statuses: [],
+      affixes,
+      split: false,
+      statuses: affixes.includes('warded')
+        ? [{ id: 'shield', stacks: 8, duration: Number.POSITIVE_INFINITY }]
+        : [],
       turnsSinceStun: STUN_RESIST_GRACE,
     };
   });
@@ -341,6 +359,37 @@ export function runCombat(
   const markMultOf = (target: EnemyState): number =>
     hasStatus(target.statuses, 'mark') ? (statusById('mark')!.perRound!.dmgTakenMult ?? 1) : 1;
 
+  /** Advance boss phases as HP crosses thresholds; studied bosses are named, others hidden. */
+  function applyPhases(e: EnemyState): void {
+    const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
+    if (!boss?.phases || e.phaseIndex >= boss.phases.length) return;
+    while (e.phaseIndex < boss.phases.length) {
+      const p = boss.phases[e.phaseIndex]!;
+      if (e.hp > Math.floor((e.maxHp * p.hpPercent) / 100)) break;
+      e.phaseIndex += 1;
+      logLine(
+        studied(boss.id) ? `${e.name} enters ${p.name} — ${p.detail}!` : `${e.name} shifts stance!`,
+      );
+    }
+  }
+
+  /** Splitting: on death, spawn one copy at half max HP (once). */
+  function maybeSplit(e: EnemyState): void {
+    if (!e.affixes.includes('splitting') || e.split) return;
+    e.split = true;
+    const half = Math.max(1, Math.round(e.maxHp / 2));
+    enemies.push({
+      ...e,
+      id: `${e.id}#${enemies.length}`,
+      hp: half,
+      maxHp: half,
+      statuses: [],
+      affixes: e.affixes.filter((a) => a !== 'splitting'),
+      split: false,
+    });
+    logLine(`${e.name} splits into a lesser copy!`);
+  }
+
   const hitEnemy = (target: EnemyState, dmgIn: number, crit: boolean, skill?: SkillDef): void => {
     let dmg = dmgIn;
     const fx = skill?.fx;
@@ -351,6 +400,14 @@ export function runCombat(
       dmg * markMultOf(target) * (skill ? skillMultiplier(target, skill, knownWeaknesses) : 1),
     );
     if (target.elite) dmg = Math.round((dmg * (100 + modifiers.eliteDamageBonus)) / 100);
+    const absorbed = Math.min(statusShield(target.statuses), dmg);
+    if (absorbed > 0) {
+      dmg -= absorbed;
+      target.statuses = target.statuses
+        .map((s) => (s.id === 'shield' ? { ...s, stacks: s.stacks - absorbed } : s))
+        .filter((s) => s.stacks > 0);
+      logLine(`${target.name}'s shield absorbs ${absorbed}.`);
+    }
     target.hp -= dmg;
     const label = skill ? `use ${skill.name} (${skill.element}) and hit` : 'hit';
     logLine(`${crit ? 'CRIT! ' : ''}You ${label} ${target.name} for ${dmg}.`);
@@ -381,10 +438,33 @@ export function runCombat(
         logLine(`${target.name} gains Burn.`);
       }
     }
-    if (target.hp <= 0) logLine(`${target.name} falls.`);
+    if (
+      bossTelegraph &&
+      target.bossId &&
+      crit &&
+      skill &&
+      fx &&
+      !isPassiveFx(fx) &&
+      fx.interruptsTelegraph
+    ) {
+      bossTelegraph = false;
+      guardActive = false;
+      logLine(`${skill.name} interrupts the telegraph!`);
+    }
+    if (target.affixes.includes('thorned') && dmg > 0 && target.hp > 0) {
+      hp -= 2;
+      logLine(`${target.name}'s thorns cut you for 2.`);
+    }
+    applyPhases(target);
+    if (target.hp <= 0) {
+      logLine(`${target.name} falls.`);
+      maybeSplit(target);
+    }
   };
 
   let bossTelegraph = false;
+  /** True when a guard skill was cast during the current telegraph window. */
+  let guardActive = false;
   let round = 1;
 
   for (; round <= ROUND_CAP; round++) {
@@ -464,6 +544,10 @@ export function runCombat(
         if (chosen) {
           energy -= chosen.energyCost ?? 1;
           cooldowns[chosen.id] = chosen.cooldown ?? 1;
+          if (bossTelegraph && chosen.role === 'guard') {
+            guardActive = true;
+            logLine('You brace your guard.');
+          }
           const fx = chosen.fx;
           const bonusCrit = fx && !isPassiveFx(fx) ? (fx.bonusCrit ?? 0) : 0;
           const roll = rollDamage(
@@ -495,14 +579,27 @@ export function runCombat(
         e.statuses = e.statuses.filter((s) => s.id !== 'stun');
         e.turnsSinceStun = 0;
         e.turn += 1;
-        logLine(`${e.name} is stunned and loses its turn.`);
+        if (bossTelegraph) {
+          bossTelegraph = false;
+          guardActive = false;
+          logLine(`${e.name} is stunned — the mechanic is interrupted!`);
+        } else {
+          logLine(`${e.name} is stunned and loses its turn.`);
+        }
         continue;
       }
       e.turn += 1;
       const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
       if (boss && e.turn % boss.mechanicEvery === 0) {
         if (bossTelegraph) {
-          const raw = Math.max(1, Math.round(e.atk * boss.mechanicMultiplier) + 2 - def);
+          const phase = boss.phases && e.phaseIndex > 0 ? boss.phases[e.phaseIndex - 1] : undefined;
+          const mult = phase?.mechanicMultiplier ?? boss.mechanicMultiplier;
+          let raw = Math.max(1, Math.round(e.atk * mult) + 2 - def);
+          if (guardActive) {
+            raw = Math.round(raw / 2);
+            logLine('Your guard softens the blow.');
+          }
+          guardActive = false;
           const reduced = Math.round((raw * (100 - modifiers.damageReduction)) / 100);
           const absorbed = Math.min(shield, reduced);
           shield -= absorbed;
@@ -513,11 +610,17 @@ export function runCombat(
           bossTelegraph = false;
         } else {
           bossTelegraph = true;
-          logLine(`${e.name} telegraphs: next round, ${boss.mechanic}!`);
+          logLine(
+            studied(boss.id)
+              ? `${e.name} telegraphs: next round, ${boss.mechanic}!`
+              : `${e.name} telegraphs: a heavy attack is coming next round!`,
+          );
         }
         continue;
       }
-      const roll = rollDamage(rng, e.atk, def, 0, 0, 1);
+      const enraged = e.affixes.includes('enraged') && e.hp * 100 < e.maxHp * 30;
+      const atkNow = enraged ? Math.round(e.atk * 1.5) : e.atk;
+      const roll = rollDamage(rng, atkNow, def, 0, 0, 1);
       const reduced = Math.round((roll.dmg * (100 - modifiers.damageReduction)) / 100);
       const absorbed = Math.min(shield, reduced);
       shield -= absorbed;
@@ -526,11 +629,28 @@ export function runCombat(
       logLine(
         `${e.name} hits for ${reduced - absorbed}${absorbed > 0 ? ` (shield absorbs ${absorbed})` : ''}.`,
       );
+      if (e.affixes.includes('vampiric') && reduced - absorbed > 0) {
+        const drain = Math.max(1, Math.round((reduced - absorbed) / 2));
+        e.hp = Math.min(e.maxHp, e.hp + drain);
+        logLine(`${e.name} drains ${drain} HP.`);
+      }
+      if (e.affixes.includes('frenzied') && e.hp > 0 && hp > 0) {
+        const roll2 = rollDamage(rng, Math.max(1, Math.round(atkNow * 0.6)), def, 0, 0, 1);
+        const reduced2 = Math.round((roll2.dmg * (100 - modifiers.damageReduction)) / 100);
+        const absorbed2 = Math.min(shield, reduced2);
+        shield -= absorbed2;
+        hp -= reduced2 - absorbed2;
+        energy += 1;
+        logLine(
+          `${e.name} strikes again for ${reduced2 - absorbed2}${absorbed2 > 0 ? ` (shield absorbs ${absorbed2})` : ''}.`,
+        );
+      }
     }
     if (enemies.every((e) => e.hp <= 0) || hp <= 0) break;
 
     // End-of-round ticks: dots/hots fire, durations decrement, cooldowns tick down.
-    for (const e of enemies) {
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i]!;
       if (e.hp <= 0) continue;
       for (const s of e.statuses) {
         const defn: StatusDef = statusById(s.id)!;
@@ -548,7 +668,11 @@ export function runCombat(
           logLine(`${e.name} regenerates ${heal} HP.`);
         }
       }
-      if (e.hp <= 0) logLine(`${e.name} falls.`);
+      applyPhases(e);
+      if (e.hp <= 0) {
+        logLine(`${e.name} falls.`);
+        maybeSplit(e);
+      }
       e.statuses = e.statuses
         .map((s) => ({ ...s, duration: s.id === 'stun' ? s.duration : s.duration - 1 }))
         .filter((s) => s.id === 'stun' || s.duration > 0);
