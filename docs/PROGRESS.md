@@ -859,3 +859,60 @@ after a touch.
   pleasant are MANUAL_TEST items. iOS Safari's autoplay policy and a real device's resume-after-
   background behaviour are untested. Haptics, the Delve scene art (4c-3) and the Canvas battle scene
   (4c-4) are still open.
+
+### Gate 4c-3 — Sixteen species and nineteen glyphs, generated and measured (2026-10-26)
+
+The bestiary had ten ordinary enemies, three elites and three bosses in the rule tables and one sprite
+between them. Now every species has four animation sets, and the roster is generated from recipes
+instead of drawn by hand — because the thing that had to be provable was not "is this sprite good" but
+"is any of this a clone".
+
+- **The rig (`src/art/critters.ts`):** one `CritterRecipe` per species — archetype
+  (`crawler | blob | rootfist | floater | beast | husk`), `shape` (three proportion builds per
+  archetype), `bulk`, limb count, palette, one readable `mark`, `lord`. Six painters share the same
+  32×32 canvas and four pose tables (IDLE 4 / ATTACK 5 / HURT 3 / FAINT 3). `enemyFrames(id)` is the
+  only lookup a scene should need; frames are cached and are pure functions of the recipe. The
+  Tollbug stays hand-authored — it is the one sprite the owner approved at Gate 0.5, and it comes back
+  byte-for-byte.
+- **Three rules moved into code** (`docs/ART_NOTES.md` has the reasoning): `limb()` makes every
+  appendage two pixels thick; every finished silhouette gets one ink outline plus an upper-left rim
+  light, because a violet or ink body on the Hollow's near-black ground otherwise reads as a hole; and
+  marks anchor to painted pixels via `topAt`/`bottomAt`/`inside`, so a crown sits on the head it
+  belongs to. `dissolve()` in `src/art/px.ts` thins a death animation by dropping hashed pixels instead
+  of fading to grey, which keeps the palette lock until the last pixel goes.
+- **The bug eyes could not see.** Pass 3 of the review looked fine and measured worse: `emberjaw` and
+  `umbraclaw` were **0.0%** apart in silhouette — same archetype, same proportions, different colours.
+  A contact sheet with one colour per row cannot show that, and neither can a reviewer. `shape` and
+  the `PROPORTIONS` table exist because of it; the closest pair in the roster is now 20.0% apart.
+- **Objective gates, so it stays that way.** `speciesIssues()` fails on recipe-vs-bestiary drift (an
+  elite whose recipe still says ordinary), on per-frame coverage outside 60–700 opaque pixels, on
+  near-white above 15% of a frame, and on any two species closer than 18% of their union.
+  `uiIssues()` fails when a status, affix or element in the rule tables has no glyph, when a 16px glyph
+  covers less than 14% or more than 78% of its canvas, and when more than 10% of its pixels are
+  detached from every neighbour — the measurable version of "that is a hairline, not a shape". The
+  floor sits just under today's worst pair, so a regression trips it without freezing this art.
+- **The glyph set:** 7 statuses, 8 affixes, 4 elements, all 16×16 in `src/art/ui.ts`, keyed
+  `STATUS_ICONS` / `AFFIX_ICONS` / `ELEMENT_ICONS` so a screen looks them up by rule id. The three
+  families are shaped differently on purpose — statuses organic, affixes hard-edged badges, elements
+  cut gems tinted straight from `ELEMENT_RAMPS` — because colour alone does not read down a combat
+  list. First render failed six of them at 1x only (`poison`'s bubbles welded into one blob under a
+  shared outline, `stun`'s eight rays became a smudge, `mark`'s ring ate its own ticks, `vampiric` read
+  as a goblet, `splitting` as a peanut, `thorned` as a squiggle); all six were redrawn with per-part
+  dark rims, and `chill` gained a ledge so it is not the `gale` triangle upside down.
+- **Review artifacts:** `delve-hollow-{1,2,3}.png` (per-Hollow roster: 1x sets, three 4x key poses, a
+  parchment silhouette per species), `delve-shapes.png` (all 16 outlines on one sheet — the sheet that
+  corresponds to the clone gate), `delve-glyphs.png` (every glyph at 4x and at the 1x it ships at), and
+  `anim-hollow-{1,2,3}-idle.gif` (one reel per Hollow, to judge whether a loop breathes or jitters).
+- **Verification:** `npm run typecheck` **verified** clean; `npx vitest run` **verified** 623/623
+  across 60 files, including the new `tests/art-critters.test.ts` (7 tests: no holes in the roster,
+  palette-locked 32×32 frames at the minimum pose counts with no frozen set, faint thins out, every
+  pair of species ≥ 18% apart, no blown-out frame, recipes rebuild identically, all six archetypes in
+  use); `npm run lint` and `prettier --write .` **verified** clean; `npm run art:validate` **verified**
+  PASS — 121 assets / 309 frames, 13 preview PNGs, 9 GIFs, 44 UI PNGs; `npm run build` **verified**
+  clean, 85 precache entries (944.94 KiB). `docs/art-preview/font.png` changed because it had not been
+  re-cut since Gate 0.5 and predates the peso glyph.
+- **Not verified / still open:** nobody has watched these sprites move in the app — the Canvas scene
+  that consumes `enemyFrames()` is 4c-4, and the 19 glyph PNGs are precached but not yet referenced by
+  a screen. Whether six archetypes are the right six, and whether the generated species hold up next
+  to the hand-authored Tollbug in the same frame, are judgement calls the measurements cannot make.
+  Haptics, the lazy Canvas battle scene and the Realm diorama remain open.

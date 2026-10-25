@@ -1,24 +1,20 @@
 import { pathToFileURL } from 'node:url';
-import {
-  artSpecs,
-  previewCounts,
-  uiAssetCount,
-  validateExports,
-  validateFrames,
-} from './lib/art-validate';
+import { artSpecs, previewCounts, uiAssetCount, validateArt } from './lib/art-validate';
 
 function main(): number {
   const specs = artSpecs();
   const frames = specs.reduce((sum, spec) => sum + spec.frames.length, 0);
   const counts = previewCounts();
-  const issues = [...specs.flatMap(validateFrames), ...validateExports()];
+  const issues = validateArt();
   console.log('Pocketrealm art validation');
   console.log(`  assets: ${specs.length} (${frames} frames)`);
   console.log(
     `  exports: ${counts.pngs} preview PNGs, ${counts.gifs} animated GIFs, ${uiAssetCount()} UI PNGs`,
   );
   if (issues.length === 0) {
-    console.log('  result: PASS - palette, canvas sizes, frame counts and exports are valid');
+    console.log(
+      '  result: PASS - palette, canvas sizes, frame counts, bestiary shapes and exports are valid',
+    );
     return 0;
   }
   console.log(`  result: FAIL - ${issues.length} issue${issues.length === 1 ? '' : 's'}`);

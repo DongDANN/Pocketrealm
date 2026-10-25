@@ -2,14 +2,16 @@
  * Pocketrealm UI kit seed: 9-slice panels and keys, guardian portraits, and 16px icons.
  * Exported as PNGs by scripts/gen-ui-assets.ts and used through CSS border-image.
  */
-import { C } from './palette';
+import { C, ELEMENT_RAMPS } from './palette';
 import {
+  colors,
   createPixmap,
   fillEllipse,
   fillPolygon,
   fillRect,
   hline,
   line,
+  outline,
   setPx,
   strokeRect,
   vline,
@@ -503,11 +505,428 @@ export function focusRing(): Pixmap {
   return p;
 }
 
+/**
+ * Delve glyph set: seven statuses, eight affixes, four elements. The three families are deliberately
+ * different shapes — statuses are organic, affixes are hard-edged badges, elements are cut gems —
+ * because at 16px on a phone a colour difference alone does not read across a whole list.
+ */
+
+/** Style lock: no hairlines. Every run gets a second pixel beside it. */
+function stroke(p: Pixmap, x0: number, y0: number, x1: number, y1: number, color: number): void {
+  line(p, x0, y0, x1, y1, color);
+  if (Math.abs(x1 - x0) >= Math.abs(y1 - y0)) line(p, x0, y0 + 1, x1, y1 + 1, color);
+  else line(p, x0 + 1, y0, x1 + 1, y1, color);
+}
+
+/** A 2px band, punched out instead of traced so it never lands on a single-pixel circle. */
+function band(p: Pixmap, cx: number, cy: number, radius: number, color: number): void {
+  fillEllipse(p, cx, cy, radius, radius, color);
+  fillEllipse(p, cx, cy, radius - 2, radius - 2, C.clear);
+}
+
+export function iconBurn(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillPolygon(
+    p,
+    [
+      [8, 2],
+      [11, 6],
+      [12, 9],
+      [10, 13],
+      [6, 13],
+      [4, 9],
+      [5, 6],
+    ],
+    C.ember2,
+  );
+  fillPolygon(
+    p,
+    [
+      [8, 5],
+      [10, 9],
+      [9, 12],
+      [7, 12],
+      [6, 9],
+    ],
+    C.ember1,
+  );
+  fillRect(p, 7, 9, 2, 3, C.amber0);
+  outline(p, C.ink800);
+  return p;
+}
+
+export function iconPoison(): Pixmap {
+  const p = createPixmap(16, 16);
+  // Each bubble carries its own dark rim. A single outline around the union welded them into one
+  // green blob at 1x.
+  fillEllipse(p, 5, 5, 4, 4, C.moss5);
+  fillEllipse(p, 5, 5, 3, 3, C.moss3);
+  fillEllipse(p, 11, 11, 4, 4, C.moss5);
+  fillEllipse(p, 11, 11, 3, 3, C.moss3);
+  fillEllipse(p, 12, 4, 2, 2, C.moss5);
+  fillEllipse(p, 12, 4, 1, 1, C.moss3);
+  setPx(p, 4, 3, C.moss0);
+  setPx(p, 10, 9, C.moss0);
+  return p;
+}
+
+export function iconChill(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillPolygon(
+    p,
+    [
+      [4, 5],
+      [12, 5],
+      [11, 8],
+      [8, 14],
+      [5, 8],
+    ],
+    C.frost3,
+  );
+  fillPolygon(
+    p,
+    [
+      [6, 6],
+      [10, 6],
+      [9, 8],
+      [8, 12],
+      [7, 8],
+    ],
+    C.frost1,
+  );
+  // The ledge the icicle hangs from, so it is not just an upward-pointing triangle like the Gale gem.
+  fillRect(p, 2, 2, 12, 3, C.frost4);
+  fillRect(p, 3, 3, 10, 1, C.frost2);
+  setPx(p, 4, 3, C.frost0);
+  setPx(p, 5, 3, C.frost0);
+  outline(p, C.ink800);
+  return p;
+}
+
+/**
+ * A bolt, not a burst of rays: eight 2px rays still read as one smudge at 16px, and stun has to be
+ * recognisable in a combat row where six other glyphs compete for the same few pixels.
+ */
+export function iconStun(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillPolygon(
+    p,
+    [
+      [9, 1],
+      [4, 9],
+      [7, 9],
+      [6, 15],
+      [12, 7],
+      [9, 7],
+    ],
+    C.amber2,
+  );
+  fillPolygon(
+    p,
+    [
+      [9, 4],
+      [6, 9],
+      [8, 9],
+      [8, 4],
+    ],
+    C.amber0,
+  );
+  outline(p, C.ink800);
+  return p;
+}
+
+export function iconMark(): Pixmap {
+  const p = createPixmap(16, 16);
+  band(p, 8, 8, 7, C.rose2);
+  fillEllipse(p, 8, 8, 2, 2, C.rose0);
+  setPx(p, 4, 4, C.rose0);
+  return p;
+}
+
+export function iconShield(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillPolygon(
+    p,
+    [
+      [3, 3],
+      [13, 3],
+      [13, 8],
+      [8, 14],
+      [3, 8],
+    ],
+    C.steel2,
+  );
+  fillPolygon(
+    p,
+    [
+      [5, 5],
+      [11, 5],
+      [11, 8],
+      [8, 12],
+      [5, 8],
+    ],
+    C.steel1,
+  );
+  stroke(p, 8, 4, 8, 12, C.cyan1);
+  setPx(p, 6, 6, C.steel0);
+  setPx(p, 7, 5, C.steel0);
+  outline(p, C.ink800);
+  return p;
+}
+
+export function iconRegen(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillEllipse(p, 8, 8, 6, 6, C.moss5);
+  fillEllipse(p, 8, 8, 5, 5, C.moss4);
+  stroke(p, 8, 3, 8, 12, C.moss0);
+  stroke(p, 3, 8, 12, 8, C.moss0);
+  setPx(p, 6, 5, C.moss1);
+  return p;
+}
+
+export function iconArmored(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillRect(p, 2, 4, 12, 9, C.steel2);
+  fillRect(p, 3, 5, 10, 7, C.steel1);
+  for (const x of [5, 8, 11]) stroke(p, x, 5, x, 11, C.steel2);
+  hline(p, 3, 12, 3, C.steel0);
+  setPx(p, 4, 7, C.steel0);
+  setPx(p, 4, 8, C.steel0);
+  outline(p, C.ink800);
+  return p;
+}
+
+export function iconSwift(): Pixmap {
+  const p = createPixmap(16, 16);
+  stroke(p, 7, 2, 12, 8, C.cyan1);
+  stroke(p, 12, 8, 7, 14, C.cyan1);
+  stroke(p, 1, 5, 4, 5, C.cyan3);
+  stroke(p, 1, 10, 4, 10, C.cyan3);
+  setPx(p, 11, 8, C.cyan0);
+  return p;
+}
+
+export function iconVampiric(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillRect(p, 3, 3, 10, 3, C.rose4);
+  fillRect(p, 4, 4, 8, 2, C.rose3);
+  fillPolygon(
+    p,
+    [
+      [5, 6],
+      [7, 6],
+      [6, 11],
+    ],
+    C.paper0,
+  );
+  fillPolygon(
+    p,
+    [
+      [9, 6],
+      [11, 6],
+      [10, 11],
+    ],
+    C.paper0,
+  );
+  fillPolygon(
+    p,
+    [
+      [8, 11],
+      [9, 13],
+      [8, 15],
+      [7, 13],
+    ],
+    C.rose1,
+  );
+  setPx(p, 4, 3, C.rose0);
+  setPx(p, 5, 3, C.rose0);
+  return p;
+}
+
+export function iconSplitting(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillEllipse(p, 5, 5, 4, 4, C.violet5);
+  fillEllipse(p, 5, 5, 3, 3, C.violet3);
+  fillEllipse(p, 11, 11, 4, 4, C.violet5);
+  fillEllipse(p, 11, 11, 3, 3, C.violet3);
+  setPx(p, 4, 3, C.violet1);
+  setPx(p, 10, 9, C.violet1);
+  return p;
+}
+
+export function iconEnraged(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillPolygon(
+    p,
+    [
+      [2, 2],
+      [6, 4],
+      [4, 9],
+      [1, 7],
+    ],
+    C.ember2,
+  );
+  fillPolygon(
+    p,
+    [
+      [14, 2],
+      [10, 4],
+      [12, 9],
+      [15, 7],
+    ],
+    C.ember2,
+  );
+  fillEllipse(p, 8, 10, 5, 4, C.ember3);
+  fillEllipse(p, 8, 10, 4, 3, C.ember2);
+  stroke(p, 5, 9, 7, 10, C.amber0);
+  stroke(p, 11, 9, 9, 10, C.amber0);
+  outline(p, C.ink800);
+  return p;
+}
+
+export function iconThorned(): Pixmap {
+  const p = createPixmap(16, 16);
+  stroke(p, 8, 1, 8, 15, C.moss4);
+  fillPolygon(
+    p,
+    [
+      [8, 4],
+      [3, 6],
+      [8, 8],
+    ],
+    C.moss2,
+  );
+  fillPolygon(
+    p,
+    [
+      [8, 9],
+      [13, 11],
+      [8, 13],
+    ],
+    C.moss2,
+  );
+  setPx(p, 4, 6, C.moss0);
+  setPx(p, 12, 11, C.moss0);
+  outline(p, C.ink800);
+  return p;
+}
+
+export function iconWarded(): Pixmap {
+  const p = createPixmap(16, 16);
+  band(p, 8, 8, 6, C.teal2);
+  stroke(p, 8, 4, 8, 12, C.teal1);
+  stroke(p, 8, 6, 11, 9, C.teal1);
+  stroke(p, 8, 6, 5, 9, C.teal1);
+  stroke(p, 5, 11, 11, 11, C.teal1);
+  setPx(p, 8, 8, C.amber0);
+  return p;
+}
+
+export function iconFrenzied(): Pixmap {
+  const p = createPixmap(16, 16);
+  stroke(p, 3, 13, 12, 4, C.steel1);
+  stroke(p, 13, 13, 4, 4, C.steel1);
+  stroke(p, 2, 14, 5, 11, C.amber3);
+  stroke(p, 14, 14, 11, 11, C.amber3);
+  setPx(p, 8, 8, C.paper0);
+  setPx(p, 7, 7, C.paper1);
+  outline(p, C.ink800);
+  return p;
+}
+
+/** The four elements as four different cuts, tinted from `ELEMENT_RAMPS` so the gem never drifts. */
+function gem(
+  cut: 'diamond' | 'hex' | 'wedge' | 'seal',
+  element: keyof typeof ELEMENT_RAMPS,
+): Pixmap {
+  const [hi, mid, dark, edge] = colors(ELEMENT_RAMPS[element]);
+  const p = createPixmap(16, 16);
+  const shapes = {
+    diamond: [
+      [8, 1],
+      [14, 8],
+      [8, 15],
+      [2, 8],
+    ],
+    hex: [
+      [5, 2],
+      [11, 2],
+      [14, 8],
+      [11, 14],
+      [5, 14],
+      [2, 8],
+    ],
+    wedge: [
+      [8, 2],
+      [14, 13],
+      [2, 13],
+    ],
+    seal: [
+      [4, 2],
+      [12, 2],
+      [14, 4],
+      [14, 12],
+      [12, 14],
+      [4, 14],
+      [2, 12],
+      [2, 4],
+    ],
+  } as const;
+  fillPolygon(
+    p,
+    shapes[cut].map(([x, y]) => [x, y] as [number, number]),
+    dark,
+  );
+  fillPolygon(
+    p,
+    shapes[cut]
+      .map(([x, y]) => [8 + Math.round((x - 8) * 0.72), 8 + Math.round((y - 8) * 0.72)])
+      .map(([x, y]) => [x, y] as [number, number]),
+    mid,
+  );
+  const facet = {
+    diamond: () => stroke(p, 8, 3, 8, 13, hi),
+    hex: () => stroke(p, 4, 8, 12, 8, hi),
+    wedge: () => stroke(p, 8, 4, 8, 12, hi),
+    seal: () => stroke(p, 5, 5, 11, 11, hi),
+  }[cut];
+  facet();
+  outline(p, edge);
+  return p;
+}
+
+export const STATUS_ICONS = {
+  burn: iconBurn,
+  poison: iconPoison,
+  chill: iconChill,
+  stun: iconStun,
+  mark: iconMark,
+  shield: iconShield,
+  regen: iconRegen,
+} as const;
+
+export const AFFIX_ICONS = {
+  armored: iconArmored,
+  swift: iconSwift,
+  vampiric: iconVampiric,
+  splitting: iconSplitting,
+  enraged: iconEnraged,
+  thorned: iconThorned,
+  warded: iconWarded,
+  frenzied: iconFrenzied,
+} as const;
+
+export const ELEMENT_ICONS = {
+  ember: () => gem('diamond', 'ember'),
+  frost: () => gem('hex', 'frost'),
+  gale: () => gem('wedge', 'gale'),
+  umbra: () => gem('seal', 'umbra'),
+} as const;
+
 export interface UiAsset {
   key: string;
   pix: Pixmap;
 }
-
 export const UI_ASSETS: readonly UiAsset[] = [
   { key: 'ui.panel.ledger', pix: ledgerPanel() },
   { key: 'ui.panel.delve', pix: delvePanel() },
@@ -534,4 +953,16 @@ export const UI_ASSETS: readonly UiAsset[] = [
   { key: 'ui.icon.music', pix: iconMusic() },
   { key: 'ui.icon.arrow', pix: iconArrow() },
   { key: 'ui.icon.backspace', pix: iconBackspace() },
+  ...Object.entries(STATUS_ICONS).map(([id, draw]) => ({
+    key: `ui.icon.status.${id}`,
+    pix: draw(),
+  })),
+  ...Object.entries(AFFIX_ICONS).map(([id, draw]) => ({
+    key: `ui.icon.affix.${id}`,
+    pix: draw(),
+  })),
+  ...Object.entries(ELEMENT_ICONS).map(([id, draw]) => ({
+    key: `ui.icon.element.${id}`,
+    pix: draw(),
+  })),
 ];

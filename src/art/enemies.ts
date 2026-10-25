@@ -4,12 +4,25 @@
  * only on the large shadowed surfaces.
  */
 import { C } from './palette';
-import { createPixmap, fillEllipse, fillPolygon, fillRect, line, setPx, type Pixmap } from './px';
+import {
+  createPixmap,
+  dissolve,
+  fillEllipse,
+  fillPolygon,
+  fillRect,
+  line,
+  setPx,
+  type Pixmap,
+} from './px';
 import { hash2 } from './px';
 
 export interface EnemyFrames {
   idle: Pixmap[];
   attack: Pixmap[];
+  /** Knocked back: the coin tips up and the antennae flatten. */
+  hurt: Pixmap[];
+  /** Hash-thinned, not faded: a dead insect stays the same colour until it stops existing. */
+  faint: Pixmap[];
 }
 
 interface BugPose {
@@ -19,6 +32,16 @@ interface BugPose {
   antenna: number;
   glow: boolean;
   spark?: number;
+  /** How the feet are placed. Omitted means the walking pose the idle/attack sets use. */
+  stance?: Stance;
+  /** Coin lifted off the legs, for a recoil. */
+  lift?: number;
+  /** Head pulled back toward the shell. */
+  tuck?: number;
+  /** Head dropped toward the floor. */
+  sink?: number;
+  /** Share of pixels dropped by hash; used only by the faint set. */
+  dissolve?: number;
 }
 
 function drawShadow(target: Pixmap): void {
@@ -30,8 +53,20 @@ function drawShadow(target: Pixmap): void {
   }
 }
 
-function drawLegs(target: Pixmap, dx: number, dy: number, legFrame: number): void {
+type Stance = 'walk' | 'brace' | 'droop';
+
+function drawLegs(
+  target: Pixmap,
+  dx: number,
+  dy: number,
+  legFrame: number,
+  stance: Stance = 'walk',
+): void {
   const shift = legFrame % 2 === 0 ? 0 : 1;
+  // A braced bug pushes its feet out and down; a dying one lets them hang inward. Walk is the
+  // original approved pose, so it stays byte-identical.
+  const out = stance === 'brace' ? 2 : stance === 'droop' ? -2 : 0;
+  const down = stance === 'walk' ? 0 : 2;
   // Two-pixel legs with a visible knee, so the silhouette does not read as hair-thin wires.
   const leg = (
     x1: number,
@@ -48,13 +83,17 @@ function drawLegs(target: Pixmap, dx: number, dy: number, legFrame: number): voi
     setPx(target, kneeX, kneeY, C.steel2);
     setPx(target, footX, footY, C.steel1);
   };
+  const rear = (x1: number, kneeX: number, kneeY: number, footX: number, footY: number) =>
+    leg(x1 + dx, 24 + dy, kneeX + dx, kneeY + dy, footX + dx + out, footY + dy + down);
+  const front = (x1: number, kneeX: number, kneeY: number, footX: number, footY: number) =>
+    leg(x1 + dx, 25 + dy, kneeX + dx, kneeY + dy, footX + dx - out, footY + dy + down);
   // rear legs, knees bent backward
-  leg(22 + dx, 24 + dy, 25 + dx, 26 + shift + dy, 27 + dx, 29 + shift + dy);
-  leg(25 + dx, 24 + dy, 28 + dx, 26 - shift + dy, 29 + dx, 28 - shift + dy);
+  rear(22, 25, 26 + shift, 27, 29 + shift);
+  rear(25, 28, 26 - shift, 29, 28 - shift);
   // front legs, knees bent forward
-  leg(13 + dx, 25 + dy, 11 + dx, 27 + shift + dy, 9 + dx, 30 + shift + dy);
-  leg(16 + dx, 25 + dy, 15 + dx, 28 - shift + dy, 14 + dx, 30 - shift + dy);
-  leg(10 + dx, 25 + dy, 8 + dx, 26 - shift + dy, 6 + dx, 27 - shift + dy);
+  front(13, 11, 27 + shift, 9, 30 + shift);
+  front(16, 15, 28 - shift, 14, 30 - shift);
+  front(10, 8, 26 - shift, 6, 27 - shift);
 }
 
 function drawShell(target: Pixmap, dx: number, dy: number): void {
@@ -182,10 +221,11 @@ function drawSpark(target: Pixmap, dx: number, dy: number, kind: number): void {
 function compose(pose: BugPose): Pixmap {
   const p = createPixmap(32, 32);
   drawShadow(p);
-  drawLegs(p, pose.dx, pose.dy, pose.legFrame);
-  drawShell(p, pose.dx, pose.dy);
-  drawHead(p, pose.dx, pose.dy, pose.antenna, pose.glow);
+  drawLegs(p, pose.dx, pose.dy, pose.legFrame, pose.stance ?? 'walk');
+  drawShell(p, pose.dx, pose.dy - (pose.lift ?? 0));
+  drawHead(p, pose.dx + (pose.tuck ?? 0), pose.dy + (pose.sink ?? 0), pose.antenna, pose.glow);
   if (pose.spark) drawSpark(p, pose.dx, pose.dy, pose.spark);
+  dissolve(p, pose.dissolve ?? 0);
   return p;
 }
 
@@ -204,10 +244,46 @@ const ATTACK: BugPose[] = [
   { dx: -1, dy: 0, legFrame: 0, antenna: 0, glow: false },
 ];
 
+/** Knocked back: the coin is tossed off its legs, the head pulls in, the antennae flatten. */
+const HURT: BugPose[] = [
+  { dx: 1, dy: -1, legFrame: 0, antenna: 2, glow: false, stance: 'brace', lift: 2, tuck: 2 },
+  { dx: 2, dy: -2, legFrame: 1, antenna: 2, glow: false, stance: 'brace', lift: 3, tuck: 2 },
+  { dx: 1, dy: 0, legFrame: 1, antenna: 1, glow: false, stance: 'brace', lift: 1, tuck: 1 },
+];
+
+/** Collapsing inward, then hashing out. The shadow stays until the last frame. */
+const FAINT: BugPose[] = [
+  { dx: 2, dy: 1, legFrame: 0, antenna: 2, glow: false, stance: 'droop', tuck: 1, sink: 1 },
+  {
+    dx: 2,
+    dy: 2,
+    legFrame: 1,
+    antenna: 2,
+    glow: false,
+    stance: 'droop',
+    tuck: 2,
+    sink: 2,
+    dissolve: 0.35,
+  },
+  {
+    dx: 2,
+    dy: 3,
+    legFrame: 0,
+    antenna: 2,
+    glow: false,
+    stance: 'droop',
+    tuck: 3,
+    sink: 3,
+    dissolve: 0.7,
+  },
+];
+
 export function buildTollbug(): EnemyFrames {
   return {
     idle: IDLE.map(compose),
     attack: ATTACK.map(compose),
+    hurt: HURT.map(compose),
+    faint: FAINT.map(compose),
   };
 }
 

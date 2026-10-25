@@ -8,13 +8,17 @@ import { blit, createPixmap, fillRect, setPx, type Pixmap } from '../src/art/px'
 import { drawText, GLYPHS } from '../src/art/font5x7';
 import { buildWarden } from '../src/art/companion';
 import { buildTollbug, silhouette } from '../src/art/enemies';
+import { bestiaryIds, critterRecipe, enemyFrames } from '../src/art/critters';
+import { BOSSES, ELITES, ENEMIES } from '../src/core/delve/data/enemies';
 import { composeRoomPreview } from '../src/art/scenes/rootfall';
 import {
+  AFFIX_ICONS,
   BUTTON_DISABLED,
   BUTTON_HOVER,
   BUTTON_NORMAL,
   BUTTON_PRESSED,
   delvePanel,
+  ELEMENT_ICONS,
   focusRing,
   guardian,
   iconBackspace,
@@ -28,6 +32,7 @@ import {
   KEY_NORMAL,
   KEY_PRESSED,
   ledgerPanel,
+  STATUS_ICONS,
 } from '../src/art/ui';
 import { savePixmap, scalePixmap } from './lib/png';
 import { saveGif } from './lib/gif';
@@ -629,6 +634,115 @@ function spritesheet(): Pixmap {
   return sheet;
 }
 
+/**
+ * One row per species: the whole set at 1x, three key poses at 4x, and the flat shape on
+ * parchment. A family that only reads at 4x is a family that will read as noise in the battle
+ * scene, so 1x comes first and gets the widest column.
+ */
+function rosterSheet(hollow: 1 | 2 | 3): Pixmap {
+  const ids = [...ENEMIES, ...ELITES, ...BOSSES].filter((enemy) => enemy.hollow === hollow);
+  const width = 1160;
+  const rowH = 152;
+  const height = 92 + ids.length * rowH + 64;
+  const sheet = createPixmap(width, height, C.ink800);
+  const names: Record<1 | 2 | 3, string> = {
+    1: 'Rootfall Warren',
+    2: 'Vault of Cinders',
+    3: 'Hollow of Umbra',
+  };
+  titleBlock(
+    sheet,
+    `HOLLOW ${hollow} - ${names[hollow].toUpperCase()}`,
+    `${ids.length} SPECIES - 32X32 - 1X SET / 4X KEY POSES / SILHOUETTE ON PARCHMENT`,
+    width,
+  );
+  ids.forEach((enemy, row) => {
+    const frames = enemyFrames(enemy.id);
+    const y = 78 + row * rowH;
+    const kind = enemy.id === 'tollbug' ? 'HAND-AUTHORED' : critterRecipe(enemy.id)?.archetype;
+    const role = 'elite' in enemy ? 'ELITE' : 'boss' in enemy ? 'BOSS' : 'ORDINARY';
+    label(sheet, 16, y, `${enemy.name.toUpperCase()} - ${String(kind)} - ${role}`, C.amber3);
+    if (!frames) {
+      label(sheet, 16, y + 14, 'NO SPRITE FAMILY', C.rose1);
+      return;
+    }
+    const set: [Pixmap[], string][] = [
+      [frames.idle, 'IDLE'],
+      [frames.attack, 'ATTACK'],
+      [frames.hurt, 'HURT'],
+      [frames.faint, 'FAINT'],
+    ];
+    let x = 16;
+    for (const [framesOfSet, name] of set) {
+      label(sheet, x, y + 14, name, C.steel1);
+      rowOfFrames(sheet, framesOfSet, x, y + 24, 1, 2);
+      x += framesOfSet.length * 34 + 10;
+    }
+    // three poses that decide whether the animation is worth watching
+    blit(sheet, scalePixmap(frames.idle[1]!, 4), x + 8, y + 8);
+    blit(
+      sheet,
+      scalePixmap(frames.attack[Math.min(3, frames.attack.length - 1)]!, 4),
+      x + 148,
+      y + 8,
+    );
+    blit(sheet, scalePixmap(frames.faint[frames.faint.length - 1]!, 4), x + 288, y + 8);
+    label(sheet, x + 8, y, '4X: IDLE / STRIKE / LAST', C.steel1);
+    paperPanel(sheet, x + 428, y + 8, 80, 80);
+    blit(sheet, scalePixmap(silhouette(frames.idle)[1]!, 2), x + 436, y + 16);
+    label(sheet, x + 428, y + 92, 'SHAPE ONLY', C.steel1);
+    fillRect(sheet, x + 2, y + 8, 1, 136, C.ink600);
+  });
+  drawText(
+    sheet,
+    16,
+    height - 40,
+    'SAME 32X32 CANVAS, SAME INK OUTLINE, ONE READABLE MARK EACH - NO ROTATION, NO SCALE, NO FILTERS',
+    C.steel1,
+    1,
+  );
+  return sheet;
+}
+
+/**
+ * Statuses, affixes and elements on one sheet. The three families sit in separate bands because the
+ * question is different for each: can you tell burn from poison at 16px, and does an affix badge
+ * still read next to a status glyph in the same combat panel?
+ */
+function glyphSheet(): Pixmap {
+  const width = 640;
+  const cell = 72;
+  const bands: [string, readonly (readonly [string, Pixmap])[]][] = [
+    ['STATUS', Object.entries(STATUS_ICONS).map(([id, draw]) => [id, draw()] as const)],
+    ['AFFIX', Object.entries(AFFIX_ICONS).map(([id, draw]) => [id, draw()] as const)],
+    ['ELEMENT', Object.entries(ELEMENT_ICONS).map(([id, draw]) => [id, draw()] as const)],
+  ];
+  const height = 84 + bands.length * (100 + cell) + 96;
+  const sheet = createPixmap(width, height, C.ink800);
+  titleBlock(sheet, 'DELVE GLYPHS', 'STATUS - AFFIX - ELEMENT - 16X16, SHOWN AT 4X', width);
+  let y = 84;
+  for (const [name, items] of bands) {
+    label(sheet, 16, y, `${name} - 4X`, C.amber3);
+    items.forEach(([id, pix], index) => {
+      const x = 16 + index * cell;
+      fillRect(sheet, x, y + 14, 64, 64, C.ink500);
+      blit(sheet, scalePixmap(pix, 4), x, y + 14);
+      label(sheet, x, y + 82, id.toUpperCase(), C.steel1);
+    });
+    y += 100;
+    label(sheet, 16, y, `${name} - 1X ON PARCHMENT, THE SIZE IT ACTUALLY SHIPS AT`, C.steel2);
+    items.forEach(([id, pix], index) => {
+      const x = 16 + index * cell;
+      paperPanel(sheet, x, y + 14, 48, 48);
+      blit(sheet, pix, x + 16, y + 30);
+      label(sheet, x, y + 66, id.toUpperCase(), C.steel1);
+    });
+    y += 100;
+  }
+  drawText(sheet, 16, height - 20, 'NO HAIRLINES - EVERY STROKE IS TWO PIXELS WIDE', C.steel1, 1);
+  return sheet;
+}
+
 function torchPreviewFrames(): Pixmap[] {
   return FLAME_FRAMES.map((flame) => {
     const out = createPixmap(96, 112, C.ink500);
@@ -636,6 +750,55 @@ function torchPreviewFrames(): Pixmap[] {
     blit(out, scalePixmap(flame, 4), 16, 0);
     return out;
   });
+}
+
+/**
+ * One reel per Hollow: every species' idle cycle back to back at 4x. A still roster shows shape;
+ * this shows whether the loop actually reads as breathing rather than jitter.
+ */
+function idleReel(hollow: 1 | 2 | 3): Pixmap[] {
+  return [...ENEMIES, ...ELITES, ...BOSSES]
+    .filter((enemy) => enemy.hollow === hollow)
+    .flatMap((enemy) => (enemyFrames(enemy.id)?.idle ?? []).map((frame) => scalePixmap(frame, 4)));
+}
+
+/**
+ * Every species reduced to its outline, on parchment, in codex order. This is the sheet the
+ * silhouette-distance gate corresponds to: two rows here that look like the same drawing are the
+ * bug that gate exists to catch, and colour separation on the roster sheets hides it.
+ */
+function shapeSheet(): Pixmap {
+  const ids = bestiaryIds();
+  const perRow = 8;
+  const cell = 76;
+  const width = 32 + perRow * cell;
+  const rows = Math.ceil(ids.length / perRow);
+  const height = 92 + rows * 108 + 40;
+  const sheet = createPixmap(width, height, C.ink800);
+  titleBlock(
+    sheet,
+    'BESTIARY SHAPES',
+    'OUTLINE ONLY - IF TWO OF THESE MATCH, THE ROSTER IS CLONED',
+    width,
+  );
+  ids.forEach((id, index) => {
+    const frames = enemyFrames(id);
+    if (!frames) return;
+    const x = 32 + (index % perRow) * cell;
+    const y = 92 + Math.floor(index / perRow) * 108;
+    paperPanel(sheet, x, y, 64, 64);
+    blit(sheet, scalePixmap(silhouette([frames.idle[1] ?? frames.idle[0]!])[0]!, 2), x + 1, y + 1);
+    label(sheet, x, y + 70, id.toUpperCase(), C.steel1);
+  });
+  drawText(
+    sheet,
+    16,
+    height - 24,
+    'MEASURED PAIRWISE: MINIMUM DIFFERENCE MUST STAY ABOVE 18 PERCENT',
+    C.steel1,
+    1,
+  );
+  return sheet;
 }
 
 savePixmap(`${OUT}/palette.png`, paletteSheet());
@@ -646,6 +809,11 @@ savePixmap(`${OUT}/ui-kit.png`, uiSheet());
 savePixmap(`${OUT}/room-contact.png`, roomSheet());
 savePixmap(`${OUT}/silhouettes.png`, spritesheet());
 savePixmap(`${OUT}/room-1x.png`, composeRoomPreview(2));
+savePixmap(`${OUT}/delve-hollow-1.png`, rosterSheet(1));
+savePixmap(`${OUT}/delve-hollow-2.png`, rosterSheet(2));
+savePixmap(`${OUT}/delve-hollow-3.png`, rosterSheet(3));
+savePixmap(`${OUT}/delve-shapes.png`, shapeSheet());
+savePixmap(`${OUT}/delve-glyphs.png`, glyphSheet());
 
 const wardenGif = buildWarden();
 const tollbugGif = buildTollbug();
@@ -675,5 +843,8 @@ saveGif(
   Array.from({ length: 12 }, (_, i) => scalePixmap(composeRoomPreview(i), 2)),
   100,
 );
+saveGif(`${OUT}/anim-hollow-1-idle.gif`, idleReel(1), 140);
+saveGif(`${OUT}/anim-hollow-2-idle.gif`, idleReel(2), 140);
+saveGif(`${OUT}/anim-hollow-3-idle.gif`, idleReel(3), 140);
 
 console.log('Wrote contact sheets and animated GIFs to', OUT);

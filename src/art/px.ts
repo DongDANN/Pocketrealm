@@ -422,6 +422,22 @@ export function shadeRow(
   hline(src, x0, x1, y, ramp[idx]!);
 }
 
+/**
+ * Drops a share of the opaque pixels by hash. A death animation needs to thin out, not fade to
+ * grey, and this keeps the palette-locked silhouette until the last pixels go.
+ */
+export function dissolve(src: Pixmap, amount: number, seed = 29): void {
+  if (amount <= 0) return;
+  const cutoff = Math.min(99, Math.round(amount * 100));
+  for (let y = 0; y < src.h; y++) {
+    for (let x = 0; x < src.w; x++) {
+      const i = y * src.w + x;
+      if (src.data[i] === 0) continue;
+      if (hash2(x, y, seed) % 100 < cutoff) src.data[i] = 0;
+    }
+  }
+}
+
 /** Palette indices for a named hex list (convenience for art code). */
 export function colors(hexes: readonly string[]): number[] {
   return hexes.map(colorIndex);

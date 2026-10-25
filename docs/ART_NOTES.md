@@ -115,6 +115,53 @@ Two things cannot be pixel-styled without faking a control, and both are opt-in 
 - The native `<select>` in the currency picker (OS-drawn arrow and list).
 - The modal scrim behind the number pad (a flat alpha wash over the page, not a sprite).
 
+## Gate 4c-3: the Delve bestiary and glyph set
+
+Sixteen species (10 ordinary, 3 elites, 3 bosses) × four animation sets, plus 19 status/affix/element
+glyphs. All of it is generated from code — no image files were authored or imported.
+
+**How the sprites are made.** `src/art/critters.ts` holds one recipe per species: an archetype
+(`crawler | blob | rootfist | floater | beast | husk`), a `shape` (0/1/2 — three proportion builds per
+archetype), a `bulk`, a limb count, a palette, one readable `mark`, and a `lord` flag that adds an
+aura. Six painters draw those recipes onto the same 32×32 canvas; four shared pose tables
+(IDLE/ATTACK/HURT/FAINT) supply motion. The Tollbug stays hand-authored from Gate 0.5 because it is the
+one sprite the owner already approved, and `enemyFrames()` returns it byte-for-byte.
+
+Three rules are enforced in the painters, not left to taste:
+
+1. `limb()` draws every appendage two pixels thick — a 1px leg disappears at 1x on a phone.
+2. Every finished silhouette gets one ink outline and an upper-left rim light, because a violet or ink
+   body on the Hollow's near-black ground reads as a hole otherwise.
+3. Marks anchor to painted pixels (`topAt`/`bottomAt`/`inside`), so a crown sits on the head it belongs
+   to instead of floating at a fixed row.
+
+**Review passes.** Four, and the last one was measurement, not eyes:
+
+- Pass 1 caught 1px limbs, marks floating off bodies, blown-out highlights, pancake-thin beasts,
+  husk arms that read as ears, and dark-on-dark bodies. Full painter rewrite.
+- Pass 2 caught crowns hovering over round heads, crests on a fixed baseline, and near-white
+  pauldrons. Fixed with per-column circlets anchored to the head top and pauldrons in body value.
+- Pass 3 caught nothing by eye — and that is the point. `emberjaw` and `umbraclaw` measured **0.0%**
+  silhouette difference: same archetype, same proportions, different colours. A contact sheet with one
+  colour per row cannot show this. Added the `shape` field and the `PROPORTIONS` table.
+- Pass 4 re-measured: the closest pair in the roster is now 20.0% apart.
+
+**The gate that keeps it that way.** `speciesIssues()` in `scripts/lib/art-validate.ts` asserts three
+things on every run: recipe-vs-bestiary drift (a species that became an elite but still draws as an
+ordinary), per-frame opaque coverage 60–700px (a blob or a dot), near-white ≤ 15% of opaque pixels,
+and pairwise silhouette distance ≥ 18% across all 16 species. The floor sits just under today's worst
+pair so a real regression trips it without freezing this week's art.
+
+`uiIssues()` does the same for the glyphs: every id in `STATUSES`, `AFFIXES` and `ELEMENTS` must have a
+glyph, coverage must stay in 14–78% of the 16×16 canvas, and no more than 10% of a glyph's pixels may be
+detached from their neighbours — the objective version of "that is a hairline, not a shape".
+
+**Glyph findings.** The first render of `delve-glyphs.png` was reviewed at both 4x and 1x and six glyphs
+failed only at 1x: `poison`'s three bubbles welded into one blob under a shared outline, `stun`'s eight
+rays became a smudge, `mark`'s ring and ticks merged, `vampiric` read as a goblet, `splitting` read as a
+peanut, `thorned` read as a squiggle. All six were redrawn with per-part dark rims and fewer, chunkier
+elements. `chill` also gained a ledge so it is not the same triangle as the `gale` gem.
+
 ## Not verified here — do not claim otherwise
 
 - **Real-device FPS and touch behaviour.** All captures are headless Chromium (desktop 1440x900 and
@@ -125,6 +172,12 @@ Two things cannot be pixel-styled without faking a control, and both are opt-in 
   watched each loop on a phone.
 - **Perceptual style judgement is one person's.** Three machine reviews cannot substitute for the
   owner's eye — which is why this gate stops for approval instead of continuing into mass production.
+- **The bestiary has never been seen in motion in the battle scene.** The idle reels are GIFs of the
+  generated frames at 4x; the Canvas scene that consumes them is Gate 4c-4. Silhouettes, coverage and
+  clone-distance are measured, and the 1x glyph row is a real 1x render, but nobody has watched these
+  sprites trade blows.
+- **Recipe variety is a judgement call.** The validator proves species are not clones; it does not prove
+  six archetypes are the right six, or that `husk` should carry three of the sixteen species.
 - **Colour on real displays.** Everything was judged on one desktop profile; no calibration target.
 
 ## Commands behind the claims
