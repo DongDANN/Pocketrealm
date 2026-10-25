@@ -14,6 +14,7 @@ import {
   offerRng,
 } from './autopilot';
 import { BASE_MODIFIERS, computeModifiers, companionBase, runCombat } from './combat';
+import { buildById, DEFAULT_BUILD } from './data/builds';
 import { boonById, RELICS, type Boon } from './data/boons';
 import { BOSSES } from './data/enemies';
 import { eventsForHollow, type EventOutcome } from './data/events';
@@ -60,6 +61,8 @@ export function emptyMeta(): DelveMeta {
   return {
     embers: 0,
     clearedHollows: [],
+    builds: {},
+    knownWeaknesses: [],
     bestFloor: {},
     forge: {},
     runsStarted: 0,
@@ -79,7 +82,9 @@ export function newRun(
   hollowId: HollowId,
   companionLevel: number,
   meta: DelveMeta,
+  buildId: string = DEFAULT_BUILD,
 ): RunState {
+  const build = buildById(buildId) ?? buildById(DEFAULT_BUILD)!;
   const base = companionBase(companionLevel);
   const plan = generateFloor(userSeed, hollowId, 1);
   return {
@@ -87,6 +92,8 @@ export function newRun(
     userSeed,
     hollowId,
     companionLevel,
+    buildId: build.id,
+    tree: meta.builds[build.id]?.tree ?? [],
     stepIndex: 0,
     floor: 1,
     row: 0,
@@ -95,13 +102,13 @@ export function newRun(
     unit: {
       id: 'companion',
       kind: 'companion',
-      name: 'Warden',
-      hp: base.hp,
-      maxHp: base.maxHp,
-      atk: base.atk,
-      def: base.def,
-      spd: base.spd,
-      luck: base.luck,
+      name: build.name,
+      hp: base.hp + build.profile.hpAdd,
+      maxHp: base.maxHp + build.profile.hpAdd,
+      atk: base.atk + build.profile.atkAdd,
+      def: base.def + build.profile.defAdd,
+      spd: base.spd + build.profile.spdAdd,
+      luck: base.luck + build.profile.luckAdd,
     },
     boons: [],
     relics: [],
@@ -460,7 +467,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   if (room.kind === 'skirmish' || room.kind === 'elite' || room.kind === 'boss') {
     const buffs = computeBuffs(ctx.signals);
     const mods = computeModifiers(next, forge, buffs);
-    const result = runCombat(next, room, mods, next.floor);
+    const result = runCombat(next, room, mods, next.floor, ctx.meta.knownWeaknesses ?? []);
     next = { ...next, log: [...next.log, ...result.log] };
     if (result.drawn) {
       const ended = endRun(

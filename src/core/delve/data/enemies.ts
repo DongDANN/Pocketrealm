@@ -3,6 +3,8 @@
  * every number is an integer at simulation time. Names and copy are original.
  */
 
+import type { Element } from './elements';
+
 export interface EnemyDef {
   id: string;
   name: string;
@@ -12,6 +14,12 @@ export interface EnemyDef {
   def: number;
   spd: number;
   luck: number;
+  /** Element the enemy's attacks carry (elementless for Hollow 1). */
+  element?: Element;
+  /** Takes +25% from this element once the codex reveals it. */
+  weakness: Element;
+  /** Takes -25% from this element, always. */
+  resistance: Element;
   /** Flavor shown in the codex once revealed. */
   lore: string;
 }
@@ -22,7 +30,7 @@ export interface EliteDef extends EnemyDef {
 
 export interface BossDef extends EnemyDef {
   boss: true;
-  /** Readable mechanic, telegraphed one round ahead (Gate 1.5 version). */
+  /** Readable mechanic, telegraphed one round ahead. */
   mechanic: string;
   /** Every N rounds the boss uses its heavy mechanic attack. */
   mechanicEvery: number;
@@ -35,10 +43,12 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Tollbug',
     hollow: 1,
     hp: 25,
-    atk: 7,
+    atk: 8,
     def: 2,
     spd: 6,
     luck: 3,
+    weakness: 'frost',
+    resistance: 'gale',
     lore: 'A coin-sized toll collector with a bite. It waits at doorways.',
   },
   {
@@ -46,10 +56,12 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Mossbite',
     hollow: 1,
     hp: 21,
-    atk: 6,
+    atk: 7,
     def: 1,
     spd: 8,
     luck: 2,
+    weakness: 'ember',
+    resistance: 'frost',
     lore: 'A clump of hungry moss with teeth like root fibres.',
   },
   {
@@ -57,10 +69,12 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Rootsnarl',
     hollow: 1,
     hp: 33,
-    atk: 10,
+    atk: 11,
     def: 4,
     spd: 4,
     luck: 2,
+    weakness: 'ember',
+    resistance: 'gale',
     lore: 'Old floor roots knotted into a slow, stubborn fist.',
   },
   {
@@ -68,10 +82,12 @@ export const ENEMIES: readonly EnemyDef[] = [
     name: 'Sparkmoth',
     hollow: 1,
     hp: 18,
-    atk: 11,
+    atk: 12,
     def: 1,
     spd: 10,
     luck: 6,
+    weakness: 'frost',
+    resistance: 'ember',
     lore: 'Drawn to lanterns. It remembers every flame it has eaten.',
   },
   {
@@ -83,6 +99,9 @@ export const ENEMIES: readonly EnemyDef[] = [
     def: 5,
     spd: 6,
     luck: 3,
+    element: 'ember',
+    weakness: 'frost',
+    resistance: 'ember',
     lore: 'Its shell still glows where the vault fire passed.',
   },
   {
@@ -94,6 +113,9 @@ export const ENEMIES: readonly EnemyDef[] = [
     def: 3,
     spd: 8,
     luck: 4,
+    element: 'ember',
+    weakness: 'frost',
+    resistance: 'ember',
     lore: 'A hinge of hot coals that snaps at anything cool.',
   },
   {
@@ -105,6 +127,9 @@ export const ENEMIES: readonly EnemyDef[] = [
     def: 6,
     spd: 3,
     luck: 2,
+    element: 'ember',
+    weakness: 'gale',
+    resistance: 'ember',
     lore: 'What remains of a smith who would not leave the forge.',
   },
   {
@@ -116,6 +141,9 @@ export const ENEMIES: readonly EnemyDef[] = [
     def: 2,
     spd: 12,
     luck: 5,
+    element: 'umbra',
+    weakness: 'ember',
+    resistance: 'umbra',
     lore: 'A draft in the dark with an opinion about you.',
   },
   {
@@ -127,6 +155,9 @@ export const ENEMIES: readonly EnemyDef[] = [
     def: 4,
     spd: 9,
     luck: 4,
+    element: 'umbra',
+    weakness: 'ember',
+    resistance: 'frost',
     lore: 'The shadow of a claw, attached to nothing at all.',
   },
   {
@@ -138,6 +169,9 @@ export const ENEMIES: readonly EnemyDef[] = [
     def: 6,
     spd: 5,
     luck: 3,
+    element: 'umbra',
+    weakness: 'gale',
+    resistance: 'umbra',
     lore: 'A curtain of stillness that folds around the lantern.',
   },
 ];
@@ -153,6 +187,8 @@ export const ELITES: readonly EliteDef[] = [
     spd: 5,
     luck: 4,
     elite: true,
+    weakness: 'ember',
+    resistance: 'gale',
     lore: 'A warden of the warren grown around a lantern it swallowed.',
   },
   {
@@ -165,6 +201,9 @@ export const ELITES: readonly EliteDef[] = [
     spd: 6,
     luck: 4,
     elite: true,
+    element: 'ember',
+    weakness: 'frost',
+    resistance: 'gale',
     lore: 'The vault keeps one door hot. This is why.',
   },
   {
@@ -177,6 +216,9 @@ export const ELITES: readonly EliteDef[] = [
     spd: 10,
     luck: 6,
     elite: true,
+    element: 'umbra',
+    weakness: 'ember',
+    resistance: 'umbra',
     lore: 'It stitches shadows into coats, and visitors into shadows.',
   },
 ];
@@ -192,6 +234,8 @@ export const BOSSES: readonly BossDef[] = [
     spd: 6,
     luck: 3,
     boss: true,
+    weakness: 'ember',
+    resistance: 'frost',
     lore: 'She tends the warren like a garden and weeds out lanterns.',
     mechanic: 'Thorn Barrage: a heavy volley every 4 rounds (telegraphed the round before).',
     mechanicEvery: 4,
@@ -207,6 +251,9 @@ export const BOSSES: readonly BossDef[] = [
     spd: 5,
     luck: 3,
     boss: true,
+    element: 'ember',
+    weakness: 'frost',
+    resistance: 'ember',
     lore: 'Built to guard a fire that went out. It has not noticed.',
     mechanic: 'Slag Wave: every 5 rounds it hardens, then slams (telegraphed; guard softens it).',
     mechanicEvery: 5,
@@ -222,6 +269,9 @@ export const BOSSES: readonly BossDef[] = [
     spd: 7,
     luck: 4,
     boss: true,
+    element: 'umbra',
+    weakness: 'ember',
+    resistance: 'frost',
     lore: 'The dark between floors, wearing a crown of dead stars.',
     mechanic: 'Siphon: every 5 rounds it drinks the next hit back as health (telegraphed).',
     mechanicEvery: 5,

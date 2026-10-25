@@ -5,12 +5,20 @@
  */
 
 import type { LocalDate } from '../types';
+import type { Element } from './data/elements';
 
 export type HollowId = 1 | 2 | 3;
 export type BoonTag = 'guard' | 'fury' | 'fortune' | 'vigor' | 'thrift';
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic';
 
 export type RoomKind = 'skirmish' | 'elite' | 'treasure' | 'rest' | 'shop' | 'event' | 'boss';
+
+/** A status effect instance (on the companion or an enemy). */
+export interface StatusInstance {
+  id: string;
+  stacks: number;
+  duration: number;
+}
 
 export interface RoomDef {
   id: string;
@@ -87,6 +95,9 @@ export interface RunState {
   userSeed: number;
   hollowId: HollowId;
   companionLevel: number;
+  /** Selected build; the talent tree is snapshotted from meta at run start. */
+  buildId: string;
+  tree: string[];
   /** Absolute step index; every applied step increments it. */
   stepIndex: number;
   floor: number;
@@ -120,6 +131,10 @@ export interface DelveMeta {
   embers: number;
   /** Best floor reached per hollow (for unlock checks). */
   clearedHollows: HollowId[];
+  /** Per-build talent state: bought node ids and total Embers spent (free respec). */
+  builds: Record<string, { tree: string[]; spent: number }>;
+  /** Elements whose weaknesses the codex has revealed (+25% damage applies). */
+  knownWeaknesses: Element[];
   bestFloor: Partial<Record<HollowId, number>>;
   forge: ForgeLevels;
   runsStarted: number;

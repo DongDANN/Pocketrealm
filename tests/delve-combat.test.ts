@@ -163,7 +163,7 @@ describe('auto-battle', () => {
   });
 
   it('telegraphs the boss mechanic one round before it lands', () => {
-    const run = runWith({ companionLevel: 8 });
+    const run = runWith({ companionLevel: 6 });
     const room = { enemies: ['thorncrown'] };
     const result = runCombat(run, room, computeModifiers(run, {}, zeroBuffs()), 6);
     expect(result.won).toBe(true);

@@ -236,7 +236,7 @@ describe('sim:delve persona pacing (§6.10)', () => {
     const stats: Record<string, PersonaStats> = {};
     for (const key of Object.keys(PERSONAS)) stats[key] = average(key as keyof typeof PERSONAS);
     // SPEC §6.10: "faint rate ... about 25 to 40% on a Hollow's first clear attempts".
-    // Tuned values (5 seeds x 60 days): trickle 26%, casual 38%, habit 27%, optimizer 22%.
+    // Tuned values with builds (5 seeds x 60 days): trickle 30%, casual 34%, habit 32%, optimizer 29%.
     // The band below allows the measured seed noise (±10 points on small attempt counts).
     const firstAttempt = (s: PersonaStats) => {
       const fa = s.firstAttempts[1];

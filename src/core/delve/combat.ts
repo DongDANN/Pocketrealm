@@ -2,12 +2,26 @@
  * Deterministic round-based auto-battle. SPD sets turn order; damage is ATK vs DEF with seeded
  * variance and LUCK-driven crits. Bosses telegraph their mechanic one round ahead. Combat
  * terminates at a hard 40-round cap, which counts as a safe retreat with no loss.
+ *
+ * Gate 1.6 layers: the selected build supplies two active skills (energy, cooldowns) and a
+ * passive; statuses (burn/poison/chill/stun/mark/regen) tick every round and clear after combat;
+ * skill attacks carry an element and hit ±25% weakness/resistance (weakness only once the codex
+ * knows it, resistance always).
  */
 
 import { hashCombine, hashString, mulberry32, type Rng } from '../rng';
 import { boonById, type Boon } from './data/boons';
+import { buildById, DEFAULT_BUILD, treeNodeById, type PassiveFx, type SkillDef } from './data/builds';
 import { BOSSES, ELITES, enemyById, scaledStats } from './data/enemies';
-import type { RunLogEntry, RunState } from './types';
+import { elementMultiplier, type Element } from './data/elements';
+import {
+  STUN_BOSS_RESIST,
+  STUN_RECENT_RESIST,
+  STUN_RESIST_GRACE,
+  statusById,
+  type StatusDef,
+} from './data/statuses';
+import type { RunLogEntry, RunState, StatusInstance } from './types';
 
 export const ROUND_CAP = 40;
 
@@ -73,7 +87,18 @@ function resolveBoons(ids: readonly string[]): Boon[] {
   return out;
 }
 
-/** Sum boon stats, tag bonuses (3/5 thresholds), relics, Forge, and budget buffs. */
+function addTreeNodeFx(m: CombatModifiers, buildId: string, nodeId: string): void {
+  const fx = treeNodeById(buildId, nodeId)?.fx;
+  if (!fx) return;
+  if (fx.kind === 'stat') m[fx.stat] += fx.add;
+  else if (fx.kind === 'critChance') m.critChance += fx.add;
+  else if (fx.kind === 'critDamage') m.critDamageMult += fx.mult;
+  else if (fx.kind === 'roomShield') m.roomShield += fx.amount;
+  else if (fx.kind === 'damageReduction') m.damageReduction += fx.percent;
+  else if (fx.kind === 'healAfterCombat') m.healAfterCombat += fx.percent;
+}
+
+/** Sum boon stats, tag bonuses (3/5 thresholds), relics, Forge, build profile/tree, and buffs. */
 export function computeModifiers(
   run: RunState,
   forgeTotals: Record<string, number>,
@@ -104,6 +129,15 @@ export function computeModifiers(
   if (run.relics.includes('relic-lanternwick')) m.roomShield += 4;
   if (run.relics.includes('relic-quill')) m.luck += boons.length;
   if (run.relics.includes('relic-matchbook')) m.eliteDamageBonus += 5;
+  const build = buildById(run.buildId) ?? buildById(DEFAULT_BUILD);
+  if (build) {
+    m.maxHp += build.profile.hpAdd;
+    m.atk += build.profile.atkAdd;
+    m.def += build.profile.defAdd;
+    m.spd += build.profile.spdAdd;
+    m.luck += build.profile.luckAdd;
+    for (const id of run.tree) addTreeNodeFx(m, build.id, id);
+  }
   m.maxHp += forgeTotals.maxHp ?? 0;
   m.atk += forgeTotals.atk ?? 0;
   m.def += forgeTotals.def ?? 0;
@@ -114,6 +148,56 @@ export function computeModifiers(
     m.atk += Math.max(0, Math.round(m.atk * 0.02 * Math.max(0, run.floor - 1)));
   }
   return m;
+}
+
+/** Apply a status with its stacking rules. Stun rolls boss/recent resistance (seeded). */
+export function applyStatus(
+  statuses: StatusInstance[],
+  id: string,
+  rng: Rng,
+  opts: { isBoss?: boolean; roundsSinceStun?: number } = {},
+): StatusInstance[] {
+  const def = statusById(id);
+  if (!def) return statuses;
+  if (id === 'stun') {
+    if (opts.isBoss && rng.int(100) < STUN_BOSS_RESIST) return statuses;
+    if (
+      (opts.roundsSinceStun ?? STUN_RESIST_GRACE) < STUN_RESIST_GRACE &&
+      rng.int(100) < STUN_RECENT_RESIST
+    ) {
+      return statuses;
+    }
+  }
+  const maxStacks = def.maxStacks ?? 1;
+  const existing = statuses.find((s) => s.id === id);
+  if (!existing) {
+    const stacks =
+      def.stacking === 'add' ? Math.min(def.amount ?? 1, maxStacks) : Math.min(1, maxStacks);
+    return [...statuses, { id, stacks, duration: def.duration }];
+  }
+  const stacks =
+    def.stacking === 'stack' || def.stacking === 'add'
+      ? Math.min(existing.stacks + (def.stacking === 'add' ? (def.amount ?? 1) : 1), maxStacks)
+      : existing.stacks;
+  return statuses.map((s) => (s.id === id ? { ...s, stacks, duration: def.duration } : s));
+}
+
+/** SPD while statuses apply (chill halves). */
+export function effectiveSpd(spd: number, statuses: readonly StatusInstance[]): number {
+  return statuses.some((s) => s.id === 'chill' && s.duration > 0) ? Math.floor(spd / 2) : spd;
+}
+
+/** Total absorb from shield statuses (for UI display). */
+export function statusShield(statuses: readonly StatusInstance[]): number {
+  return statuses.filter((s) => s.id === 'shield').reduce((a, s) => a + s.stacks, 0);
+}
+
+function hasStatus(statuses: readonly StatusInstance[], id: string): boolean {
+  return statuses.some((s) => s.id === id && s.duration > 0);
+}
+
+function isPassiveFx(fx: SkillDef['fx']): fx is PassiveFx {
+  return !!fx && 'kind' in fx;
 }
 
 export interface CombatResult {
@@ -154,14 +238,35 @@ interface EnemyState {
   elite: boolean;
   bossId?: string;
   turn: number;
+  element?: Element;
+  weakness: Element;
+  resistance: Element;
+  statuses: StatusInstance[];
+  turnsSinceStun: number;
 }
 
-/** Run one deterministic battle. Companion always attacks the first living enemy (1.5). */
+function skillMultiplier(
+  target: EnemyState,
+  skill: SkillDef,
+  knownWeaknesses: readonly Element[],
+): number {
+  const elem = skill.element;
+  if (!elem) return 1;
+  return elementMultiplier(
+    elem,
+    target.weakness,
+    target.resistance,
+    knownWeaknesses.includes(elem),
+  );
+}
+
+/** Run one deterministic battle. Companion casts ready skills (most expensive first), else basics. */
 export function runCombat(
   run: RunState,
   room: { enemies: string[] },
   modifiers: CombatModifiers,
   floor: number,
+  knownWeaknesses: readonly Element[] = [],
 ): CombatResult {
   const rng = combatRng(run.runId, run.stepIndex);
   const log: RunLogEntry[] = [];
@@ -170,10 +275,26 @@ export function runCombat(
     log.push({ step, type: 'combat', text });
   };
 
+  const build = buildById(run.buildId) ?? buildById(DEFAULT_BUILD)!;
+  const actives = build.skills.filter((s): s is SkillDef => s.kind === 'active');
+  const critBurn = build.skills.find(
+    (s) => s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'critBurn',
+  );
+
   const base = companionBase(run.companionLevel);
   const maxHp = base.maxHp + modifiers.maxHp;
   let hp = Math.min(Math.max(0, run.unit.hp), maxHp);
   let shield = modifiers.roomShield;
+  for (const s of build.skills) {
+    if (s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'startShield') {
+      shield += s.fx.amount;
+      logLine(`${s.name} grants ${s.fx.amount} Shield.`);
+    }
+  }
+
+  let energy = 0;
+  const cooldowns: Record<string, number> = {};
+  let statuses: StatusInstance[] = [];
 
   const enemies: EnemyState[] = room.enemies.map((id, i) => {
     const def = enemyById(id)!;
@@ -191,6 +312,11 @@ export function runCombat(
       elite,
       bossId: boss?.id,
       turn: 0,
+      element: def.element,
+      weakness: def.weakness,
+      resistance: def.resistance,
+      statuses: [],
+      turnsSinceStun: STUN_RESIST_GRACE,
     };
   });
 
@@ -198,14 +324,68 @@ export function runCombat(
   const def = base.def + modifiers.def;
   const spd = base.spd + modifiers.spd;
   const luck = base.luck + modifiers.luck;
+
+  const markMultOf = (target: EnemyState): number =>
+    hasStatus(target.statuses, 'mark') ? (statusById('mark')!.perRound!.dmgTakenMult ?? 1) : 1;
+
+  const hitEnemy = (target: EnemyState, dmgIn: number, crit: boolean, skill?: SkillDef): void => {
+    let dmg = dmgIn;
+    const fx = skill?.fx;
+    if (fx && !isPassiveFx(fx) && fx.bonusIfBurning && hasStatus(target.statuses, 'burn')) {
+      dmg = Math.round(dmg * (1 + fx.bonusIfBurning));
+    }
+    dmg = Math.round(
+      dmg * markMultOf(target) * (skill ? skillMultiplier(target, skill, knownWeaknesses) : 1),
+    );
+    if (target.elite) dmg = Math.round((dmg * (100 + modifiers.eliteDamageBonus)) / 100);
+    target.hp -= dmg;
+    const label = skill ? `use ${skill.name} (${skill.element}) and hit` : 'hit';
+    logLine(`${crit ? 'CRIT! ' : ''}You ${label} ${target.name} for ${dmg}.`);
+    if (skill?.element) {
+      const mult = skillMultiplier(target, skill, knownWeaknesses);
+      if (mult > 1) logLine(`Weakness! +25% ${skill.element} damage.`);
+    }
+    if (fx && !isPassiveFx(fx) && fx.shieldPercent) {
+      const gain = Math.round(dmg * fx.shieldPercent);
+      shield += gain;
+      logLine(`You gain ${gain} Shield.`);
+    }
+    if (fx && !isPassiveFx(fx) && fx.status) {
+      const out = applyStatus(target.statuses, fx.status, rng, {
+        isBoss: target.bossId !== undefined,
+        roundsSinceStun: target.turnsSinceStun,
+      });
+      if (out !== target.statuses) {
+        target.statuses = out;
+        const def = statusById(fx.status)!;
+        logLine(`${target.name} gains ${def.name}.`);
+      }
+    }
+    if (crit && critBurn && isPassiveFx(critBurn.fx) && critBurn.fx.kind === 'critBurn') {
+      const out = applyStatus(target.statuses, 'burn', rng, {});
+      if (out !== target.statuses) {
+        target.statuses = out;
+        logLine(`${target.name} gains Burn.`);
+      }
+    }
+    if (target.hp <= 0) logLine(`${target.name} falls.`);
+  };
+
   let bossTelegraph = false;
   let round = 1;
 
   for (; round <= ROUND_CAP; round++) {
+    energy += 1;
     const order: ('c' | number)[] = ['c', ...enemies.map((_, i) => i)];
     order.sort((a, b2) => {
-      const sa = a === 'c' ? spd : enemies[a as number]!.spd;
-      const sb = b2 === 'c' ? spd : enemies[b2 as number]!.spd;
+      const sa =
+        a === 'c'
+          ? effectiveSpd(spd, statuses)
+          : effectiveSpd(enemies[a as number]!.spd, enemies[a as number]!.statuses);
+      const sb =
+        b2 === 'c'
+          ? effectiveSpd(spd, statuses)
+          : effectiveSpd(enemies[b2 as number]!.spd, enemies[b2 as number]!.statuses);
       if (sa !== sb) return sb - sa;
       if (a === 'c') return -1;
       if (b2 === 'c') return 1;
@@ -216,29 +396,56 @@ export function runCombat(
       if (enemies.every((e) => e.hp <= 0) || hp <= 0) break;
 
       if (actor === 'c') {
+        if (hasStatus(statuses, 'stun')) {
+          statuses = statuses.filter((s) => s.id !== 'stun');
+          logLine('You are stunned and lose your turn.');
+          continue;
+        }
         const target = enemies.find((e) => e.hp > 0)!;
-        const roll = rollDamage(
-          rng,
-          atk,
-          target.def,
-          luck,
-          modifiers.critChance,
-          modifiers.critDamageMult,
+        const ready = actives.filter(
+          (s) => (cooldowns[s.id] ?? 0) <= 0 && energy >= (s.energyCost ?? 1),
         );
-        let dmg = roll.dmg;
-        if (target.elite) dmg = Math.round((dmg * (100 + modifiers.eliteDamageBonus)) / 100);
-        target.hp -= dmg;
-        logLine(
-          roll.crit
-            ? `CRIT! You hit ${target.name} for ${dmg}.`
-            : `You hit ${target.name} for ${dmg}.`,
-        );
-        if (target.hp <= 0) logLine(`${target.name} falls.`);
+        let chosen: SkillDef | undefined;
+        for (const s of ready) {
+          if (!chosen || (s.energyCost ?? 1) > (chosen.energyCost ?? 1)) chosen = s;
+        }
+        if (chosen) {
+          energy -= chosen.energyCost ?? 1;
+          cooldowns[chosen.id] = chosen.cooldown ?? 1;
+          const fx = chosen.fx;
+          const bonusCrit = fx && !isPassiveFx(fx) ? (fx.bonusCrit ?? 0) : 0;
+          const roll = rollDamage(
+            rng,
+            Math.round(atk * (chosen.power ?? 1)),
+            target.def,
+            luck,
+            modifiers.critChance + bonusCrit,
+            modifiers.critDamageMult,
+          );
+          hitEnemy(target, roll.dmg, roll.crit, chosen);
+        } else {
+          const roll = rollDamage(
+            rng,
+            atk,
+            target.def,
+            luck,
+            modifiers.critChance,
+            modifiers.critDamageMult,
+          );
+          hitEnemy(target, roll.dmg, roll.crit);
+        }
         continue;
       }
 
       const e = enemies[actor as number]!;
       if (e.hp <= 0) continue;
+      if (hasStatus(e.statuses, 'stun')) {
+        e.statuses = e.statuses.filter((s) => s.id !== 'stun');
+        e.turnsSinceStun = 0;
+        e.turn += 1;
+        logLine(`${e.name} is stunned and loses its turn.`);
+        continue;
+      }
       e.turn += 1;
       const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
       if (boss && e.turn % boss.mechanicEvery === 0) {
@@ -263,9 +470,57 @@ export function runCombat(
       const absorbed = Math.min(shield, reduced);
       shield -= absorbed;
       hp -= reduced - absorbed;
+      energy += 1;
       logLine(
         `${e.name} hits for ${reduced - absorbed}${absorbed > 0 ? ` (shield absorbs ${absorbed})` : ''}.`,
       );
+    }
+    if (enemies.every((e) => e.hp <= 0) || hp <= 0) break;
+
+    // End-of-round ticks: dots/hots fire, durations decrement, cooldowns tick down.
+    for (const e of enemies) {
+      if (e.hp <= 0) continue;
+      for (const s of e.statuses) {
+        const defn: StatusDef = statusById(s.id)!;
+        if (defn.kind === 'dot') {
+          const dmg = (defn.perRound!.damage ?? 0) * s.stacks;
+          e.hp -= dmg;
+          logLine(
+            s.id === 'burn'
+              ? `${e.name} burns for ${dmg}.`
+              : `${e.name} suffers ${dmg} ${defn.name} damage.`,
+          );
+        } else if (defn.kind === 'hot') {
+          const heal = defn.perRound!.heal ?? 0;
+          e.hp = Math.min(e.maxHp, e.hp + heal);
+          logLine(`${e.name} regenerates ${heal} HP.`);
+        }
+      }
+      if (e.hp <= 0) logLine(`${e.name} falls.`);
+      e.statuses = e.statuses
+        .map((s) => ({ ...s, duration: s.id === 'stun' ? s.duration : s.duration - 1 }))
+        .filter((s) => s.id === 'stun' || s.duration > 0);
+      e.turnsSinceStun += 1;
+    }
+    for (const s of statuses) {
+      const defn: StatusDef = statusById(s.id)!;
+      if (defn.kind === 'dot') {
+        const dmg = (defn.perRound!.damage ?? 0) * s.stacks;
+        hp -= dmg;
+        logLine(
+          s.id === 'burn' ? `You burn for ${dmg}.` : `You suffer ${dmg} ${defn.name} damage.`,
+        );
+      } else if (defn.kind === 'hot') {
+        const heal = defn.perRound!.heal ?? 0;
+        hp = Math.min(maxHp, hp + heal);
+        logLine(`You regenerate ${heal} HP.`);
+      }
+    }
+    statuses = statuses
+      .map((s) => ({ ...s, duration: s.id === 'stun' ? s.duration : s.duration - 1 }))
+      .filter((s) => s.id === 'stun' || s.duration > 0);
+    for (const id of Object.keys(cooldowns)) {
+      if (cooldowns[id]! > 0) cooldowns[id]! -= 1;
     }
     if (enemies.every((e) => e.hp <= 0) || hp <= 0) break;
   }

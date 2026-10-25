@@ -11,3 +11,23 @@ export * from './engine';
 export { BOONS, RELICS, boonById, relicById, RARITY_WEIGHT } from './data/boons';
 export { ENEMIES, ELITES, BOSSES, enemyById, scaledStats } from './data/enemies';
 export { EVENTS, eventsForHollow } from './data/events';
+export {
+  BUILDS,
+  buildById,
+  buildUnlocked,
+  buyTreeNode,
+  respecBuild,
+  treeNodeById,
+  DEFAULT_BUILD,
+  TREE_BRANCHES,
+  TREE_NODES_PER_BRANCH,
+  NODE_COSTS,
+} from './data/builds';
+export { ELEMENTS, elementMultiplier, WEAKNESS_MULT, RESIST_MULT } from './data/elements';
+export {
+  STATUSES,
+  statusById,
+  STUN_BOSS_RESIST,
+  STUN_RECENT_RESIST,
+  STUN_RESIST_GRACE,
+} from './data/statuses';
