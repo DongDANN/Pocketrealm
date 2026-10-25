@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { buildWarden } from '../../art/companion';
 import { C } from '../../art/palette';
-import { disableSound, enableSound, playSfx, type SfxName } from '../../audio/chiptune';
+import { disableSound, enableSound, isSoundOn, playSfx } from '../lib/sound';
 import {
   CURRENCIES,
   DEFAULT_CURRENCY,
@@ -58,7 +58,7 @@ export function TodayMock() {
 
   const [amount, setAmount] = useState('');
   const [padOpen, setPadOpen] = useState(false);
-  const [soundOn, setSoundOn] = useState(false);
+  const [soundOn, setSoundOn] = useState(isSoundOn());
   const [checkedIn, setCheckedIn] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [currency, setCurrency] = useState<CurrencyCode>(storedCurrency);
@@ -90,7 +90,7 @@ export function TodayMock() {
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   };
 
-  const sfx = (name: SfxName) => {
+  const sfx = (name: string) => {
     if (soundOn) playSfx(name);
   };
 
@@ -148,7 +148,7 @@ export function TodayMock() {
   const checkIn = () => {
     if (checkedIn) return;
     setCheckedIn(true);
-    sfx('check');
+    sfx('confirm');
     say('Checked in. Seven days steady · mock only, nothing saved.');
   };
 
@@ -162,8 +162,8 @@ export function TodayMock() {
     const ok = await enableSound();
     setSoundOn(ok);
     if (ok) {
-      playSfx('check');
-      say('Sound on. Original 12-second loop, low volume.');
+      playSfx('confirm');
+      say('Sound on. Original chiptune, low volume.');
     } else {
       say('Audio is unavailable in this browser.');
     }

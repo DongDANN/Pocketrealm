@@ -26,9 +26,22 @@ import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { bytesLabel } from '../../core/view';
 import { say } from '../lib/toast';
 import { setTextMode, useTextMode } from '../lib/textMode';
+import {
+  disableSound,
+  enableSound,
+  loadSoundLevels,
+  playSfx,
+  setSoundLevels,
+  type SoundLevels,
+} from '../lib/sound';
 
 const LOCALES = ['en-PH', 'en-US', 'en-GB', 'en-SG', 'en-IN', 'de-DE', 'fr-FR'];
 const BACKUP_REMINDER_DAYS = 7;
+const SOUND_LEVEL_FIELDS: { key: keyof SoundLevels; label: string }[] = [
+  { key: 'master', label: 'Master' },
+  { key: 'music', label: 'Music' },
+  { key: 'sfx', label: 'Effects' },
+];
 
 function downloadJson(text: string, filename: string) {
   const blob = new Blob([text], { type: 'application/json' });
@@ -56,6 +69,7 @@ export function Settings() {
   const [error, setError] = useState('');
 
   const [importText, setImportText] = useState<string | null>(null);
+  const [levels, setLevels] = useState<SoundLevels>(loadSoundLevels);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importProblems, setImportProblems] = useState<{ path: string; message: string }[]>([]);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
@@ -102,6 +116,29 @@ export function Settings() {
     },
     [db, settings],
   );
+
+  /**
+   * The click is the gesture WebAudio waits for, so a player who turns sound on hears it confirm
+   * itself rather than waiting for the next tap.
+   */
+  const toggleSound = useCallback(async () => {
+    if (!settings) return;
+    const next = !settings.sound;
+    await update({ sound: next }, next ? 'Sound on.' : 'Sound off.');
+    if (!next) {
+      disableSound();
+      return;
+    }
+    if (!(await enableSound(levels))) say('Audio is unavailable in this browser.', 'warn');
+  }, [settings, update, levels]);
+
+  const changeLevel = useCallback((key: keyof SoundLevels, value: number) => {
+    setLevels((current) => {
+      const next = { ...current, [key]: value };
+      setSoundLevels(next);
+      return next;
+    });
+  }, []);
 
   const exportBook = useCallback(
     async (reason: 'manual' | 'reminder') => {
@@ -357,9 +394,7 @@ export function Settings() {
             type="button"
             className={settings.sound ? 'toggle-button on' : 'toggle-button'}
             aria-pressed={settings.sound}
-            onClick={() =>
-              void update({ sound: !settings.sound }, settings.sound ? 'Sound off.' : 'Sound on.')
-            }
+            onClick={() => void toggleSound()}
           >
             <img className="ui-icon" src="/ui/ui-icon-music.png" width={20} height={20} alt="" />
             <PixelText
@@ -369,6 +404,48 @@ export function Settings() {
             />
           </button>
         </div>
+        {settings.sound && (
+          <div className="sound-levels">
+            {SOUND_LEVEL_FIELDS.map((field) => (
+              <label className="field" key={field.key}>
+                <span className="field-label">
+                  <PixelText
+                    text={`${field.label} ${Math.round(levels[field.key] * 100)}%`}
+                    color={C.paper1}
+                    pixelScale={2}
+                  />
+                </span>
+                <input
+                  className="delve-range"
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={Math.round(levels[field.key] * 100)}
+                  aria-label={`${field.label} volume`}
+                  onChange={(event) => changeLevel(field.key, Number(event.target.value) / 100)}
+                />
+              </label>
+            ))}
+            <PixelButton
+              variant="secondary"
+              onClick={() => {
+                setSoundLevels(levels);
+                playSfx('coin');
+              }}
+            >
+              <PixelText text="Test sound" color={C.paper1} pixelScale={2} />
+            </PixelButton>
+            <p className="field-note">
+              <PixelText
+                text="The soundtrack is synthesized on this device from score data. There are no audio files, so nothing has to download, and music never plays before you touch the screen."
+                color={C.paper3}
+                pixelScale={2}
+                wrap={44}
+              />
+            </p>
+          </div>
+        )}
         <p className="field-note">
           <PixelText
             text={`Rest tokens: ${settings.restTokensPerMonth} a month. A rest day keeps the streak alive without logging; nothing is lost.`}

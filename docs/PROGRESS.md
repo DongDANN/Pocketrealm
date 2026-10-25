@@ -55,7 +55,9 @@ Last updated: 2026-10-25
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
       cosmetics/realm, weekly review, month summary, insights.
       **4a data controller and worker transport, 4b the twelve game screens plus committed browser
-      coverage and goldens; 4c scene art/audio, 4d bundle split and the rest of e2e pending.**
+      coverage and goldens, 4c-1 the route/vendor chunk split, 4c-2 the chiptune soundtrack and its
+      gesture gate; 4c-3 scene art and 4c-4 the lazy Canvas battle scene, 4d the rest of e2e
+      pending.**
 - [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
       reminders, error states, manifest shortcuts.
 - [ ] Gate 6 — Polish/ship: a11y, reduced motion, Lighthouse, vercel.json, README,
@@ -801,3 +803,59 @@ defect in the style lock itself, which is why this gate also changes `PixelText`
   splits the Delve scene and the route chunks. The Delve scene art, chiptune SFX and haptics are
   Gate 4c. Real-device timing, iOS Safari IndexedDB/worker behaviour and the offline cold launch on
   hardware remain MANUAL_TEST items; nothing here claims them.
+
+### Gate 4c-2 — A soundtrack that answers the Delve, and the gesture that arms it (2026-10-26)
+
+The Gate 0.5 chiptune seed (`src/audio/chiptune.ts`, one hard-coded 32-step loop) is gone. In its
+place: a data-driven tracker, a four-voice synth, 33 sound effects and a player that only exists
+after a touch.
+
+- **Score as data (`src/audio/score.ts`):** six looping themes (camp, three Hollows, boss, results)
+  and three one-shot stingers, each four channels — noise, two pulses with a selectable duty and a
+  triangle. Steps are written as text (`a4 ~ c#5 . | k - h - s`, bar lines optional) with rests,
+  holds, slides, vibrato and arpeggio marks; the octave digit follows the accidental so `bb3` is B
+  flat and `b3` is B natural. `prepareTrack` refuses a channel that does not fill its bars, and the
+  test suite pins tempo, loop length (7–45 s), MIDI range and bar alignment for every track.
+- **Synthesis (`src/audio/synth.ts`, `src/audio/sfx.ts`):** pulse waves come from cached Fourier
+  coefficients, the noise voice is one deterministic xorshift buffer shaped into kick/snare/hat/open,
+  and notes decay exponentially so a bar of eighths still breathes. 33 SFX presets cover taps,
+  combat, casts, statuses and the three celebrations — no audio file anywhere, so the offline pack
+  stays a code-and-art download.
+- **The player (`src/audio/engine.ts`):** master/music/SFX buses, a 250 ms lookahead scheduler on a
+  25 ms tick, swing applied only to off-steps, tie-aware note holds, and ducking under every stinger.
+  Two identical effects inside 40 ms collapse so a fast run cannot machine-gun. `enableAudio` is the
+  only path that constructs an `AudioContext`, and every other entry point is safe before it.
+- **A dead-in-the-browser bug the new test caught:** `enableAudio` gated on `this.master`, which
+  nothing ever created, so it returned false forever and the sound switch would have done nothing on
+  a real device either. The old unit tests only proved the _unsupported_ path — a browser-only defect
+  survives that. `buildBuses()` now makes the three gains at silence and `applyVolumes` opens them,
+  and `tests/audio.test.ts` drives the engine against a stand-in `AudioContext` (4 tests: buses
+  exist, a theme schedules voices, an effect plays and its duplicate does not, a stinger expires).
+- **The lazy boundary (`src/ui/lib/sound.ts`):** the engine is a dynamic import, so a player who
+  never turns sound on never downloads it — **verified** in the build output, where the entry chunk
+  (237.51 kB) contains no reference to `engine-*.js` (9.17 kB) or `score-*.js` (8.58 kB). The switch
+  itself stays in the book so it exports with the backup; only the three slider levels are
+  localStorage, because a cleared cache should cost a slider and not a preference.
+- **Settings is no longer a dead switch:** the toggle writes the book, then arms audio inside its own
+  click; three sliders (master, music, effects) and a Test sound button appear under it. `AppShell`
+  primes a one-shot gesture listener for a returning player who left sound on, which is the browser's
+  rule and not ours: until they touch something, the app stays silent.
+- **The Delve names what it does (`src/ui/lib/delveSound.ts`):** the theme follows the run (Hollow
+  one/two/three, boss while its door is next, results on the summary panel, camp otherwise) and the
+  cues come from comparing the run before an action with the run after it — a graze against a heavy
+  blow, an offer against a fork, a clear against a faint. It never predicts an outcome, one fanfare
+  per action and three layers at most. `PixelButton` answers every press with a blip.
+- **`defaultSettings().sound` was `true`.** SPEC §15.10 requires off-by-default, so a fresh book now
+  ships silent and attaches no listener at all; `tests/data-repos.test.ts` asserts the new default.
+- **Verification:** `npm run typecheck` **verified** clean; `npx vitest run` **verified** 616/616
+  across 59 files (18 audio, 9 cue); `npx playwright test` **verified** 41/41, including the new
+  `e2e/sound.spec.ts` (3 tests: a fresh book requests no audio file and constructs no `AudioContext`
+  even after real taps; enabling offers the three levels and yields exactly one context, and a reload
+  is silent again until the next touch; the Delve asks for its theme without opening a second one);
+  `npm run lint`, `prettier --write .` and `npm run art:validate` **verified** clean. Settings before
+  and after the toggle, and a live run, were read back as 390px PNGs with no page errors.
+- **Not verified / still open:** nobody has heard this. Headless Chromium cannot report what a
+  `PeriodicWave` sounds like, so mix balance, the tuning of the ducking and whether the themes are
+  pleasant are MANUAL_TEST items. iOS Safari's autoplay policy and a real device's resume-after-
+  background behaviour are untested. Haptics, the Delve scene art (4c-3) and the Canvas battle scene
+  (4c-4) are still open.

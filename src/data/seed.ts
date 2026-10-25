@@ -18,7 +18,8 @@ export function defaultSettings(): Settings {
     periodStartDay: 1,
     theme: 'system',
     reducedMotion: 'system',
-    sound: true,
+    // Off by default: a budgeting app must not start making noise at someone's desk (SPEC §15.10).
+    sound: false,
     restTokensPerMonth: DEFAULT_REST_TOKENS_PER_MONTH,
     schemaVersion: SCHEMA_VERSION,
   };

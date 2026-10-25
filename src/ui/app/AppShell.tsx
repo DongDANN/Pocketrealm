@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { C } from '../../art/palette';
 import { reloadForUpdate, subscribePwa, type PwaState } from '../../pwa/register';
 import { useSettings } from './hooks';
+import { primeSoundFromGesture } from '../lib/sound';
 import { PixelButton } from '../components/PixelButton';
 import { PixelPanel } from '../components/PixelPanel';
 import { PixelText } from '../components/PixelText';
@@ -22,6 +23,12 @@ export function AppShell() {
   useEffect(() => {
     document.documentElement.dataset.motion = settings?.reducedMotion ?? 'system';
   }, [settings?.reducedMotion]);
+
+  // A returning player who left sound on still has to touch the screen once: that is the browser's
+  // rule, not ours. Until then this only arms a listener.
+  useEffect(() => {
+    primeSoundFromGesture(settings?.sound === true);
+  }, [settings?.sound]);
 
   return (
     <>

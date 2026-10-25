@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { C } from '../../art/palette';
 import {
@@ -16,6 +16,7 @@ import {
   type HollowId,
   type RunState,
 } from '../../core/delve';
+import type { DelveRunResult } from '../../data/delve';
 import { AppHeader } from '../components/AppHeader';
 import { Gauge } from '../components/Gauge';
 import { PixelButton } from '../components/PixelButton';
@@ -34,6 +35,8 @@ import {
   roomKindLabel,
   upcomingRooms,
 } from '../lib/delveView';
+import { cuesForRun, musicTrackFor } from '../lib/delveSound';
+import { playSfx, playStinger, requestMusic } from '../lib/sound';
 
 function buffCopy(run: RunState, metaLevel: number): string {
   return `${run.unit.name} · Lv ${metaLevel} · Heat ${run.heat}`;
@@ -58,6 +61,13 @@ export function Delve() {
   const snapshot = delve.snapshot;
   const buffs = useMemo(() => (snapshot ? computeBuffs(snapshot.signals) : null), [snapshot]);
 
+  const runForMusic = snapshot?.active ?? null;
+  const musicTrack = musicTrackFor(runForMusic, !runForMusic && delve.lastEnded !== null);
+  useEffect(() => {
+    requestMusic(musicTrack);
+    return () => requestMusic(null);
+  }, [musicTrack]);
+
   if (delve.loading) return <LoadingPanel label="Lighting the lantern" />;
   if (delve.problem) return <FatalPanel message={delve.problem} />;
   if (!snapshot) return <LoadingPanel label="Lighting the lantern" />;
@@ -75,14 +85,42 @@ export function Delve() {
   const heatOpen = heatUnlocked(meta, hollow);
   const sparks = ledger?.sparks ?? 0;
 
+  /** The engine already decided what happened in this action; the sounds only say it out loud. */
+  const voice = (result: DelveRunResult | null) => {
+    if (!result) return;
+    if (!result.ok) {
+      playSfx('error');
+      return;
+    }
+    for (const cue of cuesForRun(run, result.run)) {
+      if (cue.kind === 'stinger') playStinger(cue.id);
+      else playSfx(cue.name);
+    }
+  };
+
   const start = async () => {
     const result = await delve.start(hollow, buildId, heat);
+    voice(result);
     if (result?.ok) setConfirmRetreat(false);
   };
 
   const startDaily = async () => {
     const result = await delve.startDaily();
+    voice(result);
     if (result?.ok) setConfirmRetreat(false);
+  };
+
+  const stepRun = async () => {
+    voice(await delve.step());
+  };
+
+  const chooseOption = async (optionId: string) => {
+    voice(await delve.choose(optionId));
+  };
+
+  const retreatRun = async () => {
+    voice(await delve.retreat());
+    setConfirmRetreat(false);
   };
 
   const catchUpPanel = delve.catchUp && (
@@ -416,7 +454,7 @@ export function Delve() {
                       type="button"
                       className="delve-choice"
                       disabled={delve.busy}
-                      onClick={() => void delve.choose(option.id)}
+                      onClick={() => void chooseOption(option.id)}
                     >
                       <PixelText text={option.label} color={C.amber1} pixelScale={2} wrap={30} />
                       {option.detail && (
@@ -437,7 +475,7 @@ export function Delve() {
                   (!run.daily && snapshot.oil < 1) ||
                   run.result !== 'active'
                 }
-                onClick={() => void delve.step()}
+                onClick={() => void stepRun()}
               >
                 <PixelText
                   text={
@@ -471,13 +509,7 @@ export function Delve() {
                     />
                   </p>
                   <div className="confirm-actions">
-                    <PixelButton
-                      disabled={delve.busy}
-                      onClick={() => {
-                        void delve.retreat();
-                        setConfirmRetreat(false);
-                      }}
-                    >
+                    <PixelButton disabled={delve.busy} onClick={() => void retreatRun()}>
                       <PixelText text="Yes, retreat" color={C.ink900} pixelScale={2} />
                     </PixelButton>
                     <PixelButton variant="secondary" onClick={() => setConfirmRetreat(false)}>

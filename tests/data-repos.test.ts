@@ -49,7 +49,8 @@ describe('settings', () => {
       periodStartDay: 1,
       theme: 'system',
       reducedMotion: 'system',
-      sound: true,
+      // Silent until a touch says otherwise (SPEC §15.10).
+      sound: false,
       restTokensPerMonth: 2,
       schemaVersion: SCHEMA_VERSION,
     });
@@ -60,10 +61,10 @@ describe('settings', () => {
     const db = testDb('settings-save');
     const first = await getSettings(db);
     await saveSettings(db, { ...first, currency: 'USD', periodStartDay: 15 });
-    const again = await saveSettings(db, { ...(await getSettings(db)), sound: false });
+    const again = await saveSettings(db, { ...(await getSettings(db)), sound: true });
     expect(again.currency).toBe('USD');
     expect(again.periodStartDay).toBe(15);
-    expect(again.sound).toBe(false);
+    expect(again.sound).toBe(true);
     expect(await db.settings.count()).toBe(1);
     db.close();
   });
