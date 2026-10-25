@@ -48,6 +48,7 @@ describe('the Forge', () => {
       startGlint: 0,
       embersBonus: 0,
       oilCapacity: 0,
+      rerolls: 0,
     });
     expect(forgeTotals({ maxhp: 2 }).maxHp).toBe(12);
     expect(forgeTotals({ glint: 3 }).startGlint).toBe(30);
@@ -66,6 +67,7 @@ describe('the Forge', () => {
       'glint',
       'embers',
       'oilcap',
+      'reroll',
     ]);
     for (const node of FORGE_NODES) {
       expect(node.maxLevel).toBeGreaterThan(0);

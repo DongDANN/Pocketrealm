@@ -13,7 +13,8 @@ export interface ForgeNode {
   /** Cost of buying level n+1 (0-based current level). */
   cost: (level: number) => number;
   effect: {
-    stat: 'maxHp' | 'atk' | 'def' | 'luck' | 'startGlint' | 'embersBonus' | 'oilCapacity';
+    stat:
+      'maxHp' | 'atk' | 'def' | 'luck' | 'startGlint' | 'embersBonus' | 'oilCapacity' | 'rerolls';
     add: number;
   };
   blurb: string;
@@ -76,6 +77,14 @@ export const FORGE_NODES: readonly ForgeNode[] = [
     effect: { stat: 'oilCapacity', add: 20 },
     blurb: '+20 Lantern Oil capacity per level',
   },
+  {
+    id: 'reroll',
+    name: 'Silver Lining',
+    maxLevel: 3,
+    cost: (l) => 20 + l * 15,
+    effect: { stat: 'rerolls', add: 1 },
+    blurb: '+1 boon-offer reroll per run per level',
+  },
 ];
 
 export function emptyForge(): ForgeLevels {
@@ -110,6 +119,7 @@ export function forgeTotals(forge: ForgeLevels): Record<string, number> {
     startGlint: 0,
     embersBonus: 0,
     oilCapacity: 0,
+    rerolls: 0,
   };
   for (const node of FORGE_NODES) {
     const level = forge[node.id] ?? 0;

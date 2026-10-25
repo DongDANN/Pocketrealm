@@ -47,6 +47,8 @@ export interface BossDef extends EnemyDef {
   mechanicMultiplier: number;
   /** HP-threshold phases, first to last. */
   phases?: BossPhase[];
+  /** Extra final phase added at Heat 3+. */
+  heatPhase?: BossPhase;
 }
 
 export const ENEMIES: readonly EnemyDef[] = [
@@ -266,6 +268,12 @@ export const BOSSES: readonly BossDef[] = [
         mechanicMultiplier: 1.8,
       },
     ],
+    heatPhase: {
+      hpPercent: 25,
+      name: 'Lantern Eater',
+      detail: 'the crown of thorns reaches for the lantern itself; the barrage hits brutally hard.',
+      mechanicMultiplier: 2.1,
+    },
   },
   {
     id: 'ashwrought',
@@ -298,6 +306,12 @@ export const BOSSES: readonly BossDef[] = [
         mechanicMultiplier: 1.9,
       },
     ],
+    heatPhase: {
+      hpPercent: 25,
+      name: 'Ash Reign',
+      detail: 'every cinder in the vault answers its call; the slam hits brutally hard.',
+      mechanicMultiplier: 2.2,
+    },
   },
   {
     id: 'umbralmonarch',
@@ -330,6 +344,12 @@ export const BOSSES: readonly BossDef[] = [
         mechanicMultiplier: 1.9,
       },
     ],
+    heatPhase: {
+      hpPercent: 25,
+      name: 'Eclipse',
+      detail: 'the dead stars gutter out; the siphon pulls brutally hard.',
+      mechanicMultiplier: 2.2,
+    },
   },
 ];
 

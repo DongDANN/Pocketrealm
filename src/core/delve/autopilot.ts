@@ -4,7 +4,8 @@
  */
 
 import { hashCombine, hashString, mulberry32, type Rng } from '../rng';
-import { BOONS, RARITY_WEIGHT, boonById, type Boon } from './data/boons';
+import { BOONS, MAX_BOON_LEVEL, RARITY_WEIGHT, type BoonLike } from './data/boons';
+import { FUSIONS, anyBoonById } from './data/fusions';
 import type { AutopilotPolicy, BoonTag, PendingChoice, RoomDef, RunState, Rarity } from './types';
 
 export function offerRng(run: RunState, salt: string): Rng {
@@ -15,7 +16,7 @@ export function offerRng(run: RunState, salt: string): Rng {
 export function topTag(run: RunState): BoonTag {
   const counts = new Map<BoonTag, number>();
   for (const id of run.boons) {
-    const b = boonById(id);
+    const b = anyBoonById(id);
     if (!b) continue;
     counts.set(b.tag, (counts.get(b.tag) ?? 0) + 1);
   }
@@ -33,27 +34,32 @@ const RARITY_UP: Record<Rarity, Rarity> = {
   epic: 'epic',
 };
 
-function effectiveRarity(run: RunState, b: Boon): Rarity {
+function effectiveRarity(run: RunState, b: BoonLike): Rarity {
   return run.relics.includes('relic-inkwell') ? RARITY_UP[b.rarity] : b.rarity;
 }
 
 /**
  * Weighted, distinct offer of `count` boons. Tag affinity boosts weights for tags already held;
- * bad-luck protection forces a top-tag boon in when two consecutive offers missed it.
+ * bad-luck protection forces a top-tag boon in when two consecutive offers missed it. Held boons
+ * below max level stay in the pool (level-up offers); maxed boons never appear. `salt` varies the
+ * draw (used by Forge rerolls); the default salt keys off the step index.
  */
 export function buildBoonOffer(
   run: RunState,
   count: number,
-): { offer: Boon[]; offerStreak: number } {
-  const rng = offerRng(run, `offer-${run.stepIndex}`);
-  const held = new Set(run.boons);
-  const pool = BOONS.filter((b) => !held.has(b.id));
+  salt?: string,
+): { offer: BoonLike[]; offerStreak: number } {
+  const rng = offerRng(run, salt ?? `offer-${run.stepIndex}`);
+  const pool: BoonLike[] = [...BOONS, ...FUSIONS].filter((b) => {
+    if (!run.boons.includes(b.id)) return true;
+    return (run.boonLevels[b.id] ?? 0) < MAX_BOON_LEVEL;
+  });
   const tagCounts = new Map<BoonTag, number>();
   for (const id of run.boons) {
-    const b = boonById(id);
+    const b = anyBoonById(id);
     if (b) tagCounts.set(b.tag, (tagCounts.get(b.tag) ?? 0) + 1);
   }
-  const pick = (forcedTag?: BoonTag): Boon => {
+  const pick = (forcedTag?: BoonTag): BoonLike => {
     const candidates = forcedTag ? pool.filter((b) => b.tag === forcedTag) : pool;
     const list = candidates.length > 0 ? candidates : pool;
     let total = 0;
@@ -70,10 +76,10 @@ export function buildBoonOffer(
     return list[list.length - 1]!;
   };
 
-  const chosen: Boon[] = [];
+  const chosen: BoonLike[] = [];
   const top = topTag(run);
   if (run.offerStreak >= 2) chosen.push(pick(top));
-  while (chosen.length < count) {
+  while (chosen.length < Math.min(count, pool.length)) {
     const next = pick();
     if (!chosen.includes(next)) chosen.push(next);
   }
@@ -84,8 +90,8 @@ export function buildBoonOffer(
 /** Autopilot picks a boon: first tag in the priority list that is offered, else highest rarity. */
 export function autopilotBoon(
   policy: AutopilotPolicy,
-  offer: readonly Boon[],
-): { boon: Boon; reason: string } {
+  offer: readonly BoonLike[],
+): { boon: BoonLike; reason: string } {
   for (const tag of policy.tagPriority) {
     const match = offer.find((b) => b.tag === tag);
     if (match)

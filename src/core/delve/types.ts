@@ -110,10 +110,16 @@ export interface RunState {
   floorPlan: FloorPlan;
   unit: CombatUnitState;
   boons: string[];
+  /** Level per held boon id (1-3); a held boon can be offered again to level up. */
+  boonLevels: Record<string, number>;
   relics: string[];
   glint: number;
   /** Embers earned so far this run (banked on retreat / 60% on faint / clear bonus). */
   embersEarned: number;
+  /** Heat level 0-5: optional difficulty, never forced, no effect on budgeting. */
+  heat: number;
+  /** Boon-offer rerolls remaining this run (granted by the Forge tree). */
+  rerollsLeft: number;
   /** Consecutive boon offers that missed the top tag (bad-luck protection). */
   offerStreak: number;
   /** Once-per-run relic flags. */

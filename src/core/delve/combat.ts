@@ -13,7 +13,8 @@
  */
 
 import { hashCombine, hashString, mulberry32, type Rng } from '../rng';
-import { boonById, type Boon } from './data/boons';
+import type { BoonLike } from './data/boons';
+import { anyBoonById } from './data/fusions';
 import {
   buildById,
   DEFAULT_BUILD,
@@ -21,7 +22,14 @@ import {
   type PassiveFx,
   type SkillDef,
 } from './data/builds';
-import { BOSSES, ELITES, enemyById, scaledStats } from './data/enemies';
+import {
+  BOSSES,
+  ELITES,
+  enemyById,
+  scaledStats,
+  type BossDef,
+  type BossPhase,
+} from './data/enemies';
 import { elementMultiplier, type Element } from './data/elements';
 import {
   cardById,
@@ -90,14 +98,14 @@ export function companionBase(level: number): {
   };
 }
 
-function countTag(boons: readonly Boon[], tag: string): number {
+function countTag(boons: readonly BoonLike[], tag: string): number {
   return boons.filter((x) => x.tag === tag).length;
 }
 
-function resolveBoons(ids: readonly string[]): Boon[] {
-  const out: Boon[] = [];
+function resolveBoons(ids: readonly string[]): BoonLike[] {
+  const out: BoonLike[] = [];
   for (const id of ids) {
-    const x = boonById(id);
+    const x = anyBoonById(id);
     if (x) out.push(x);
   }
   return out;
@@ -123,13 +131,14 @@ export function computeModifiers(
   const m: CombatModifiers = { ...BASE_MODIFIERS };
   const boons = resolveBoons(run.boons);
   for (const b of boons) {
+    const lvl = run.boonLevels[b.id] ?? 1;
     const fx = b.fx;
-    if (fx.kind === 'stat') m[fx.stat] += fx.add;
-    else if (fx.kind === 'critChance') m.critChance += fx.add;
-    else if (fx.kind === 'critDamage') m.critDamageMult += fx.mult;
-    else if (fx.kind === 'roomShield') m.roomShield += fx.amount;
-    else if (fx.kind === 'damageReduction') m.damageReduction += fx.percent;
-    else if (fx.kind === 'healAfterCombat') m.healAfterCombat += fx.percent;
+    if (fx.kind === 'stat') m[fx.stat] += fx.add * lvl;
+    else if (fx.kind === 'critChance') m.critChance += fx.add * lvl;
+    else if (fx.kind === 'critDamage') m.critDamageMult += fx.mult * lvl;
+    else if (fx.kind === 'roomShield') m.roomShield += fx.amount * lvl;
+    else if (fx.kind === 'damageReduction') m.damageReduction += fx.percent * lvl;
+    else if (fx.kind === 'healAfterCombat') m.healAfterCombat += fx.percent * lvl;
   }
   const guard = countTag(boons, 'guard');
   const fury = countTag(boons, 'fury');
@@ -320,6 +329,7 @@ export function runCombat(
   let statuses: StatusInstance[] = [];
 
   const roomAffixes = room.affixes ?? [];
+  const heatAtk = run.heat >= 1 ? 1.1 : 1; // Heat 1+: stronger enemies
   const enemies: EnemyState[] = room.enemies.map((id, i) => {
     const def = enemyById(id)!;
     const elite = ELITES.some((e) => e.id === id);
@@ -332,7 +342,7 @@ export function runCombat(
       name: def.name,
       hp: s.hp,
       maxHp: s.hp,
-      atk: s.atk,
+      atk: Math.round(s.atk * heatAtk),
       def: armored ? s.def + Math.max(1, Math.round(s.def * 0.3)) : s.def,
       spd: s.spd + (affixes.includes('swift') ? 2 : 0),
       elite,
@@ -359,12 +369,20 @@ export function runCombat(
   const markMultOf = (target: EnemyState): number =>
     hasStatus(target.statuses, 'mark') ? (statusById('mark')!.perRound!.dmgTakenMult ?? 1) : 1;
 
+  /** Boss phases for this fight: Heat 3+ appends the boss's extra final phase. */
+  const bossPhasesOf = (boss: BossDef): BossPhase[] => {
+    const base = boss.phases ?? [];
+    return run.heat >= 3 && boss.heatPhase ? [...base, boss.heatPhase] : base;
+  };
+
   /** Advance boss phases as HP crosses thresholds; studied bosses are named, others hidden. */
   function applyPhases(e: EnemyState): void {
     const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
-    if (!boss?.phases || e.phaseIndex >= boss.phases.length) return;
-    while (e.phaseIndex < boss.phases.length) {
-      const p = boss.phases[e.phaseIndex]!;
+    if (!boss) return;
+    const phases = bossPhasesOf(boss);
+    if (e.phaseIndex >= phases.length) return;
+    while (e.phaseIndex < phases.length) {
+      const p = phases[e.phaseIndex]!;
       if (e.hp > Math.floor((e.maxHp * p.hpPercent) / 100)) break;
       e.phaseIndex += 1;
       logLine(
@@ -592,7 +610,8 @@ export function runCombat(
       const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
       if (boss && e.turn % boss.mechanicEvery === 0) {
         if (bossTelegraph) {
-          const phase = boss.phases && e.phaseIndex > 0 ? boss.phases[e.phaseIndex - 1] : undefined;
+          const phases = bossPhasesOf(boss);
+          const phase = e.phaseIndex > 0 ? phases[e.phaseIndex - 1] : undefined;
           const mult = phase?.mechanicMultiplier ?? boss.mechanicMultiplier;
           let raw = Math.max(1, Math.round(e.atk * mult) + 2 - def);
           if (guardActive) {

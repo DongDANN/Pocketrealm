@@ -25,13 +25,20 @@ const KIND_WEIGHTS: [RoomKind, number][] = [
   ['elite', 8],
 ];
 
-/** Elites never appear on the first three floors of a hollow. */
-function kindWeights(floor: number): [RoomKind, number][] {
-  return floor >= 4 ? KIND_WEIGHTS : KIND_WEIGHTS.filter(([k]) => k !== 'elite');
+/** Elites never appear on the first three floors of a hollow. Heat 2 adds more elites, Heat 4 fewer rests. */
+function kindWeights(floor: number, heat: number): [RoomKind, number][] {
+  let weights = floor >= 4 ? KIND_WEIGHTS : KIND_WEIGHTS.filter(([k]) => k !== 'elite');
+  if (heat >= 2)
+    weights = weights.map(([k, w]) =>
+      k === 'elite' ? (['elite', 16] as const) : ([k, w] as const),
+    );
+  if (heat >= 4)
+    weights = weights.map(([k, w]) => (k === 'rest' ? (['rest', 4] as const) : ([k, w] as const)));
+  return weights;
 }
 
-function weightedKind(rng: { int(n: number): number }, floor: number): RoomKind {
-  const weights = kindWeights(floor);
+function weightedKind(rng: { int(n: number): number }, floor: number, heat: number): RoomKind {
+  const weights = kindWeights(floor, heat);
   const total = weights.reduce((s, [, w]) => s + w, 0);
   let roll = rng.int(total);
   for (const [kind, w] of weights) {
@@ -60,7 +67,12 @@ function pickAffixes(rng: { int(n: number): number }, kind: RoomKind, floor: num
   return [];
 }
 
-export function generateFloor(userSeed: number, hollowId: HollowId, floor: number): FloorPlan {
+export function generateFloor(
+  userSeed: number,
+  hollowId: HollowId,
+  floor: number,
+  heat = 0,
+): FloorPlan {
   const rng = mulberry32(floorSeed(userSeed, hollowId, floor));
   const rows = 3 + rng.int(3); // 3..5
   const cols = 2 + rng.int(2); // 2..3
@@ -84,7 +96,7 @@ export function generateFloor(userSeed: number, hollowId: HollowId, floor: numbe
       let kind: RoomKind;
       if (r === 0) kind = 'skirmish';
       else if (last) kind = isBossFloor ? 'boss' : 'rest';
-      else kind = weightedKind(rng, floor);
+      else kind = weightedKind(rng, floor, heat);
       row.push({
         id: `f${floor}r${r}c${c}`,
         kind,

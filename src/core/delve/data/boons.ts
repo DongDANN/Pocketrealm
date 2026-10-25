@@ -18,16 +18,23 @@ export type BoonEffect =
   | { kind: 'embersBonus'; percent: number }
   | { kind: 'damageReduction'; percent: number };
 
-export interface Boon {
+/** Boons cap at this level; maxed boons leave the offer pool. */
+export const MAX_BOON_LEVEL = 3;
+
+/** The shared shape of boons and fusion boons (everything the engine needs). */
+export interface BoonLike {
   id: string;
   name: string;
   tag: BoonTag;
   rarity: Rarity;
   fx: BoonEffect;
-  /** Offer weight; rarity is also expressed in text and colour. */
-  weight: number;
   /** Human-readable effect for logs and UI. */
   effect: string;
+}
+
+export interface Boon extends BoonLike {
+  /** Offer weight; rarity is also expressed in text and colour. */
+  weight: number;
 }
 
 export interface Relic {

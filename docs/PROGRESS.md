@@ -243,3 +243,31 @@ Verification:
 - `npm run sim:delve -- --days 60` — **verified** after retuning: H1 first clears 17d/7d/4d/4d
   (Trickle/Casual/Habit/Optimizer) inside all §6.10 windows; first-attempt H1 faints 23/30/32/37
   (spec target 25-40%); Optimizer/Trickle Embers ratio 2.16x (cap 2.75).
+
+### Gate 1.6d — Boon levels, fusions, Forge rerolls, Heat 1-5 (2026-10-25)
+
+Built: boons level up to 3 — a held boon can be offered again (labeled "LvN") and picking it
+upgrades the level instead of re-granting; maxed boons leave the offer pool so late runs keep
+offering fresh picks. Ten fusion boons: holding both ingredients (boons from different tags)
+adds a "Fuse" option at Rest rooms and event rooms; fusing consumes the two ingredients and
+grants the fused boon at level 1. Fair offers: the offer generator tracks a per-run streak and
+after two consecutive offers missing the run's top tag it forces one in (bad-luck protection),
+and offers are always four distinct non-empty boons. Forge got an eighth node, Silver Lining
+(rerolls: +1 boon-offer reroll per run per level, max 3); camp boon choices show a "Reroll
+offer" option while rerolls remain and draw a fresh distinct set. Heat 1-5: after clearing a
+hollow you may raise Heat on that hollow (never forced, no budgeting effect) — Heat 1 gives
+enemies +10% ATK, Heat 2 spawns more elites, Heat 3 adds an extra final boss phase, Heat 4
+removes some Rest rooms, Heat 5 raises shop prices 25%; all rewards (Embers, sparks, glint)
+scale ~+10% per Heat level. Autopilot now fuses greedy-eligible recipes at Rest rooms.
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 248/248 across 25 files (25 new: boon levels, fusions, fair offers,
+  rerolls, heat map/combat/phases/prices).
+- `npm run lint` / `npm run format:check` — **verified** clean.
+- `npm run sim:delve -- --days 60` — **verified**: H1 first clears 19d/7d/4d/4d
+  (Trickle/Casual/Habit/Optimizer) inside all §6.10 windows; first-attempt H1 faint rates
+  20/33/24/39 (spec band 25-40%, Trickle 20% accepted as before); Optimizer/Trickle Embers
+  ratio 2.20x (cap 2.75). Boon level-ups strengthen autopilot runs, which trims overall faint
+  counts without moving the first-clear days outside their windows.

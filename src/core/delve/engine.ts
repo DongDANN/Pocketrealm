@@ -16,9 +16,10 @@ import {
 import { BASE_MODIFIERS, computeModifiers, companionBase, runCombat } from './combat';
 import { affixById } from './data/affixes';
 import { buildById, DEFAULT_BUILD } from './data/builds';
-import { boonById, RELICS, type Boon } from './data/boons';
+import { MAX_BOON_LEVEL, RELICS, type BoonLike } from './data/boons';
 import { BOSSES } from './data/enemies';
 import { eventsForHollow, type EventOutcome } from './data/events';
+import { anyBoonById, fusionById, fusionRecipesFor, type FusionDef } from './data/fusions';
 import { forgeTotals } from './forge';
 import { generateFloor, HOLLOW_FLOORS } from './map';
 import { computeBuffs } from './signals';
@@ -38,6 +39,18 @@ const CLEAR_BONUS: Record<HollowId, number> = { 1: 25, 2: 30, 3: 45 };
 const BOON_CAP = 8;
 /** The Lantern can only refine this many Embers per local day (anti-grind). */
 const EMBER_DAILY_CAP = 50;
+/** Heat caps at 5 (SPEC 6.11 F: Heat 1 to 5 at MVP). */
+export const HEAT_MAX = 5;
+
+/** Heat reward multiplier: about 1.1 per level (Embers and Sparks only). */
+export function heatRewardMult(heat: number): number {
+  return 1 + Math.max(0, Math.min(HEAT_MAX, Math.trunc(heat))) * 0.1;
+}
+
+/** Heat unlocks for a hollow once it has been cleared; never forced. */
+export function heatUnlocked(meta: DelveMeta, hollow: HollowId): boolean {
+  return meta.clearedHollows.includes(hollow);
+}
 
 /** Bank Embers into the meta, clamped by the daily refinement cap. */
 function bankEmbers(
@@ -86,10 +99,12 @@ export function newRun(
   companionLevel: number,
   meta: DelveMeta,
   buildId: string = DEFAULT_BUILD,
+  heat = 0,
 ): RunState {
   const build = buildById(buildId) ?? buildById(DEFAULT_BUILD)!;
+  const h = Math.max(0, Math.min(HEAT_MAX, Math.trunc(heat)));
   const base = companionBase(companionLevel);
-  const plan = generateFloor(userSeed, hollowId, 1);
+  const plan = generateFloor(userSeed, hollowId, 1, h);
   return {
     runId: `d${hollowId}-${userSeed.toString(16)}-${meta.runsStarted + 1}`,
     userSeed,
@@ -115,9 +130,12 @@ export function newRun(
       luck: base.luck + build.profile.luckAdd,
     },
     boons: [],
+    boonLevels: {},
     relics: [],
     glint: 0,
     embersEarned: 0,
+    heat: h,
+    rerollsLeft: forgeTotals(meta.forge).rerolls ?? 0,
     offerStreak: 0,
     relicFlags: {},
     result: 'active',
@@ -141,13 +159,14 @@ function economyMods(run: RunState, forge: Record<string, number>): EconomyMods 
   };
   const tags = new Map<string, number>();
   for (const id of run.boons) {
-    const b = boonById(id);
+    const b = anyBoonById(id);
     if (!b) continue;
+    const lvl = run.boonLevels[id] ?? 1;
     tags.set(b.tag, (tags.get(b.tag) ?? 0) + 1);
     const fx = b.fx;
-    if (fx.kind === 'startGlint') mods.startGlint += fx.amount;
-    else if (fx.kind === 'shopDiscount') mods.shopDiscount += fx.percent;
-    else if (fx.kind === 'embersBonus') mods.embersBonus += fx.percent;
+    if (fx.kind === 'startGlint') mods.startGlint += fx.amount * lvl;
+    else if (fx.kind === 'shopDiscount') mods.shopDiscount += fx.percent * lvl;
+    else if (fx.kind === 'embersBonus') mods.embersBonus += fx.percent * lvl;
   }
   if ((tags.get('thrift') ?? 0) >= 3) mods.shopDiscount += 15;
   if ((tags.get('thrift') ?? 0) >= 5) mods.startGlint += 20;
@@ -231,11 +250,65 @@ function maxHpOf(run: RunState): number {
   return run.unit.maxHp + computeModifiers(run, {}, { wardHp: 0, luckBonus: 0 }).maxHp;
 }
 
-function applyBoonPick(run: RunState, boon: Boon): RunState {
-  let next = { ...run, boons: [...run.boons, boon.id] };
+/** Pick a boon (or fusion boon): first pick adds it at level 1; re-picks level it up to 3. */
+function applyBoonPick(run: RunState, boon: BoonLike): RunState {
+  const held = run.boons.includes(boon.id);
+  const lvl = run.boonLevels[boon.id] ?? 0;
+  let next: RunState;
+  if (held) {
+    if (lvl >= MAX_BOON_LEVEL) return run;
+    next = {
+      ...run,
+      boonLevels: { ...run.boonLevels, [boon.id]: lvl + 1 },
+    };
+    next = pushLog(next, 'reward', `${boon.name} upgraded to level ${lvl + 1}.`);
+  } else {
+    next = {
+      ...run,
+      boons: [...run.boons, boon.id],
+      boonLevels: { ...run.boonLevels, [boon.id]: 1 },
+    };
+  }
   const fx = boon.fx;
-  if (fx.kind === 'healNow') next = healHp(next, fx.percent);
+  if (fx.kind === 'healNow') next = healHp(next, fx.percent * (held ? lvl + 1 : 1));
   return next;
+}
+
+/** Choice label for a boon; held boons show the level they would reach. */
+function boonOptionLabel(run: RunState, b: BoonLike): string {
+  const held = run.boons.includes(b.id);
+  const suffix = held ? ` (Lv${(run.boonLevels[b.id] ?? 0) + 1})` : '';
+  return `${b.name}${suffix} (${b.rarity} ${b.tag})`;
+}
+
+/** Fuse option for a recipe the run currently qualifies for. */
+function fuseOption(f: FusionDef): ChoiceOption {
+  const [a, b] = f.from.map((id) => anyBoonById(id)?.name ?? id);
+  return {
+    id: `fuse:${f.id}`,
+    label: `Fuse: ${f.name}`,
+    detail: `${a} + ${b} → ${f.name}. ${f.effect}`,
+  };
+}
+
+/** Consume two ingredients and grant the fused boon; null when the recipe does not apply. */
+function applyFusion(run: RunState, recipeId: string): RunState | null {
+  const recipe = fusionById(recipeId);
+  if (!recipe) return null;
+  const [a, b] = recipe.from;
+  if (!run.boons.includes(a) || !run.boons.includes(b)) return null;
+  const boonLevels = { ...run.boonLevels };
+  delete boonLevels[a];
+  delete boonLevels[b];
+  const stripped: RunState = {
+    ...run,
+    boons: run.boons.filter((id) => id !== a && id !== b),
+    boonLevels,
+  };
+  const next = applyBoonPick(stripped, recipe);
+  const aName = anyBoonById(a)?.name ?? a;
+  const bName = anyBoonById(b)?.name ?? b;
+  return pushLog(next, 'choice', `Fused ${aName} + ${bName} → ${recipe.name}!`);
 }
 
 function grantBoonOffer(
@@ -256,11 +329,22 @@ function grantBoonOffer(
         ...next,
         pendingChoice: {
           kind: 'boon',
-          options: offer.map((b) => ({
-            id: b.id,
-            label: `${b.name} (${b.rarity} ${b.tag})`,
-            detail: b.effect,
-          })),
+          options: [
+            ...offer.map((b) => ({
+              id: b.id,
+              label: boonOptionLabel(run, b),
+              detail: b.effect,
+            })),
+            ...(run.rerollsLeft > 0
+              ? [
+                  {
+                    id: 'reroll',
+                    label: `Reroll offer (${run.rerollsLeft} left)`,
+                    detail: 'Draw a fresh set of boons.',
+                  },
+                ]
+              : []),
+          ],
           reason: 'Choose a boon.',
           stepIndex: next.stepIndex,
         },
@@ -296,15 +380,16 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
   // Floor complete. Same-day re-clears of a hollow pay 25% (Ember fatigue).
   const floor = next.floor;
   const fatigue = meta.lastClearDate[next.hollowId] === ctx.today ? 0.25 : 1;
+  const heatMult = heatRewardMult(next.heat);
   const reward = 4 + floor;
   const bonus = economyMods(next, forgeTotals(meta.forge)).embersBonus;
-  const gained = Math.max(1, Math.round(((reward * (100 + bonus)) / 100) * fatigue));
+  const gained = Math.max(1, Math.round(((reward * (100 + bonus)) / 100) * fatigue * heatMult));
   next = { ...next, embersEarned: next.embersEarned + gained };
   ledger.push({
     key: `delve:floor:${next.runId}:${floor}`,
     type: 'delve:floor',
     xp: 10,
-    sparks: 1,
+    sparks: Math.max(1, Math.round(heatMult)),
   });
   next = pushLog(
     next,
@@ -315,7 +400,7 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
   if (floor >= HOLLOW_FLOORS[next.hollowId]) {
     const clearBonus = Math.max(
       1,
-      Math.round(((CLEAR_BONUS[next.hollowId] * (100 + bonus)) / 100) * fatigue),
+      Math.round(((CLEAR_BONUS[next.hollowId] * (100 + bonus)) / 100) * fatigue * heatMult),
     );
     const bankedAll = bankEmbers(meta, next.embersEarned + clearBonus, ctx.today);
     meta = bankedAll.meta;
@@ -328,7 +413,12 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
       result: 'cleared',
       pendingChoice: null,
     };
-    ledger.push({ key: `delve:clear:${next.runId}`, type: 'delve:clear', xp: 60, sparks: 10 });
+    ledger.push({
+      key: `delve:clear:${next.runId}`,
+      type: 'delve:clear',
+      xp: 60,
+      sparks: Math.max(1, Math.round(10 * heatMult)),
+    });
     next = pushLog(
       next,
       'end',
@@ -344,7 +434,7 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
     floor: newFloor,
     row: 0,
     path: [],
-    floorPlan: generateFloor(next.userSeed, next.hollowId, newFloor),
+    floorPlan: generateFloor(next.userSeed, next.hollowId, newFloor, next.heat),
     glint: next.glint + glintGain,
   };
   if (next.relics.includes('relic-trailmix')) next = healHp(next, 8);
@@ -381,7 +471,9 @@ function shopItems(
   forge: Record<string, number>,
 ): { id: string; label: string; cost: number; detail: string }[] {
   const discount = economyMods(run, forge).shopDiscount;
-  const price = (base: number) => Math.max(1, Math.round((base * (100 - discount)) / 100));
+  const heatPrice = run.heat >= 5 ? 1.25 : 1; // Heat 5: pricier shops
+  const price = (base: number) =>
+    Math.max(1, Math.round(((base * (100 - discount)) / 100) * heatPrice));
   return [
     { id: 'heal', label: 'Poultice (heal 30%)', cost: price(40), detail: 'Heal 30% HP' },
     { id: 'boon', label: 'Wandering boon', cost: price(80), detail: 'Gain a boon' },
@@ -417,7 +509,16 @@ function autopilotShop(
 function autopilotRest(
   run: RunState,
   policy: StepContext['policy'],
-): { choice: 'rest' | 'retreat'; reason: string } {
+): { choice: 'rest' | 'retreat' | 'fuse'; reason: string; recipeId?: string } {
+  const eligible = fusionRecipesFor(run);
+  if (policy.route === 'greedy' && eligible.length > 0) {
+    const f = eligible[0]!;
+    return {
+      choice: 'fuse',
+      recipeId: f.id,
+      reason: `Autopilot: greedy route fuses ${f.name} instead of resting.`,
+    };
+  }
   const hpRatio = Math.round((run.unit.hp / maxHpOf(run)) * 100);
   // The last-row Rest on the floor before the boss floor is the last safe place to turn back.
   const nextIsBossFloor =
@@ -604,12 +705,16 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
       (o) =>
         !(o.outcome.kind === 'glint' && o.outcome.amount < 0 && next.glint < -o.outcome.amount),
     );
+    const fuses = fusionRecipesFor(next);
     if (ctx.policy.mode === 'camp') {
       next = {
         ...next,
         pendingChoice: {
           kind: 'event',
-          options: affordable.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
+          options: [
+            ...affordable.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
+            ...fuses.map((f) => fuseOption(f)),
+          ],
           reason: `${event.title} — ${event.text}`,
           stepIndex: next.stepIndex,
         },
@@ -631,6 +736,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           options: [
             { id: 'rest', label: 'Rest and recover', detail: 'Heal 40% HP' },
             { id: 'retreat', label: 'Retreat to camp', detail: `Bank ${next.embersEarned} Embers` },
+            ...fusionRecipesFor(next).map((f) => fuseOption(f)),
           ],
           reason: 'A safe room. Catch your breath, or head home.',
           stepIndex: next.stepIndex,
@@ -643,8 +749,13 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
       const ended = endRun(pushLog(next, 'choice', rest.reason), ctx.meta, 'retreated', ctx.today);
       return { run: ended.run, meta: ended.meta, ledger, oilSpent: 1, ended: true };
     }
-    const healPct = 40 + (next.relics.includes('relic-nightlight') ? 15 : 0);
-    next = pushLog(healHp(next, healPct), 'choice', rest.reason);
+    if (rest.choice === 'fuse') {
+      const fused = applyFusion(next, rest.recipeId!);
+      next = fused ? pushLog(fused, 'info', rest.reason) : next;
+    } else {
+      const healPct = 40 + (next.relics.includes('relic-nightlight') ? 15 : 0);
+      next = pushLog(healHp(next, healPct), 'choice', rest.reason);
+    }
   }
 
   const adv = advanceAfterRoom(next, ctx);
@@ -731,7 +842,43 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
       return { run: next, meta: ctx.meta, ledger, oilSpent: 0, ended: false };
     }
     case 'boon': {
-      const boon = boonById(optionId);
+      if (optionId === 'reroll') {
+        if (next.rerollsLeft <= 0) return empty;
+        const count = choice.options.filter((o) => o.id !== 'reroll').length;
+        const { offer } = buildBoonOffer(
+          next,
+          count,
+          `offer-${next.stepIndex}-reroll-${next.rerollsLeft}`,
+        );
+        const rerollsLeft = next.rerollsLeft - 1;
+        next = {
+          ...next,
+          rerollsLeft,
+          pendingChoice: {
+            kind: 'boon',
+            options: [
+              ...offer.map((b) => ({
+                id: b.id,
+                label: boonOptionLabel(next, b),
+                detail: b.effect,
+              })),
+              ...(rerollsLeft > 0
+                ? [
+                    {
+                      id: 'reroll',
+                      label: `Reroll offer (${rerollsLeft} left)`,
+                      detail: 'Draw a fresh set of boons.',
+                    },
+                  ]
+                : []),
+            ],
+            reason: 'Choose a boon.',
+            stepIndex: next.stepIndex,
+          },
+        };
+        return { run: next, meta: ctx.meta, ledger, oilSpent: 0, ended: false };
+      }
+      const boon = anyBoonById(optionId);
       if (!boon) return empty;
       next = pushLog(
         { ...applyBoonPick(next, boon), pendingChoice: null },
@@ -748,6 +895,12 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
       break;
     }
     case 'event': {
+      if (optionId.startsWith('fuse:')) {
+        const fused = applyFusion(next, optionId.slice(5));
+        if (!fused) return empty;
+        next = { ...fused, pendingChoice: null };
+        break;
+      }
       const events = eventsForHollow(next.hollowId);
       const room = currentRoom(next);
       const event = events[room.optionSeed % events.length]!;
@@ -768,6 +921,12 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
         const ended = endRun(next, ctx.meta, 'retreated', ctx.today);
         next = ended.run;
         return { run: next, meta: ended.meta, ledger, oilSpent: 0, ended: true };
+      }
+      if (optionId.startsWith('fuse:')) {
+        const fused = applyFusion(next, optionId.slice(5));
+        if (!fused) return empty;
+        next = { ...fused, pendingChoice: null };
+        break;
       }
       if (optionId !== 'rest') return empty;
       const healPct = 40 + (next.relics.includes('relic-nightlight') ? 15 : 0);
