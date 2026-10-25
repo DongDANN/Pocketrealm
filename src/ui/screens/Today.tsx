@@ -12,6 +12,7 @@ import { PixelImage } from '../components/PixelImage';
 import { PixelPanel } from '../components/PixelPanel';
 import { PixelText } from '../components/PixelText';
 import { useCompanion, useQuestChips, useSettings, useToday, useTodayBoard } from '../app/hooks';
+import { useDelve } from '../app/delve';
 import { useSession } from '../app/session';
 import { usePrefersReducedMotion } from '../hooks/useMediaQuery';
 import { checkIn } from '../../data/habits';
@@ -33,6 +34,7 @@ export function Today() {
   const board = useTodayBoard();
   const settings = useSettings();
   const companion = useCompanion();
+  const delve = useDelve();
   const today = useToday();
   const quests = useQuestChips(today);
   const systemReduced = usePrefersReducedMotion();
@@ -212,6 +214,40 @@ export function Today() {
         ))}
       </PixelPanel>
 
+      <Link className="delve-strip-panel" to="/delve" aria-label="Open the Delve">
+        {delve.snapshot ? (
+          <>
+            <span className="delve-strip-head">
+              <PixelText
+                text={
+                  delve.catchingUp
+                    ? 'Walking the Hollows…'
+                    : delve.snapshot.active
+                      ? `${delve.snapshot.active.pendingChoice ? 'Waiting at a choice' : `Floor ${delve.snapshot.active.floor} · step ${delve.snapshot.active.stepIndex}`}`
+                      : 'No run out. The camp is open.'
+                }
+                color={C.paper0}
+                pixelScale={2}
+                wrap={26}
+              />
+            </span>
+            <span className="delve-strip-meta">
+              <PixelText
+                text={`${delve.snapshot.oil} oil · ${delve.snapshot.meta.embers} Embers${
+                  delve.catchUp ? ' · news waiting' : ''
+                }`}
+                color={C.paper3}
+                pixelScale={2}
+              />
+            </span>
+          </>
+        ) : (
+          <span className="delve-strip-head">
+            <PixelText text="The Delve" color={C.paper0} pixelScale={2} />
+          </span>
+        )}
+      </Link>
+
       <PixelPanel className="companion-panel" aria-labelledby="companion-title">
         <div className="companion-art">
           {reducedMotion ? (
@@ -243,9 +279,14 @@ export function Today() {
 
       {quests && quests.length > 0 && (
         <PixelPanel className="quest-panel" aria-labelledby="quests-title">
-          <h2 id="quests-title" className="panel-title">
-            <PixelText text="Today's work" color={C.paper0} pixelScale={3} />
-          </h2>
+          <div className="panel-head">
+            <h2 id="quests-title" className="panel-title">
+              <PixelText text="Today's work" color={C.paper0} pixelScale={3} />
+            </h2>
+            <Link className="text-link" to="/quests">
+              <PixelText text="Claim →" color={C.amber2} pixelScale={2} />
+            </Link>
+          </div>
           <div className="quest-chips">
             {quests.map((quest) => (
               <span className={quest.done ? 'quest-chip done' : 'quest-chip'} key={quest.id}>
@@ -258,16 +299,43 @@ export function Today() {
               </span>
             ))}
           </div>
-          <p className="panel-note">
-            <PixelText
-              text="Claiming quests arrives with the realm gate. Progress is already being kept."
-              color={C.paper3}
-              pixelScale={2}
-              wrap={34}
-            />
-          </p>
         </PixelPanel>
       )}
+
+      <PixelPanel className="ritual-panel" aria-labelledby="ritual-title">
+        <h2 id="ritual-title" className="panel-title">
+          <PixelText text="Rituals" color={C.paper0} pixelScale={3} />
+        </h2>
+        <div className="link-grid">
+          <Link className="camp-link" to="/review">
+            <PixelText text="Weekly review" color={C.amber2} pixelScale={2} />
+            <PixelText
+              text="About a minute. It pays the review bonus and lights the lantern buff."
+              color={C.paper3}
+              pixelScale={2}
+              wrap={28}
+            />
+          </Link>
+          <Link className="camp-link" to="/insights">
+            <PixelText text="Insights" color={C.amber2} pixelScale={2} />
+            <PixelText
+              text="This period against last, six months, and the days you touched."
+              color={C.paper3}
+              pixelScale={2}
+              wrap={28}
+            />
+          </Link>
+          <Link className="camp-link" to="/achievements">
+            <PixelText text="Achievements" color={C.amber2} pixelScale={2} />
+            <PixelText
+              text="Granted on the day they are met. Nothing to claim twice."
+              color={C.paper3}
+              pixelScale={2}
+              wrap={28}
+            />
+          </Link>
+        </div>
+      </PixelPanel>
 
       <p className="art-footer">
         <PixelText

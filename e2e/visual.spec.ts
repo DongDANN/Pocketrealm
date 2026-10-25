@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { completeOnboarding, pinClockAndIds, startRun } from './helpers';
 
 test.describe('style-lock goldens', () => {
   test.use({
@@ -49,5 +50,50 @@ test.describe('desktop golden', () => {
       fullPage: true,
       animations: 'disabled',
     });
+  });
+});
+
+/**
+ * The game layer, one golden per screen at the phone width the style lock was cut for. A run is
+ * already active so the Delve hub is measured in its densest state, not the empty camp.
+ */
+test.describe('game goldens', () => {
+  test.use({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 1,
+    reducedMotion: 'reduce',
+  });
+
+  const screens: [string, string, string][] = [
+    ['/delve', 'delve-run', 'The Delve'],
+    ['/delve/policy', 'delve-policy', 'Autopilot'],
+    ['/delve/forge', 'delve-forge', 'Forge'],
+    ['/delve/workshop', 'delve-workshop', 'Workshop'],
+    ['/delve/cards', 'delve-cards', 'Habit Cards'],
+    ['/delve/codex', 'delve-codex', 'Codex'],
+    ['/delve/history', 'delve-history', 'Run history'],
+    ['/quests', 'quests', 'Quests'],
+    ['/achievements', 'achievements', 'Achievements'],
+    ['/realm', 'realm', 'The Realm'],
+    ['/review', 'review', 'Weekly review'],
+    ['/insights', 'insights', 'Insights'],
+  ];
+
+  test.beforeEach(async ({ page }) => {
+    await pinClockAndIds(page);
+  });
+
+  test('the camp and the ritual screens at 390px', async ({ page }) => {
+    await completeOnboarding(page, { income: '25000' });
+    await startRun(page);
+
+    for (const [path, name, title] of screens) {
+      await page.goto(path);
+      await expect(page.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
+      await expect(page).toHaveScreenshot(`${name}.png`, {
+        fullPage: true,
+        animations: 'disabled',
+      });
+    }
   });
 });

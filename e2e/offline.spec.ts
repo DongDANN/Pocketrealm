@@ -29,7 +29,7 @@ test('cold-launches offline with the book intact and keeps logging entries', asy
   await page.reload();
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
   await expect.poll(() => visibleText(page, '[role="status"]')).toContain('Working offline');
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '₱400.00 left',
   );
@@ -39,7 +39,7 @@ test('cold-launches offline with the book intact and keeps logging entries', asy
   await page.getByRole('button', { name: 'Save entry' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
   expect(await visibleText(page, '.safe-meta')).toContain('Spent today ₱150.00');
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '₱350.00 left',
   );

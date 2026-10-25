@@ -22,7 +22,9 @@ export function nospendReward(at: LocalDate): GrantSpec[] {
 }
 
 export function reviewReward(weekId: string, at: LocalDate): GrantSpec[] {
-  return [{ key: `review:${weekId}`, type: 'review', xp: 60, sparks: 10, oil: 30, at }];
+  return [
+    { key: `review:${weekId}`, type: 'review', xp: 60, sparks: 10, oil: 30, at, meta: { weekId } },
+  ];
 }
 
 /** Oil-free on purpose: an envelope is paid for being *used*, so nothing here buys oil with abstinence. */

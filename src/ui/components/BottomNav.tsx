@@ -4,7 +4,7 @@ import { PixelText } from './PixelText';
 
 const LINKS = [
   { to: '/', label: 'Today', icon: 'coin', end: true },
-  { to: '/envelopes', label: 'Jars', ariaLabel: 'Envelopes', icon: 'panel-ledger' },
+  { to: '/envelopes', label: 'Jars', ariaLabel: 'Envelopes', icon: 'jars' },
   { to: '/add', label: 'Add', icon: 'plus', primary: true },
   { to: '/goals', label: 'Goals', icon: 'spark' },
   { to: '/history', label: 'Log', ariaLabel: 'History and transactions', icon: 'clock' },

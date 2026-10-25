@@ -53,7 +53,15 @@ describe('habit reward specs', () => {
 
   it('pays the weekly review per week id, not per day', () => {
     expect(reviewReward('2026-W44', AT)).toEqual([
-      { key: 'review:2026-W44', type: 'review', xp: 60, sparks: 10, oil: 30, at: AT },
+      {
+        key: 'review:2026-W44',
+        type: 'review',
+        xp: 60,
+        sparks: 10,
+        oil: 30,
+        at: AT,
+        meta: { weekId: '2026-W44' },
+      },
     ]);
   });
 

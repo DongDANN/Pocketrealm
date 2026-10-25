@@ -43,3 +43,29 @@ export async function completeOnboarding(
 export function nav(page: Page) {
   return page.getByRole('navigation', { name: 'Main' });
 }
+
+/**
+ * Begins a real Delve run. The densest screen in the book: map, kit, choices and log all at once,
+ * so layout and style checks that only visit the camp screens would miss it.
+ */
+export async function startRun(page: Page): Promise<void> {
+  await page.goto('/delve');
+  await page.getByRole('button', { name: /^Descend into Rootfall Warren/ }).click();
+  await expect(page.getByRole('heading', { name: 'Kit' })).toBeVisible();
+}
+
+/**
+ * Freezes the two things that make the same screen unrepeatable: the wall clock (dates, the oil
+ * trickle, "resets in") and freshly minted ids, because a run's floor plan is hashed from the
+ * companion id. Goldens need both or they drift at local midnight and on every new book.
+ */
+export async function pinClockAndIds(page: Page, at = '2026-10-25T09:00:00'): Promise<void> {
+  await page.clock.setFixedTime(new Date(at));
+  await page.addInitScript(() => {
+    let counter = 0;
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      configurable: true,
+      value: () => `7d4a11e0-5a3e-4b0a-9c1d-${String(counter++).padStart(12, '0')}`,
+    });
+  });
+}

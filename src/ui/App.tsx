@@ -6,6 +6,7 @@ import { subscribePwa, type PwaState } from '../pwa/register';
 import { PixelText } from './components/PixelText';
 import { ToastHost } from './components/ToastHost';
 import { AppGate, OnboardingGate, RequireOnboarded } from './app/gates';
+import { DelveProvider } from './app/delve';
 import { SessionProvider } from './app/session';
 import { AppShell } from './app/AppShell';
 import { Foundation } from './screens/Foundation';
@@ -19,6 +20,18 @@ import { EnvelopeDetail } from './screens/EnvelopeDetail';
 import { Goals } from './screens/Goals';
 import { History } from './screens/History';
 import { Settings } from './screens/Settings';
+import { Quests } from './screens/Quests';
+import { Achievements } from './screens/Achievements';
+import { Review } from './screens/Review';
+import { Insights } from './screens/Insights';
+import { Realm } from './screens/Realm';
+import { Delve } from './screens/Delve';
+import { DelveCards } from './screens/DelveCards';
+import { DelveCodex } from './screens/DelveCodex';
+import { DelveForge } from './screens/DelveForge';
+import { DelveHistory } from './screens/DelveHistory';
+import { DelvePolicy } from './screens/DelvePolicy';
+import { DelveWorkshop } from './screens/DelveWorkshop';
 
 /**
  * First run leads to onboarding; every book screen sits behind the shared thumb bar. The style-lock
@@ -45,7 +58,9 @@ export function App() {
           <Route
             element={
               <RequireOnboarded>
-                <AppShell />
+                <DelveProvider>
+                  <AppShell />
+                </DelveProvider>
               </RequireOnboarded>
             }
           >
@@ -56,6 +71,18 @@ export function App() {
             <Route path="/goals" element={<Goals />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/quests" element={<Quests />} />
+            <Route path="/achievements" element={<Achievements />} />
+            <Route path="/review" element={<Review />} />
+            <Route path="/insights" element={<Insights />} />
+            <Route path="/realm" element={<Realm />} />
+            <Route path="/delve" element={<Delve />} />
+            <Route path="/delve/policy" element={<DelvePolicy />} />
+            <Route path="/delve/forge" element={<DelveForge />} />
+            <Route path="/delve/workshop" element={<DelveWorkshop />} />
+            <Route path="/delve/cards" element={<DelveCards />} />
+            <Route path="/delve/codex" element={<DelveCodex />} />
+            <Route path="/delve/history" element={<DelveHistory />} />
           </Route>
           <Route path="/art" element={<ArtPreview />} />
           <Route path="/mock/today" element={<TodayMock />} />

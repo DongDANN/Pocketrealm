@@ -15,7 +15,7 @@ test('first run opens a real book and keeps it across reloads', async ({ page })
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Tala' })).toBeVisible();
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '₱12,500.00 left',
   );
@@ -23,7 +23,7 @@ test('first run opens a real book and keeps it across reloads', async ({ page })
 
   await page.reload();
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '₱12,500.00 left',
   );
@@ -51,7 +51,7 @@ test('a common expense is three taps: Add, amount, Save', async ({ page }) => {
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
   expect(await visibleText(page, '.toast-host')).toContain('Logged ₱250.00');
   expect(await visibleText(page, '.safe-meta')).toContain('Spent today ₱250.00');
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '₱250.00 left',
   );
@@ -67,7 +67,7 @@ test('overspending turns the envelope red and a transfer moves money between jar
   await page.getByRole('button', { name: 'Amount ₱1,000.00' }).click();
   await page.getByRole('button', { name: 'Save entry' }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '-₱500.00 left',
   );
@@ -88,11 +88,11 @@ test('overspending turns the envelope red and a transfer moves money between jar
 
   await page.getByRole('link', { name: 'Jars', exact: true }).click();
   await expect(page).toHaveURL(/\/envelopes$/);
-  await expect(page.locator('.envelope-row').nth(0).locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').nth(0).locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '-₱550.00 left',
   );
-  await expect(page.locator('.envelope-row').nth(1).locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').nth(1).locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '₱350.00 left',
   );
@@ -153,9 +153,8 @@ test('a backup moves to a second browser and restores the whole book', async ({
 
   await other.goto('/');
   await expect(other.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
-  await expect(other.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
-    'aria-label',
-    '₱12,374.50 left',
-  );
+  await expect(
+    other.locator('.envelope-row').first().locator('.money .pixel-text'),
+  ).toHaveAttribute('aria-label', '₱12,374.50 left');
   await second.close();
 });

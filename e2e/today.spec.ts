@@ -4,17 +4,17 @@ import { visibleText } from './helpers';
 test('defaults to PHP and stores a display-only currency preference', async ({ page }) => {
   await page.goto('/mock/today');
   const picker = page.getByLabel('Display currency');
-  const safeAmount = page.locator('.safe-amount > canvas');
+  const safeAmount = page.locator('.safe-amount > .pixel-text');
   await expect(picker).toHaveValue('PHP');
   await expect(safeAmount).toHaveAttribute('aria-label', '₱4,250.00');
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '₱12,160.00 left',
   );
 
   await picker.selectOption('USD');
   await expect(safeAmount).toHaveAttribute('aria-label', '$4,250.00');
-  await expect(page.locator('.envelope-row').first().locator('.money canvas')).toHaveAttribute(
+  await expect(page.locator('.envelope-row').first().locator('.money .pixel-text')).toHaveAttribute(
     'aria-label',
     '$12,160.00 left',
   );
@@ -37,7 +37,10 @@ test('number pad logs a mock expense and closes with Escape', async ({ page }) =
   for (const key of ['1', '2', '.', '3', '4']) {
     await page.getByRole('button', { name: key, exact: true }).click();
   }
-  await expect(page.locator('.numpad-display > canvas')).toHaveAttribute('aria-label', '₱12.34');
+  await expect(page.locator('.numpad-display > .pixel-text')).toHaveAttribute(
+    'aria-label',
+    '₱12.34',
+  );
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -110,7 +113,7 @@ test('the readable text toggle swaps the bitmap face for the system face', async
   );
   await expect(page.locator('.currency-label')).toContainText('Currency');
   expect(await visibleText(page, '.safe-amount')).toContain('₱4,250.00');
-  await expect(page.locator('.safe-amount > canvas')).toHaveCount(0);
+  await expect(page.locator('.safe-amount > .pixel-text')).toHaveCount(0);
 
   await page.reload();
   await expect(page.getByRole('button', { name: 'Readable text: on' })).toBeVisible();

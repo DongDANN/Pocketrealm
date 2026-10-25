@@ -54,8 +54,8 @@ Last updated: 2026-10-25
       only; Firefox, WebKit, real phones and screen readers remain Gate 5/6 and MANUAL_TEST items.**
 - [ ] Gate 4 — Game layer: Delve screens + lazy Canvas 2D scene, audio, quests/achievements UI,
       cosmetics/realm, weekly review, month summary, insights.
-      **4a data controller, worker transport and controller tests done; 4b screens, 4c scene/audio,
-      4d e2e pending.**
+      **4a data controller and worker transport, 4b the twelve game screens plus committed browser
+      coverage and goldens; 4c scene art/audio, 4d bundle split and the rest of e2e pending.**
 - [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
       reminders, error states, manifest shortcuts.
 - [ ] Gate 6 — Polish/ship: a11y, reduced motion, Lighthouse, vercel.json, README,
@@ -747,3 +747,57 @@ review buff`; losing the buff clamps the lamp instead of hiding oil. The wallet 
   browser bundle because the app does not import the controller until Gate 4b; browser worker
   transport and real-device timing are Gate 4d/5 work. No screen or e2e coverage for these APIs is
   claimed yet.
+
+### Gate 4b — The game screens on real data, and the style lock that had to change (2026-10-25)
+
+Twelve screens went in: the run itself, Autopilot, Forge, Workshop, Habit Cards, Codex, run history,
+Quests, Achievements, the Realm, Weekly review and Insights. Every one of them reads and writes the
+Gate 4a controller — no screen holds a copy of game state. Reviewing the new goldens then exposed a
+defect in the style lock itself, which is why this gate also changes `PixelText`.
+
+- **One owner for the run (`src/ui/app/delve.tsx`):** `DelveProvider` holds the snapshot, the oil
+  wallet, the Autopilot policy and the catch-up job, and exposes run actions behind a single action
+  lock so two taps cannot commit the same step. Screens read it through `useDelve()`. The module Web
+  Worker from Gate 4a is now really in the browser bundle: `src/data/delveWorker.ts` spawns it as its
+  own 61 kB chunk and falls back to the pure `runCatchUpJob` when the transport is unavailable.
+- **Style lock change (`src/ui/components/PixelText.tsx`):** a bitmap line used to be one canvas and
+  therefore could not shrink, which is exactly what pushed cards past the edge of a 390px screen.
+  Words are now one canvas each inside a wrapping flex line, so a paragraph reflows with its panel;
+  `wrap` is a soft character cap on top of that instead of the only break rule. The accessible name
+  moved to the wrapper (`role="img" aria-label={text}`) and the canvases became `aria-hidden`.
+- **Follow-on fixes the goldens demanded:** the Delve map chips carry a short label
+  (`roomKindChip()` — Fight/Loot) with the full room kind as the chip's accessible name, because
+  three unbreakable bitmap words do not fit across 390px; the run log's empty state wraps; the header
+  title flexes and drops its back label below 390px; `.pixel-bar-row` lifts the amount onto the
+  label's line below 420px; `.shop-grid`/`.link-grid` track minimums use `min(240px, 100%)` /
+  `min(200px, 100%)` so a single long word cannot widen a card; the Codex collapsed 28 identical
+  "???" rows into one "N not sighted yet" line per shelf (golden 2884px → 1300px).
+- **A real hole no canvas check could see:** the Envelopes nav item pointed at
+  `/ui/ui-icon-panel-ledger.png`, which does not exist — the tab rendered a broken-image glyph.
+  `iconJars()` was authored in `src/art/ui.ts`, registered as `ui.icon.jars`, and the nav now asks
+  for `jars`. `npm run ui:assets` writes 25 UI PNGs.
+- **Sparks and the Realm (`src/core/cosmetics.ts`, `src/data/cosmetics.ts`, `src/art/cosmetics.ts`):**
+  Sparks are ledger total minus purchase receipts, so a purchase can never mint spendable currency
+  and the budget is untouched. The Realm shop, keepsake cards and link grid read that number.
+- **Committed browser coverage:** new `e2e/delve.spec.ts` drives a real run, camp fork, Autopilot,
+  Forge, Workshop, Cards, Codex, history, Quests, Achievements, Realm Sparks purchases and the
+  once-only review payout. `e2e/visual.spec.ts` adds a 12-screen 390px golden set.
+- **Three durable e2e invariants, each of which found a live bug:**
+  1. per-box spill — any box whose `scrollWidth > clientWidth` and whose excess is a bitmap line is
+     reported with the culprit's width and text (a native range thumb's own ink is skipped);
+  2. broken `<img>` — a missing PNG is now a layout failure, not a shrug;
+  3. measure with an active run — `startRun()` runs before the app-route sweep, because the densest
+     screen in the book was never visited by the layout or visual specs at all.
+- **Reproducible goldens:** `pinClockAndIds()` freezes the wall clock and replaces
+  `crypto.randomUUID` with a counter. A run's floor plan is hashed from the companion id and the oil
+  trickle reads the clock, so without this the Delve, history and Quest goldens drifted at local
+  midnight and on every new book. Two consecutive unflagged runs now re-generate nothing.
+- **Verification:** `npm run typecheck` **verified** clean; `npx vitest run` **verified** 594/594
+  across 58 files; `npx playwright test` **verified** 38/38 (11 layout viewports × 2 specs, delve,
+  app, offline, today, audio, 5 golden tests); `npm run lint`, `prettier --write .` and
+  `npm run art:validate` **verified** clean (40 assets, 59 frames, 8 preview PNGs, 6 GIFs, 25 UI
+  PNGs). All 12 new goldens were read as images and reviewed by eye.
+- **Not verified / still open:** the bundle is 812 kB JS and the >500 kB warning stands — Gate 4c
+  splits the Delve scene and the route chunks. The Delve scene art, chiptune SFX and haptics are
+  Gate 4c. Real-device timing, iOS Safari IndexedDB/worker behaviour and the offline cold launch on
+  hardware remain MANUAL_TEST items; nothing here claims them.

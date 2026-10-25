@@ -380,6 +380,32 @@ describe('choices and camp forks', () => {
     expect(bad.ok).toBe(false);
     expect((await loadActiveRun(db))?.state.pendingChoice?.kind).toBe('fork');
   });
+
+  it('resumes the step clock at the answer, so deciding time is never simulated as idle progress', async () => {
+    // The fork is offered with the clock already 30 steps old. The user takes the same 30 steps of
+    // wall-clock to answer, and that wait must not become free progress once the answer lands.
+    const waited = NOW + 30 * STEP_MS;
+    const meta = { ...emptyMeta(), lastStepAt: NOW, maxSeenAt: NOW };
+    await putRun(forkRun(), meta, 60, NOW);
+    await stepDelve(db, { ...OPTIONS, policy: CAMP_POLICY });
+
+    const chosen = await chooseDelve(db, {
+      ...OPTIONS,
+      now: waited,
+      policy: CAMP_POLICY,
+      optionId: 'r0c1',
+    });
+    expect(chosen.ok).toBe(true);
+    expect((await loadMeta(db))?.meta.lastStepAt).toBe(waited);
+
+    const report = await applyCatchUp(
+      db,
+      { ...OPTIONS, now: waited, policy: CAMP_POLICY },
+      inProcess,
+    );
+    expect(report.ran).toBe(false);
+    expect(report.steps).toBe(0);
+  });
 });
 
 describe('Daily Challenge', () => {

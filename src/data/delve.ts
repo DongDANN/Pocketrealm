@@ -712,8 +712,13 @@ export async function chooseDelve(
     };
   }
 
-  // A choice does not consume a step, so the step clock is left alone; only maxSeenAt advances.
-  let meta: DelveMeta = { ...out.meta, maxSeenAt: Math.max(out.meta.maxSeenAt, options.now) };
+  // The choice itself is not a step, but resolving it resumes the clock: time spent deciding must
+  // not become idle progress the moment the answer is stored.
+  let meta: DelveMeta = {
+    ...out.meta,
+    lastStepAt: options.now,
+    maxSeenAt: Math.max(out.meta.maxSeenAt, options.now),
+  };
   let ledger = out.ledger;
   let daily: DailyFinish | undefined;
   if (out.run.result !== 'active' && out.run.daily) {
@@ -1221,7 +1226,7 @@ export async function loadBuildingMilestones(db: PocketDb): Promise<BuildingMile
 
 export interface DelveHistoryEntry {
   runId: string;
-  hollowId: number;
+  hollowId: HollowId;
   result: RunResult;
   daily: boolean;
   floor: number;
@@ -1239,7 +1244,7 @@ export async function listDelveHistory(db: PocketDb, limit = 20): Promise<DelveH
   const rows = await listDelveRuns(db);
   return rows.slice(0, Math.max(0, Math.trunc(limit))).map((row) => ({
     runId: row.runId,
-    hollowId: row.hollowId,
+    hollowId: (row.hollowId === 2 || row.hollowId === 3 ? row.hollowId : 1) as HollowId,
     result: row.result,
     daily: row.daily,
     floor: row.state.floor,

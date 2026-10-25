@@ -33,16 +33,20 @@ export function PixelText({
   align = 'left',
 }: Props) {
   const mode = useTextMode();
-  const words = useMemo(
-    () => (wrap && wrap > 0 ? text.split(/\s+/).filter(Boolean) : null),
-    [text, wrap],
-  );
+  // Words are always separate canvases so a line can reflow with its panel: a single bitmap run
+  // cannot shrink, and an unshrinkable line is what pushes a card past the edge of the screen.
+  const words = useMemo(() => {
+    const split = text.split(/\s+/).filter(Boolean);
+    return split.length > 0 ? split : [''];
+  }, [text]);
 
-  const maxWidth = words && wrap ? wrap * ADVANCE * cssPerArtPixel(pixelScale) : undefined;
+  const advance = ADVANCE * cssPerArtPixel(pixelScale);
+  // `wrap` is only a soft cap on top of that: `.pixel-text` also shrinks with its panel.
+  const maxWidth = wrap && wrap > 0 ? wrap * advance : undefined;
 
   const pixmaps = useMemo(
-    () => (words ?? [text]).map((word) => textPixmap(word, color, pixelScale)),
-    [words, text, color, pixelScale],
+    () => words.map((word) => textPixmap(word, color, pixelScale)),
+    [words, color, pixelScale],
   );
 
   if (mode === 'system') {
@@ -62,10 +66,6 @@ export function PixelText({
         {text}
       </span>
     );
-  }
-
-  if (!words) {
-    return <PixelImage pixmap={pixmaps[0]!} scale={1} alt={text} className={className} />;
   }
 
   const unit = cssPerArtPixel(pixelScale);

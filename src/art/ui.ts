@@ -11,6 +11,7 @@ import {
   hline,
   line,
   setPx,
+  strokeRect,
   vline,
   type Pixmap,
 } from './px';
@@ -390,6 +391,20 @@ export function iconClock(): Pixmap {
   return p;
 }
 
+/** The Envelopes tab: a glass jar with the coin line low in it. */
+export function iconJars(): Pixmap {
+  const p = createPixmap(16, 16);
+  fillRect(p, 5, 1, 6, 2, C.steel1);
+  fillRect(p, 6, 3, 4, 1, C.steel2);
+  strokeRect(p, 3, 4, 10, 11, C.steel1);
+  fillRect(p, 4, 5, 8, 9, C.ink500);
+  fillRect(p, 4, 10, 8, 4, C.amber3);
+  hline(p, 4, 11, 10, C.amber1);
+  hline(p, 4, 11, 12, C.amber1);
+  vline(p, 5, 6, 8, C.paper3);
+  return p;
+}
+
 export function iconWarn(): Pixmap {
   const p = createPixmap(16, 16);
   fillPolygon(
@@ -513,6 +528,7 @@ export const UI_ASSETS: readonly UiAsset[] = [
   { key: 'ui.icon.plus', pix: iconPlus() },
   { key: 'ui.icon.check', pix: iconCheck() },
   { key: 'ui.icon.clock', pix: iconClock() },
+  { key: 'ui.icon.jars', pix: iconJars() },
   { key: 'ui.icon.warn', pix: iconWarn() },
   { key: 'ui.icon.gear', pix: iconGear() },
   { key: 'ui.icon.music', pix: iconMusic() },

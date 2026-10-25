@@ -209,6 +209,7 @@ describe('check-in, no-spend, review', () => {
       key: 'review:2026-W41',
       type: 'review',
       at: TODAY,
+      meta: { weekId: '2026-W41' },
     });
     // Today's own week is still unclaimed, because the caller paid for a different one.
     expect((await completeReview(db, ctx())).granted).toBe(true);

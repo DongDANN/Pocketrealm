@@ -19,7 +19,7 @@ export { BOONS, RELICS, boonById, relicById, RARITY_WEIGHT, MAX_BOON_LEVEL } fro
 export type { BoonLike } from './data/boons';
 export { FUSIONS, fusionById, anyBoonById, fusionRecipesFor } from './data/fusions';
 export type { FusionDef } from './data/fusions';
-export { ENEMIES, ELITES, BOSSES, enemyById, scaledStats } from './data/enemies';
+export { ENEMIES, ELITES, BOSSES, enemyById, scaledStats, type EnemyDef } from './data/enemies';
 export { AFFIXES, affixById } from './data/affixes';
 export { EVENTS, eventsForHollow } from './data/events';
 export {
@@ -49,6 +49,9 @@ export {
   cardUnlocked,
   evaluateCards,
   resolveCardAction,
+  type CardAction,
   type CardCombatState,
+  type CardCondition,
   type CardDecision,
+  type CardDef,
 } from './data/habitCards';

@@ -1,12 +1,31 @@
 import { expect, test, type Page } from '@playwright/test';
 import { MASTER_PALETTE } from '../src/art/palette';
-import { completeOnboarding } from './helpers';
+import { completeOnboarding, startRun } from './helpers';
 
 /** Screens that need no book: onboarding, the art preview and the two style-lock mocks. */
 const PUBLIC_ROUTES = ['/onboarding', '/art', '/mock/foundation', '/mock/today'];
 
 /** Screens behind a completed book, exercised in order from one onboarding. */
-const APP_ROUTES = ['/', '/add', '/envelopes', '/goals', '/history', '/settings'];
+const APP_ROUTES = [
+  '/',
+  '/add',
+  '/envelopes',
+  '/goals',
+  '/history',
+  '/settings',
+  '/delve',
+  '/delve/policy',
+  '/delve/forge',
+  '/delve/workshop',
+  '/delve/cards',
+  '/delve/codex',
+  '/delve/history',
+  '/quests',
+  '/achievements',
+  '/realm',
+  '/review',
+  '/insights',
+];
 
 /** Windows laptops commonly run 1.25/1.5 DPR, so fractional ratios are part of the contract. */
 const VIEWPORTS = [
@@ -113,8 +132,37 @@ function measureLayout(page: Page) {
         bad.push(`${canvas.className} maps to ${deviceRatio.toFixed(3)} device px per backing px`);
       }
     }
+    // A bitmap line is one canvas and cannot shrink, so a box whose content is wider than it is
+    // has already lost: the line either crosses a neighbour's border or gets clipped.
+    const spill: string[] = [];
+    for (const box of Array.from(document.querySelectorAll('body *, body'))) {
+      if (box.closest('.sr-only')) continue;
+      const style = getComputedStyle(box);
+      if (style.overflowX === 'auto' || style.overflowX === 'scroll') continue;
+      if (box.clientWidth === 0) continue;
+      if (box.scrollWidth <= box.clientWidth + 1) continue;
+      // A native widget paints its own ink past the content edge (a slider thumb); only bitmap
+      // lines are the style lock's problem.
+      const innerRight =
+        box.getBoundingClientRect().right -
+        parseFloat(style.paddingRight) -
+        parseFloat(style.borderRightWidth);
+      const textOver = Array.from(box.querySelectorAll('.pixel-text canvas')).some(
+        (c) => c.getBoundingClientRect().right > innerRight + 1,
+      );
+      if (!textOver && box.querySelector('input, select, textarea, meter, progress')) continue;
+      const cls = box.className?.toString().trim().split(' ')[0] ?? box.tagName.toLowerCase();
+      const culprit = Array.from(box.querySelectorAll('*'))
+        .map((child) => ({ child, width: child.getBoundingClientRect().width }))
+        .filter((entry) => entry.width > box.clientWidth + 1)
+        .sort((a, b) => b.width - a.width)[0];
+      const what = culprit
+        ? `${culprit.child.tagName.toLowerCase()}.${culprit.child.className?.toString().trim().split(' ')[0] ?? ''} ${Math.round(culprit.width)}px "${(culprit.child.closest('.pixel-text')?.getAttribute('aria-label') ?? '').slice(0, 24)}"`
+        : `${box.scrollWidth}px`;
+      spill.push(`.${cls} holds ${what} in ${box.clientWidth}px`);
+    }
     for (const head of Array.from(document.querySelectorAll('.envelope-head'))) {
-      const money = head.querySelector('.money canvas')?.getBoundingClientRect();
+      const money = head.querySelector('.money .pixel-text')?.getBoundingClientRect();
       if (!money || money.width === 0) continue;
       const name = head.closest('.envelope-row')?.querySelector('.envelope-name');
       for (const canvas of Array.from(head.querySelectorAll('.envelope-name canvas'))) {
@@ -129,6 +177,11 @@ function measureLayout(page: Page) {
     }
     return {
       bad,
+      spill: [...new Set(spill)].slice(0, 20),
+      // A missing PNG is a hole in the style lock no canvas check can see.
+      broken: Array.from(document.images)
+        .filter((img) => img.complete && img.naturalWidth === 0)
+        .map((img) => img.getAttribute('src') ?? ''),
       scrollWidth: document.documentElement.scrollWidth,
       innerWidth: window.innerWidth,
       wide: Array.from(document.querySelectorAll('main *, main'))
@@ -163,6 +216,8 @@ test.describe('pixel face and integer scaling', () => {
 
   test('the real book screens keep the bitmap face and the master palette', async ({ page }) => {
     await completeOnboarding(page);
+    // An active run is the densest screen in the app: map, choices, kit, log all at once.
+    await startRun(page);
     for (const route of APP_ROUTES) {
       await page.goto(route);
       await waitForScreen(page);
@@ -183,28 +238,32 @@ test.describe('pixel face and integer scaling', () => {
         deviceScaleFactor: viewport.dpr,
       });
       const page = await context.newPage();
+      const findings: string[] = [];
+      const check = (route: string, result: Awaited<ReturnType<typeof measureLayout>>) => {
+        findings.push(...result.bad.map((b) => `${route} ${viewport.name}: ${b}`));
+        findings.push(...result.spill.map((s) => `${route} ${viewport.name}: ${s}`));
+        findings.push(
+          ...result.broken.map((src) => `${route} ${viewport.name}: broken image ${src}`),
+        );
+        if (result.scrollWidth !== result.innerWidth)
+          findings.push(
+            `${route} ${viewport.name}: scrollWidth ${result.scrollWidth} ≠ ${result.innerWidth} — ${result.wide.join(' | ')}`,
+          );
+      };
       for (const route of PUBLIC_ROUTES) {
         await page.goto(route);
         await waitForScreen(page);
-        const result = await measureLayout(page);
-        expect(result.bad, `${route} @ ${viewport.name}`).toEqual([]);
-        expect(
-          [result.scrollWidth, result.wide],
-          `${route} @ ${viewport.name} fits without horizontal scrolling`,
-        ).toStrictEqual([result.innerWidth, []]);
+        check(route, await measureLayout(page));
       }
       await completeOnboarding(page, { income: '1000' });
+      await startRun(page);
       for (const route of APP_ROUTES) {
         await page.goto(route);
         await waitForScreen(page);
-        const result = await measureLayout(page);
-        expect(result.bad, `${route} @ ${viewport.name}`).toEqual([]);
-        expect(
-          [result.scrollWidth, result.wide],
-          `${route} @ ${viewport.name} fits without horizontal scrolling`,
-        ).toStrictEqual([result.innerWidth, []]);
+        check(route, await measureLayout(page));
       }
       await context.close();
+      expect(findings, `${viewport.name}: every bitmap line fits its box`).toEqual([]);
     });
   }
 });
