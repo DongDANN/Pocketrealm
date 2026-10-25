@@ -33,11 +33,10 @@ Last updated: 2026-10-25
 ## Gate checklist
 
 - [x] Gate 0 — Foundation: scaffold, strict TS, tests, PWA hello-world offline e2e, PROGRESS.
-- [ ] Gate 0.5 — Retro style lock: palette, px toolkit, bitmap font, UI kit seed, companion,
+- [x] Gate 0.5 — Retro style lock: palette, px toolkit, bitmap font, UI kit seed, companion,
       enemy, tiled room, mock Today, chiptune + SFX, contact sheets + independent review.
-      **Owner approval required before mass art production.** Built and reviewed
-      ([ART_NOTES.md](ART_NOTES.md)); box stays open until the owner signs off.
-- [ ] Gate 1 — Core logic headless: money, periods, envelopes, safe-to-spend, rollover,
+      **Owner approved 2026-10-25 ("start generating the remaining assets").**
+- [x] Gate 1 — Core logic headless: money, periods, envelopes, safe-to-spend, rollover,
       recurring, rewards ledger, XP/levels, streaks/rest tokens, quests, achievements, insights.
 - [ ] Gate 1.5 — Delve engine headless: RNG, maps, auto-battle, boons/relics, Autopilot, oil,
       budget buffs, catch-up clock defense, Embers/Forge, ledger, sim:delve + persona tuning.
@@ -83,7 +82,7 @@ Verification:
 Not verified: install prompts on real devices, iOS behavior, Lighthouse, Vercel. The icon mark was
 viewed at 512px; its glow reads as a hard checkerboard and will be refined in Gate 0.5.
 
-### Gate 0.5 — Retro style lock (2026-10-25) — **awaiting owner approval**
+### Gate 0.5 — Retro style lock (2026-10-25) — **owner approved**
 
 Built: 64-colour master palette with hue-shifted ramps (`src/art/palette.ts`), palette-indexed pixmap
 toolkit with 9-slice and ordered dither (`src/art/px.ts`), 5x8 "Lantern Sans" bitmap face with a
@@ -110,5 +109,31 @@ Verification (all commands run, output checked):
   [ART_NOTES.md](ART_NOTES.md), including five rejected findings with the evidence that refuted them.
 
 Not verified: real-device FPS and touch, human viewing of the GIF loops, iOS Safari, colour on a
-calibrated display. The Gate 0.5 checkbox stays open until the owner approves the style lock; no
-further art mass production happens before that.
+calibrated display. **Owner approved the style lock 2026-10-25** ("start generating the remaining
+assets"); mass art production is unblocked for Gate 4.
+
+### Gate 1 — Core logic headless (2026-10-25)
+
+Built: 11 pure modules in `src/core` — no React, DOM, IndexedDB, `Date.now()`, or `Math.random()`.
+Clock and seeded RNG are injected; same data + same date ⇒ identical results; money is integer
+minor units end to end. `dates.ts` (LocalDate math, ISO weeks, month clamps), `rng.ts` (FNV-1a,
+mulberry32, seededPick), `periods.ts` (`periodOf` with clamped start day, `closePlan` with carry /
+sweep-to-goal and transfer conservation), `budget.ts` (envelope status at exact 80% threshold,
+guardian states, safe-to-spend floors, transfer validation), `recurring.ts` (weekly/biweekly/monthly
+catch-up, idempotent `rec:<id>:<date>` occurrence keys), `rewards.ts` (idempotent XP/Sparks/oil
+ledger, per-source daily caps, `round(60·N^1.5)` level curve, oil trickle + caps), `streaks.ts`
+(rest tokens auto-spend, break = first missed day of a gap, today-pending is never a break),
+`quests.ts` (8 daily + 6 weekly + 1 season, deterministic per-user-seed rotation), `achievements.ts`
+(20 unlocks over `BudgetFacts`), `insights.ts` (period comparisons, 6-month totals, top notes,
+Monday-first streak calendar), `currency.ts` (PHP default, preference-only change).
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 105/105 across 13 files: unit tests per module plus property tests
+  (500 random periods conserve integer money through `closePlan`; safe-to-spend floors never exceed
+  the exact split; recurring catch-up is idempotent over 200 random rule sets; streak invariants
+  over 500 random histories; quest rotation deterministic and distinct).
+- `npm run lint` / `npm run format:check` — **verified** clean.
+
+No UI in this gate; screens consume these helpers starting Gate 3. Delve begins next (Gate 1.5).
