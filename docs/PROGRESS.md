@@ -483,3 +483,43 @@ New code, all RED-first: `src/data/{exportImport,lifecycle}.ts` and
   which exercises the transaction semantics but not a real browser's quota/abort behaviour. The
   on-open orchestration (who calls these, in what order, with what UI feedback) is Gate 3/5 work —
   the functions exist and are proven; nothing calls them yet.
+
+### Gate 3a — Core logic the screens read (2026-10-25)
+
+- **New pure modules, all test-first:** `core/companion.ts` (mood from logging recency only,
+  `moodCopy` with no digit anywhere in it, evolution stages at levels 5/10/20/35, three original
+  starter species whose sprites are described as parts rather than colours), `core/templates.ts`
+  (Essentials 50/30/20, Student, Custom), `core/habits.ts` (SPEC 6.1/6.9 reward table as builders, so
+  a screen cannot invent a grant), `core/facts.ts` (`buildBudgetFacts`).
+- `core/currency.ts` gained `parseAmount()`: digits and at most two decimals, thousands separators
+  stripped, 12 whole digits max so `whole * 100` stays inside exact integer range. It refuses `-5`,
+  `1e3`, `12.345` and `''` rather than coercing them.
+- **Templates split income with integer arithmetic only:** each slot takes `floor(income * share)` and
+  the remainder goes to the first slot, so the envelopes always sum to exactly the income, at `0`,
+  `1`, `101` or `123,456,789` centavos. Envelope ids come from the caller's id factory, which is why
+  the savings envelope is found by its icon slug and not its id — a fixed id would collide with an
+  envelope the user already made.
+- **`buildBudgetFacts` is windowed.** Quests read a daily/weekly/month window; achievements read all
+  history. Two rules the tests guard hardest: counts never see outside their window, and money never
+  enters a count — `entriesLogged` counts expense entries only, so a transfer is movement, not
+  evidence of budgeting, and `closedWithinAllowance` requires the five entries SPEC 6.1 asks for.
+  The streak is deliberately computed from the whole history even when the window is one day, and
+  `activeDates` merges logged entries with check-in and no-spend events (a review is an event about a
+  week, not a day of showing up).
+- **Latent bug found while writing the facts tests:** `spentInPeriod()` took a `periodId` string and
+  re-derived the period with the *default* start day, so any user with `periodStartDay` 15 got
+  calendar-month totals. It now takes the period bounds (`{ start, end }`) and is covered by tests
+  that place transactions before the 15th and after the close. Nothing else called it, so no other
+  behaviour changed.
+- **Mutation checking (14 mutants, all killed):** remainder dropped, `custom` leaked into the
+  generated set, `archived: true` leaked, mood band widened, first-time mood wrong, oil drift, review
+  keyed per day, no-spend ignoring `kind`, soft-deleted counted as spending, activity from every event
+  type, windowed streak, zero-target goal "reached", transfers counted as entries, five-entry rule
+  dropped, ratio scale wrong, zero allowance counted. Two mutants initially survived — the mood/level
+  clamp and a window-vs-all-history mix-up — and the tests were rewritten rather than the code left
+  unproven; the redundant `Math.max(1, …)` clamp in `evolutionStage` was then deleted as dead code.
+- Verification: `npm run typecheck` **verified** clean; `npx vitest run` **verified** 417/417 across
+  45 files; `npm run lint` **verified** clean; `prettier --check .` **verified** clean.
+- **Not possible here:** none of this is on screen yet. The species art is a part recipe, not a
+  drawn sprite — Gate 4 renders it. Nothing calls `buildBudgetFacts` until Gate 3b wires the data
+  layer to it.

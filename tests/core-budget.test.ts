@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { envelopeStatus, safeToSpendToday, spentToday, validateTransfer } from '../src/core/budget';
+import {
+  envelopeStatus,
+  safeToSpendToday,
+  spentInPeriod,
+  spentToday,
+  validateTransfer,
+} from '../src/core/budget';
 import { addDays } from '../src/core/dates';
 import { closePlan, daysLeftInclusive, periodOf, periodEnded } from '../src/core/periods';
 import type { Envelope, Transaction } from '../src/core/types';
@@ -213,5 +219,31 @@ describe('period close plan', () => {
     const food = result.summary.perEnvelope.find((r) => r.envelopeId === 'food')!;
     expect(food.result).toBe(200);
     expect(result.carries.get('food')).toBe(200);
+  });
+});
+
+describe('spentInPeriod', () => {
+  // A period that starts mid-month: 2026-10-15 .. 2026-11-14.
+  const mid = periodOf('2026-10-20', 15);
+
+  it('uses the period it was handed instead of assuming the calendar month', () => {
+    const txns = [
+      txn('1', 'expense', 100, '2026-10-10', { envelopeId: 'food' }), // before the 15th
+      txn('2', 'expense', 200, '2026-10-20', { envelopeId: 'food' }),
+      txn('3', 'expense', 300, '2026-11-10', { envelopeId: 'food' }),
+      txn('4', 'expense', 400, '2026-11-20', { envelopeId: 'food' }), // after the close
+      txn('5', 'expense', 500, '2026-10-20', { envelopeId: 'fun' }), // another envelope
+      txn('6', 'expense', 600, '2026-10-20', { envelopeId: 'food', deletedAt: 1 }),
+    ];
+    expect(spentInPeriod('food', txns, mid)).toBe(500);
+  });
+
+  it('nets transfers so a moved amount is not spent twice', () => {
+    const txns = [
+      txn('1', 'transfer', 100, '2026-10-20', { envelopeId: 'food', toEnvelopeId: 'fun' }),
+      txn('2', 'transfer', 40, '2026-11-02', { envelopeId: 'fun', toEnvelopeId: 'food' }),
+    ];
+    expect(spentInPeriod('food', txns, mid)).toBe(60);
+    expect(spentInPeriod('fun', txns, mid)).toBe(-60);
   });
 });

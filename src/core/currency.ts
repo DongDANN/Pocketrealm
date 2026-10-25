@@ -34,3 +34,23 @@ export function formatMoney(minor: number, code: CurrencyCode): string {
   const fraction = String(abs % 100).padStart(2, '0');
   return `${sign}${currencySymbol(code)}${whole}.${fraction}`;
 }
+
+/**
+ * Grouping separators are stripped, so only digits and at most two decimal digits survive. A third
+ * decimal is refused rather than rounded: 12.345 is a mistype or a corrupted file, not a cent value.
+ */
+const AMOUNT_PATTERN = /^(\d*)(?:\.(\d{1,2}))?$/;
+
+/** 12 whole digits keeps `whole * 100` inside the range where integers stay exact. */
+const MAX_WHOLE_DIGITS = 12;
+
+/** Typed money text to integer minor units, or null when it is not an amount. */
+export function parseAmount(input: string): number | null {
+  const match = AMOUNT_PATTERN.exec(input.trim().replace(/,/g, ''));
+  if (!match) return null;
+  const whole = match[1] ?? '';
+  const fraction = match[2] ?? '';
+  if (whole === '' && fraction === '') return null;
+  if (whole.length > MAX_WHOLE_DIGITS) return null;
+  return Number(whole || '0') * 100 + Number(fraction.padEnd(2, '0'));
+}

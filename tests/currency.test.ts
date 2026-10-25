@@ -6,6 +6,7 @@ import {
   formatMoney,
   getCurrency,
   isCurrencyCode,
+  parseAmount,
 } from '../src/core/currency';
 
 describe('currency preference data', () => {
@@ -37,5 +38,33 @@ describe('formatMoney', () => {
 
   it('keeps negative amounts readable', () => {
     expect(formatMoney(-123456, 'PHP')).toBe('-₱1,234.56');
+  });
+});
+
+describe('parseAmount', () => {
+  it('turns typed decimal money into exact integer minor units', () => {
+    expect(parseAmount('12.50')).toBe(1250);
+    expect(parseAmount('12.5')).toBe(1250);
+    expect(parseAmount('0.05')).toBe(5);
+    expect(parseAmount('.99')).toBe(99);
+    expect(parseAmount('0')).toBe(0);
+    expect(parseAmount('1,234.56')).toBe(123456);
+    expect(parseAmount(' 42 ')).toBe(4200);
+  });
+
+  it('refuses what a person did not actually type as an amount', () => {
+    expect(parseAmount('')).toBeNull();
+    expect(parseAmount('   ')).toBeNull();
+    expect(parseAmount('.')).toBeNull();
+    expect(parseAmount('12.345')).toBeNull();
+    expect(parseAmount('-5')).toBeNull();
+    expect(parseAmount('abc')).toBeNull();
+    expect(parseAmount('1e3')).toBeNull();
+    expect(parseAmount('12.')).toBeNull();
+  });
+
+  it('refuses a value too large to hold as an integer', () => {
+    expect(parseAmount('99999999999999')).toBeNull();
+    expect(parseAmount('999999999999')).toBe(99_999_999_999_900);
   });
 });

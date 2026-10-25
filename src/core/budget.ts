@@ -19,22 +19,25 @@ export interface EnvelopeStatus {
   state: EnvelopeState;
 }
 
+/**
+ * What left an envelope inside a given period: expenses and transfers out, minus transfers in.
+ * The caller supplies the period so a mid-month start day is honoured; re-deriving it from a date
+ * would silently fall back to the calendar month.
+ */
 export function spentInPeriod(
   envId: string,
   txns: readonly Transaction[],
-  periodId: string,
+  period: { start: LocalDate; end: LocalDate },
 ): Minor {
-  const period = periodOf(periodId);
   let sum = 0;
   for (const t of txns) {
     if (t.deletedAt !== undefined) continue;
-    if (t.envelopeId === envId && t.date >= period.start && t.date <= period.end) {
+    if (t.date < period.start || t.date > period.end) continue;
+    if (t.envelopeId === envId) {
       if (t.kind === 'expense') sum += t.amount;
       if (t.kind === 'transfer') sum += t.amount;
     }
-    if (t.toEnvelopeId === envId && t.date >= period.start && t.date <= period.end) {
-      if (t.kind === 'transfer') sum -= t.amount;
-    }
+    if (t.toEnvelopeId === envId && t.kind === 'transfer') sum -= t.amount;
   }
   return sum;
 }
