@@ -16,10 +16,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "sim:delve": "tsx scripts/sim-delve.ts",
-    "art:sheets": "tsx scripts/render-art-sheets.ts",
+    "art:sheets": "tsx scripts/render-art-sheets.ts && tsx scripts/gen-ui-assets.ts",
     "art:validate": "tsx scripts/validate-art.ts",
     "icons": "tsx scripts/gen-icons.ts",
-    "lighthouse": "lhci autorun"
+    "ui:assets": "tsx scripts/gen-ui-assets.ts",
+    "lighthouse": "lhci autorun",
+    "art:shots": "tsx scripts/shoot-app.ts"
   },
   "dependencies": {
     "dexie": "4.4.7",
@@ -38,6 +40,7 @@
     "@vitejs/plugin-react": "6.1.2",
     "eslint": "10.13.0",
     "fake-indexeddb": "6.2.6",
+    "gifenc": "^1.0.3",
     "globals": "17.13.0",
     "prettier": "3.9.10",
     "tsx": "4.23.15",

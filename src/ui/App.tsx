@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { lanternMark } from '../art/brand';
-import { PixelImage } from './components/PixelImage';
+import { Route, Routes } from 'react-router-dom';
+import { C } from '../art/palette';
 import { useOnline } from './hooks/useOnline';
-import { subscribePwa, reloadForUpdate, type PwaState } from '../pwa/register';
-
-const brand = lanternMark(32);
+import { subscribePwa, type PwaState } from '../pwa/register';
+import { PixelText } from './components/PixelText';
+import { Foundation } from './screens/Foundation';
+import { ArtPreview } from './screens/ArtPreview';
+import { TodayMock } from './screens/TodayMock';
 
 export function App() {
   const online = useOnline();
@@ -13,30 +15,24 @@ export function App() {
   useEffect(() => subscribePwa(setPwa), []);
 
   return (
-    <main className="shell foundation">
-      <section className="title-panel panel" aria-labelledby="app-title">
-        <PixelImage pixmap={brand} scale={6} alt="A lantern glowing over a small floating island" />
-        <h1 id="app-title" className="title">
-          Pocketrealm
-        </h1>
-        <p className="lede">A calm budget companion, offline by design.</p>
-        <p className="muted">Foundation build — the realm is being drawn.</p>
-        <ul className="foundation-list" aria-label="Build status">
-          <li>Strict TypeScript, tests and production build</li>
-          <li>Installable PWA with an offline app shell</li>
-          <li>No accounts, no trackers, no network requests with your data</li>
-        </ul>
-        {pwa.needRefresh && (
-          <button type="button" className="pixel-button" onClick={() => reloadForUpdate()}>
-            Update available — reload
-          </button>
-        )}
-      </section>
+    <>
+      <Routes>
+        <Route path="/" element={<Foundation needRefresh={pwa.needRefresh} />} />
+        <Route path="/art" element={<ArtPreview />} />
+        <Route path="/today" element={<TodayMock />} />
+        <Route path="*" element={<Foundation needRefresh={pwa.needRefresh} />} />
+      </Routes>
       {!online && (
         <p className="offline-strip" role="status">
-          Working offline. Everything is saved on this device.
+          <PixelText
+            text="Working offline. Everything is saved on this device."
+            color={C.paper1}
+            pixelScale={2}
+            wrap={30}
+            align="center"
+          />
         </p>
       )}
-    </main>
+    </>
   );
 }

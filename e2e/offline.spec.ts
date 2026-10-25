@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { visibleText } from './helpers';
 
 test('loads, registers a service worker, and cold-launches offline', async ({ page, context }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Pocketrealm' })).toBeVisible();
-  await expect(page.getByText('A calm budget companion, offline by design.')).toBeVisible();
+  await expect.poll(() => visibleText(page, '.lede')).toContain('A calm budget companion');
 
   await page.waitForFunction(async () => {
     if (!('serviceWorker' in navigator)) return false;
@@ -19,7 +20,7 @@ test('loads, registers a service worker, and cold-launches offline', async ({ pa
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Pocketrealm' })).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('Working offline');
+  await expect.poll(() => visibleText(page, '[role="status"]')).toContain('Working offline');
 
   const fresh = await context.newPage();
   await fresh.goto('/');

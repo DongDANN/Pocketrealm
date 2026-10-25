@@ -289,7 +289,7 @@ export function selout(src: Pixmap, shadow: number, rim: number): void {
 }
 
 const BAYER2 = [0, 2, 3, 1];
-const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+export const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 export function ditherRect(
   src: Pixmap,

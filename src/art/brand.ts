@@ -1,14 +1,28 @@
 import { C } from './palette';
-import {
-  createPixmap,
-  fillRect,
-  ditherCircle,
-  hline,
-  line,
-  setPx,
-  fillEllipse,
-  type Pixmap,
-} from './px';
+import { BAYER4, createPixmap, fillRect, hline, line, setPx, fillEllipse, type Pixmap } from './px';
+
+/**
+ * Dithered radial falloff: density drops with distance and the colour steps inward, so the light
+ * dissolves pixel by pixel instead of ending on a ring.
+ */
+function glow(p: Pixmap, cx: number, cy: number, rMax: number, ramp: readonly number[]): void {
+  for (let y = -rMax; y <= rMax; y++) {
+    for (let x = -rMax; x <= rMax; x++) {
+      const d = Math.sqrt(x * x + y * y) / rMax;
+      if (d > 1) continue;
+      const density = 0.95 * (1 - d) ** 1.15;
+      const threshold = (BAYER4[((y + rMax) % 4) * 4 + ((x + rMax) % 4)]! + 0.5) / 16;
+      if (threshold >= density) continue;
+      const band = Math.min(ramp.length - 1, Math.floor(d * ramp.length));
+      const color = ramp[band]!;
+      setPx(p, cx + x, cy + y, color);
+      // The 4x4 matrix tiles at exactly four pixels, which reads as a grid of dots rather than
+      // light. Scattering the cell index by position breaks the tile without leaving the ramp.
+      if (band > 0 && (x * 7 + y * 13 + ((x * y) & 3)) % 5 < 2)
+        setPx(p, cx + x, cy + y, ramp[band - 1]!);
+    }
+  }
+}
 
 /**
  * The Pocketrealm mark: a lantern over a small floating island.
@@ -41,10 +55,9 @@ export function lanternMark(size = 32, maskable = false): Pixmap {
     setPx(p, 30, 30, C.ink500);
   }
 
-  // ambient lantern glow (dithered, never a blur)
-  ditherCircle(p, 16, 15, 13, C.amber5, 4, 0.18);
-  ditherCircle(p, 16, 15, 10, C.amber4, 4, 0.32);
-  ditherCircle(p, 16, 15, 7, C.amber3, 2, 0.45);
+  // Ambient lantern glow: one continuous radial falloff. Three stacked dithered discs each end at
+  // a hard radius, and at 32px those edges read as checkerboard rings instead of light.
+  glow(p, 16, 15, 14, [C.amber5, C.amber4, C.amber3]);
 
   // floating island silhouette
   fillEllipse(p, 16, 25, 8, 2, C.ink600);
