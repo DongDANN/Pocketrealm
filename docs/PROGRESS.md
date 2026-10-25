@@ -182,3 +182,40 @@ plateau instead of exploding; elites and the H1 boss were softened so L3–4 fir
 tense but winnable; the pre-boss Rest retreats below a hollow's boss gate instead of throwing
 unwinnable dives at the boss. Two engine bugs were found and fixed by the tests (fork path
 off-by-one that silently walked column 0; camp-mode choice resolution clearing fresh offers).
+
+### Gate 1.6a — Builds, skills, statuses, elements (2026-10-25)
+
+Built: three builds (Warden/Spark/Broker) with stat profiles, two actives + one passive each
+(skill fx: shieldPercent, status+statusDuration, bonusCrit, bonusIfBurning; passives: startShield,
+critBurn), 12-node Ember talent trees (3 branches x 4 nodes, sequential prereqs, free respec),
+energy pool (start 0, +1/round, +1 when the companion takes a hit, uncapped), cooldowns,
+most-expensive-ready default skill selection, seven statuses (burn/poison/chill/stun/mark/shield/
+regen) with stacking rules (refresh/stack/add), boss 70% and recent 50% stun resistance, and
+combat-local statuses that clear after every combat. Element weakness multiplies skill damage
++25% (codex-gated via knownWeaknesses) and resistance -25% (always).
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 192/192 across 20 files.
+- `npm run lint` / `npm run format:check` — **verified** clean.
+- `npm run sim:delve -- --days 60` — **verified** after retuning: Warden is the zero-baseline
+  build, H1 ordinaries got +1 ATK, and first-attempt faint rates landed at 30/34/32/29 (Trickle/
+  Casual/Habit/Optimizer) — inside the spec's 25-40% band with all other §6.10 windows intact.
+
+### Gate 1.6b — Habit Cards (2026-10-25)
+
+Built: 10 Habit Cards (when -> then): Rainy Day, Opening Move, Steady Hand, Finisher, Shield Up,
+Cool Off, Mark Hunter, Ember First, Frost First, Basic Discipline. Four starters, the rest gated
+by companion level or hollow clears; at most three equipped. Conditions (hpBelow, roundOne,
+markedTarget, targetHpBelow, enemyWeakTo, energyAbove, always) and actions (prefer guard/burst/
+strongest/offCooldown, element, attackMarked, basic) resolve against live combat state; skipped
+cards log their reason (e.g. "HP 72% >= 35%"). Auto-battle evaluates cards top to bottom and
+fires the first available, falling back to a basic attack when none fire; reordering changes
+outcomes. Broker actives swapped power so the Mark & Trade guard opener outranks Glint Swipe.
+
+Verification:
+
+- `npm run typecheck` — **verified** clean.
+- `npm test` — **verified** 202/202 across 21 files.
+- `npm run lint` / `npm run format:check` — **verified** clean.

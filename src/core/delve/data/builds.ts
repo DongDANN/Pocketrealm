@@ -44,6 +44,8 @@ export interface SkillDef {
   id: string;
   name: string;
   kind: 'active' | 'passive';
+  /** Card roles: guard = defensive/utility, burst = heavy damage. */
+  role?: 'guard' | 'burst';
   element?: Element;
   energyCost?: number;
   cooldown?: number;
@@ -104,6 +106,7 @@ export const BUILDS: readonly BuildDef[] = [
         id: 'warden-bastion',
         name: 'Bastion',
         kind: 'active',
+        role: 'guard',
         element: 'frost',
         energyCost: 4,
         cooldown: 4,
@@ -115,6 +118,7 @@ export const BUILDS: readonly BuildDef[] = [
         id: 'warden-shieldbash',
         name: 'Shield Bash',
         kind: 'active',
+        role: 'burst',
         element: 'gale',
         energyCost: 4,
         cooldown: 4,
@@ -182,6 +186,7 @@ export const BUILDS: readonly BuildDef[] = [
         id: 'spark-flare',
         name: 'Flare',
         kind: 'active',
+        role: 'burst',
         element: 'ember',
         energyCost: 3,
         cooldown: 2,
@@ -193,6 +198,7 @@ export const BUILDS: readonly BuildDef[] = [
         id: 'spark-kindling',
         name: 'Kindling',
         kind: 'active',
+        role: 'burst',
         element: 'ember',
         energyCost: 2,
         cooldown: 2,
@@ -248,10 +254,11 @@ export const BUILDS: readonly BuildDef[] = [
         id: 'broker-marktrade',
         name: 'Mark & Trade',
         kind: 'active',
+        role: 'guard',
         element: 'umbra',
         energyCost: 3,
         cooldown: 3,
-        power: 1.4,
+        power: 1.5,
         effect: 'Marks the target; marked enemies take 25% more damage.',
         fx: { status: 'mark', statusDuration: 2 },
       },
@@ -259,10 +266,11 @@ export const BUILDS: readonly BuildDef[] = [
         id: 'broker-glintswipe',
         name: 'Glint Swipe',
         kind: 'active',
+        role: 'burst',
         element: 'gale',
         energyCost: 4,
         cooldown: 4,
-        power: 1.5,
+        power: 1.4,
         effect: 'A fast swipe that often crits.',
         fx: { bonusCrit: 30 },
       },

@@ -98,6 +98,8 @@ export interface RunState {
   /** Selected build; the talent tree is snapshotted from meta at run start. */
   buildId: string;
   tree: string[];
+  /** Equipped Habit Cards for this run (max 3, priority order). */
+  cards: string[];
   /** Absolute step index; every applied step increments it. */
   stepIndex: number;
   floor: number;
@@ -135,6 +137,8 @@ export interface DelveMeta {
   builds: Record<string, { tree: string[]; spent: number }>;
   /** Elements whose weaknesses the codex has revealed (+25% damage applies). */
   knownWeaknesses: Element[];
+  /** Equipped Habit Cards (max 3, priority top to bottom). */
+  cards: string[];
   bestFloor: Partial<Record<HollowId, number>>;
   forge: ForgeLevels;
   runsStarted: number;

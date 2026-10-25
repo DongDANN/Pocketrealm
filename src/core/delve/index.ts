@@ -31,3 +31,12 @@ export {
   STUN_RECENT_RESIST,
   STUN_RESIST_GRACE,
 } from './data/statuses';
+export {
+  CARDS,
+  cardById,
+  cardUnlocked,
+  evaluateCards,
+  resolveCardAction,
+  type CardCombatState,
+  type CardDecision,
+} from './data/habitCards';

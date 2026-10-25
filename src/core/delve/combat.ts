@@ -11,9 +11,22 @@
 
 import { hashCombine, hashString, mulberry32, type Rng } from '../rng';
 import { boonById, type Boon } from './data/boons';
-import { buildById, DEFAULT_BUILD, treeNodeById, type PassiveFx, type SkillDef } from './data/builds';
+import {
+  buildById,
+  DEFAULT_BUILD,
+  treeNodeById,
+  type PassiveFx,
+  type SkillDef,
+} from './data/builds';
 import { BOSSES, ELITES, enemyById, scaledStats } from './data/enemies';
 import { elementMultiplier, type Element } from './data/elements';
+import {
+  cardById,
+  evaluateCards,
+  resolveCardAction,
+  type CardCombatState,
+  type CardDef,
+} from './data/habitCards';
 import {
   STUN_BOSS_RESIST,
   STUN_RECENT_RESIST,
@@ -401,14 +414,53 @@ export function runCombat(
           logLine('You are stunned and lose your turn.');
           continue;
         }
-        const target = enemies.find((e) => e.hp > 0)!;
-        const ready = actives.filter(
-          (s) => (cooldowns[s.id] ?? 0) <= 0 && energy >= (s.energyCost ?? 1),
-        );
+        const equipped = (run.cards ?? [])
+          .map((id) => cardById(id))
+          .filter((c): c is CardDef => c !== undefined)
+          .slice(0, 3);
         let chosen: SkillDef | undefined;
-        for (const s of ready) {
-          if (!chosen || (s.energyCost ?? 1) > (chosen.energyCost ?? 1)) chosen = s;
+        let attackMarked = false;
+        if (equipped.length > 0) {
+          const state: CardCombatState = {
+            round,
+            energy,
+            hp,
+            maxHp,
+            cooldowns,
+            actives,
+            targets: enemies
+              .filter((e) => e.hp > 0)
+              .map((e) => ({
+                hp: e.hp,
+                maxHp: e.maxHp,
+                marked: hasStatus(e.statuses, 'mark'),
+                weakness: e.weakness,
+              })),
+          };
+          const decision = evaluateCards(equipped, state);
+          const skippedTxt = decision.skipped.map((s) => `${s.name} (${s.reason})`).join(', ');
+          if (decision.fired) {
+            logLine(
+              `Cards: fired ${decision.fired.name}${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`,
+            );
+            const res = resolveCardAction(decision.fired.action, state);
+            chosen = res.skill;
+            attackMarked = !!res.attackMarked;
+          } else {
+            logLine(`Cards: none fired${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`);
+          }
+        } else {
+          const ready = actives.filter(
+            (s) => (cooldowns[s.id] ?? 0) <= 0 && energy >= (s.energyCost ?? 1),
+          );
+          for (const s of ready) {
+            if (!chosen || (s.energyCost ?? 1) > (chosen.energyCost ?? 1)) chosen = s;
+          }
         }
+        const target = attackMarked
+          ? (enemies.find((e) => e.hp > 0 && hasStatus(e.statuses, 'mark')) ??
+            enemies.find((e) => e.hp > 0)!)
+          : enemies.find((e) => e.hp > 0)!;
         if (chosen) {
           energy -= chosen.energyCost ?? 1;
           cooldowns[chosen.id] = chosen.cooldown ?? 1;
