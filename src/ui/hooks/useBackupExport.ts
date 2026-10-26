@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import { syncEarnedAchievements } from '../../data/achievementsStore';
 import { recordBackup } from '../../data/backups';
-import { exportDatabase } from '../../data/exportImport';
 import { APP_VERSION } from '../../version';
 import { useToday } from '../app/hooks';
 import { useSession } from '../app/session';
@@ -36,6 +35,9 @@ export function useBackupExport(): {
       setError('');
       try {
         const now = ctx.clock.now();
+        // The export schema and its validator are only needed on the day of a backup. Keeping that
+        // chunk out of the first copy is worth one short wait behind the button.
+        const { exportDatabase } = await import('../../data/exportImport');
         const text = await exportDatabase(db, { now, appVersion: APP_VERSION });
         downloadJson(text, `pocketrealm-${today}.json`);
         await recordBackup(db, text, { reason, now });

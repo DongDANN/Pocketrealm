@@ -4,7 +4,7 @@ import { C } from '../../art/palette';
 import { CURRENCIES, DEFAULT_CURRENCY, isCurrencyCode } from '../../core/currency';
 import type { Settings as SettingsValue } from '../../core/types';
 import { dateOf } from '../../core/dates';
-import { importDatabase, inspectImport, type ImportPreview } from '../../data/exportImport';
+import type { ImportPreview } from '../../data/exportImport';
 import { backupReminder, latestBackup } from '../../data/backups';
 import { saveSettings } from '../../data/repos';
 import { wipeBook } from '../../data/wipe';
@@ -22,6 +22,7 @@ import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { bytesLabel } from '../../core/view';
 import { say } from '../lib/toast';
 import { setTextMode, useTextMode } from '../lib/textMode';
+import { setHighContrast, useHighContrast } from '../lib/contrast';
 import {
   disableSound,
   enableSound,
@@ -45,6 +46,7 @@ export function Settings() {
   const transactions = useAllTransactions();
   const backup = useLiveQuery(() => latestBackup(db), [db]);
   const textMode = useTextMode();
+  const highContrast = useHighContrast();
   const install = useInstallPrompt();
   const backupExport = useBackupExport();
 
@@ -143,6 +145,7 @@ export function Settings() {
     setMode('merge');
     try {
       const text = await file.text();
+      const { inspectImport } = await import('../../data/exportImport');
       const inspected = inspectImport(text);
       if (!inspected.ok) {
         setImportProblems(inspected.problems);
@@ -163,6 +166,7 @@ export function Settings() {
     setError('');
     setImportProblems([]);
     try {
+      const { importDatabase } = await import('../../data/exportImport');
       const outcome = await importDatabase(db, importText, {
         mode,
         now: ctx.clock.now(),
@@ -321,6 +325,20 @@ export function Settings() {
           >
             <PixelText
               text={textMode === 'system' ? 'Readable text: on' : 'Readable text: bitmap'}
+              color={C.paper0}
+              pixelScale={2}
+            />
+          </PixelButton>
+          <PixelButton
+            variant="secondary"
+            aria-pressed={highContrast}
+            onClick={() => {
+              setHighContrast(!highContrast);
+              say(highContrast ? 'Standard contrast on.' : 'High contrast on.', 'neutral');
+            }}
+          >
+            <PixelText
+              text={highContrast ? 'High contrast: on' : 'High contrast: off'}
               color={C.paper0}
               pixelScale={2}
             />
@@ -511,7 +529,17 @@ export function Settings() {
             <PixelText text={backupExport.error} color={C.ember1} pixelScale={2} wrap={40} />
           </p>
         )}
-        <label className="pixel-button secondary link-button wide" htmlFor="import-file">
+        <label
+          className="pixel-button secondary link-button wide"
+          htmlFor="import-file"
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.currentTarget.control?.click();
+          }}
+        >
           <PixelText
             text="Choose a backup file to import"
             color={C.paper0}
@@ -525,6 +553,7 @@ export function Settings() {
           type="file"
           accept="application/json,.json"
           aria-label="Backup file"
+          tabIndex={-1}
           onChange={(event) => void chooseFile(event.target.files?.[0])}
         />
 

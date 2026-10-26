@@ -1,8 +1,10 @@
 import { useMemo } from 'react';
 import { ADVANCE, LINE_HEIGHT, textPixmap } from '../../art/font5x7';
+import { highContrastColor } from '../../art/palette';
 import { cssPerArtPixel } from '../lib/canvas';
 import { PixelImage } from './PixelImage';
 import { useTextMode } from '../lib/textMode';
+import { useHighContrast } from '../lib/contrast';
 
 interface Props {
   text: string;
@@ -33,6 +35,8 @@ export function PixelText({
   align = 'left',
 }: Props) {
   const mode = useTextMode();
+  const highContrast = useHighContrast();
+  const paint = highContrast ? highContrastColor(color) : color;
   // Words are always separate canvases so a line can reflow with its panel: a single bitmap run
   // cannot shrink, and an unshrinkable line is what pushes a card past the edge of the screen.
   const words = useMemo(() => {
@@ -45,8 +49,8 @@ export function PixelText({
   const maxWidth = wrap && wrap > 0 ? wrap * advance : undefined;
 
   const pixmaps = useMemo(
-    () => words.map((word) => textPixmap(word, color, pixelScale)),
-    [words, color, pixelScale],
+    () => words.map((word) => textPixmap(word, paint, pixelScale)),
+    [words, paint, pixelScale],
   );
 
   if (mode === 'system') {

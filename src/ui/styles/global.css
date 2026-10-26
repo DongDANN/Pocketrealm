@@ -21,6 +21,30 @@
   color-scheme: dark;
 }
 
+/*
+ * A user-chosen palette, not a filter. Shell colours step brighter here, and bitmap text swaps its
+ * ramp tone through the same master palette (see highContrastColor in src/art/palette.ts).
+ */
+:root[data-contrast='high'] {
+  --ink-900: #000000;
+  --ink-800: #000000;
+  --ink-700: #0a0910;
+  --ink-600: #14111f;
+  --ink-500: #3a3457;
+  --ink-400: #8a83ad;
+  --ink-300: #d6d1ec;
+  --paper: #fff6dd;
+  --paper-dim: #fff6dd;
+  --amber: #ffe79a;
+  --amber-deep: #ffb13b;
+  --moss: #d9f0bf;
+  --rose: #ffd6e6;
+  --gold: #fff6c9;
+  --focus: #ffffff;
+  --text-muted: #fff6dd;
+  --text-faint: #ffe79a;
+}
+
 *,
 *::before,
 *::after {
@@ -976,7 +1000,7 @@ a {
 .delve-strip .link-button {
   flex: 0 0 auto;
   margin: 0 0 0 auto;
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 12px;
   font-size: 0.68rem;
 }
@@ -1268,6 +1292,7 @@ a {
 }
 
 .header-link {
+  min-width: 44px;
   min-height: 44px;
   padding: 4px;
   display: inline-flex;
@@ -1364,11 +1389,13 @@ a {
 }
 
 .text-link {
+  min-width: 44px;
   min-height: 44px;
   margin: 0;
   padding: 4px 2px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   background: none;
   border: 0;
   color: var(--amber);
@@ -1377,7 +1404,7 @@ a {
 }
 
 .text-link.small {
-  min-height: 36px;
+  min-height: 44px;
   padding: 2px;
 }
 
@@ -1542,8 +1569,8 @@ a {
 
 .toast-dismiss {
   flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   background: var(--ink-500);

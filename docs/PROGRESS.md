@@ -65,8 +65,11 @@ Last updated: 2026-10-26
       automatic persistence request, shared backup reminder, honest install/offline badges and a
       fatal-error panel. Chromium only; real install prompts, iOS Safari and the persistence grant
       remain MANUAL_TEST items.**
-- [ ] Gate 6 — Polish/ship: a11y, reduced motion, Lighthouse, vercel.json, README,
+- [x] Gate 6 — Polish/ship: a11y, reduced motion, Lighthouse, vercel.json, README,
       MANUAL_TEST.md, final report + acceptance matrix.
+      **High contrast + keyboard audit, Lighthouse CI, a policy emulator and security e2e,
+      README/MANUAL_TEST/FINAL_REPORT. Chromium-only evidence; live deployment, real installs and a
+      screen-reader pass remain MANUAL_TEST items.**
 
 ### SHOULD follow-up gates (not part of MVP; shipped only if explicitly requested)
 
@@ -1053,3 +1056,69 @@ two badges that could never be earned and one that was paid for the wrong fact.
   deployment or HTTPS context — all headless Chromium, and the prompt is synthesized. Network-throttled
   first-pack timing and a real browser update prompt remain MANUAL_TEST items for Gate 6. The nudge is
   deliberately tied to five entries and seven days rather than a date; there is no snooze.
+
+### Gate 6 — Contrast, budgets, a testable deployment policy, and the honest paperwork (2026-10-26)
+
+Gate 6 was not one feature; it was the pass that turns “it works here” into a defensible release
+candidate. It found and fixed two real defects behind the first Lighthouse score and a keyboard
+defect in the import control, then documented what remains unverified instead of rounding it up.
+
+- **High contrast, and why it had to remap the palette.** `src/ui/lib/contrast.ts` owns a persisted
+  display preference and applies `data-contrast` to the root; `PixelText` reads it and maps every
+  text tone to the lightest tone of its ramp through `highContrastColor()` in the palette. Canvas text
+  cannot inherit a CSS colour, so this is an index remap rather than an overlay. Panels and art keep
+  their framing colours. Tests measure the real text tones at ≥7:1 on the dark shell; standard money
+  labels stay at AAA and body labels at AA. The shell CSS also gains a high-contrast variable block,
+  and the Settings toggle announces the change.
+- **Touch targets and a real keyboard defect.** The Playwright control audit found the hidden file
+  input at 1×1 and focusable while its visible label was not. The fix was structural: the visible
+  label is now a `role="button"` with Enter/Space activation and a 44 px target; the file input is
+  removed from the tab order. The same pass raised text links, toast dismiss, the Delve strip link
+  and the header link to 44 px. The audit now covers seven screens: every visible control has an
+  accessible name, a 44 px target, and every canvas either has an `aria-label` or is `aria-hidden`.
+- **Lighthouse and the two defects behind the score.** `@lhci/cli` 0.15.1 (Lighthouse 12.6.1) runs the
+  production build through `scripts/serve-vercel.mjs`, seeds a shared Chrome profile through
+  `scripts/lighthouse-onboard.cjs`, and audits `/` and `/add`. The first run scored performance 0.43
+  with CLS 1.09/1.14. Two causes: the local verifier served 725,928 bytes of raw JavaScript (Vercel
+  compresses), and every `PixelImage` canvas started at the browser default 300×150 before an effect
+  resized it, collapsing wrapped lines. The verifier now gzip-compresses text like Vercel;
+  `PixelImage` computes `pixelGrid` during render and sets the canvas attributes and CSS size inline.
+  Final scores: performance **0.93/0.94**, accessibility **1.00**, best practices **1.00**, FCP 2.3 s,
+  LCP 2.9/2.7 s, TBT 50/0 ms, CLS 0.01/0.00, script transfer 224,763 B, total 240/239 KiB. No
+  assertions triggered. Lighthouse 12.6.1 has no PWA category; installability remains covered by the
+  manifest/install e2e and the manual checklist.
+- **The validation chunk left the first copy.** `zod`, `inspectImport` and `exportDatabase` are now
+  dynamic imports reached only from backup/import actions. Initial JS is still **190.6 kB gzipped**
+  (React 78.5, Dexie 33.9, app 69.4) against the soft ~150 KB budget — reported over rather than
+  hidden — while all lazy JS sums to 110.1 kB and the Delve subset is roughly 57 kB, inside its
+  ~450 KB budget. Precache is 89 entries / 1000.34 KiB, inside the ~6 MB art+audio budget.
+- **A deployment policy that can be tested locally.** `vercel.json` supplies the SPA rewrite
+  (excluding `/assets`, `/ui`, `/icons`), immutable hashed assets and Workbox runtime, `no-cache` for
+  the shell/sw/manifest and extensionless routes, `application/manifest+json`, a self-only CSP with
+  `script-src 'self'` and `style-src 'self' 'unsafe-inline'` (React sets inline style attributes;
+  production HTML has no inline scripts), plus `nosniff`, `no-referrer`, a narrow Permissions-Policy
+  and `X-Frame-Options: DENY`. `scripts/serve-vercel.mjs` reads that file, applies headers and
+  rewrites to `dist/`, gzip-compresses and validates unknown patterns loudly.
+  `e2e/security.spec.ts` asserts the headers, cache rules, manifest type, absence of inline scripts,
+  working inline styles under CSP, an active service worker, a cold offline launch under CSP, and
+  that using the book makes **no request outside the app's origin**.
+- **Reduced motion and the rest of the a11y pass** were already in place from Gate 4; Gate 6 added the
+  high-contrast path, the control audit, the focus-ring e2e, and the honest contrast tests. The
+  light/dark theme setting and the read-only storage fallback remain gaps, reported in the final
+  report rather than implied complete.
+- **Verification:** `npm run typecheck` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 667/667 across 66 files**;
+  `npm run art:validate` **verified PASS** (121 assets / 309 frames); `npm run build` **verified**
+  clean (89 precache entries, 1000.34 KiB); `npx playwright test` **verified 61/61** in Chromium
+  against the production build; `npm run lighthouse` **verified** the scores above. The full browser
+  run refreshed five visual goldens after review: the 44 px touch-target fixes add 4 px to the Delve
+  strip and shift the header by 1 px, and the new screenshots show no clipping or missing labels.
+  New artifacts:
+  `README.md`, `docs/MANUAL_TEST.md`, `docs/FINAL_REPORT.md`, `vercel.json`, `lighthouserc.cjs`,
+  `scripts/serve-vercel.mjs`, `scripts/lighthouse-onboard.cjs`, `e2e/a11y.spec.ts`,
+  `e2e/security.spec.ts`, `tests/art-high-contrast.test.ts`, `src/ui/lib/contrast.ts`.
+- **Not verified / still open:** no deployment (owner deploys), no real Android/iOS install, no real
+  persistence grant, no real-phone FPS/catch-up timing, no human screen-reader pass, no live Vercel
+  header check. The Theme field is deliberately static (“Realm night”); there is no daylight theme,
+  no read-only storage mode, and no Aseprite/PNG art importer. These are listed with the SHOULD gaps
+  in `docs/FINAL_REPORT.md`.

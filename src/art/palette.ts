@@ -198,6 +198,39 @@ export const UI = {
   focus: RAMPS.gold[0],
 } as const;
 
+/**
+ * High-contrast text keeps its hue but steps to the lightest tone in the ramp. Canvas text cannot
+ * inherit a CSS colour, so the palette index itself is remapped. Only text is remapped: panels and
+ * sprites keep their framing colours, which is what makes the contrast swap legible instead of flat.
+ */
+const HIGH_CONTRAST_TEXT = new Map<number, number>();
+
+function lightenText(ramp: readonly string[], target = ramp[0]!): void {
+  for (const hex of ramp.slice(1)) HIGH_CONTRAST_TEXT.set(colorIndex(hex), colorIndex(target));
+}
+
+lightenText(RAMPS.parchment);
+lightenText(RAMPS.amber, RAMPS.amber[1]);
+lightenText(RAMPS.ember, RAMPS.ember[0]);
+lightenText(RAMPS.moss);
+lightenText(RAMPS.teal);
+lightenText(RAMPS.cyan);
+lightenText(RAMPS.frost);
+lightenText(RAMPS.violet);
+lightenText(RAMPS.rose);
+lightenText(RAMPS.gold);
+lightenText(RAMPS.steel);
+lightenText(RAMPS.skin);
+// Ink is text on the light paper panels, where the darkest tone is the readable one.
+for (const hex of [RAMPS.ink[4], RAMPS.ink[5], RAMPS.ink[6]]) {
+  const index = colorIndex(hex);
+  HIGH_CONTRAST_TEXT.set(index, C.ink900);
+}
+
+export function highContrastColor(index: number): number {
+  return HIGH_CONTRAST_TEXT.get(index) ?? index;
+}
+
 export function contrastRatio(a: string, b: string): number {
   const lum = (hex: string): number => {
     const v = hex.replace('#', '');

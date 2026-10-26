@@ -24,4 +24,14 @@ export default tseslint.config(
     files: ['scripts/**/*.ts', 'tests/**/*.ts', 'e2e/**/*.ts', '*.config.ts'],
     languageOptions: { globals: { ...globals.node } },
   },
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { ecmaVersion: 2022, globals: { ...globals.node } },
+  },
+  {
+    // The Lighthouse onboarding script runs in Node and also passes callbacks to page.evaluate,
+    // which execute in the browser context.
+    files: ['scripts/**/*.cjs'],
+    languageOptions: { ecmaVersion: 2022, globals: { ...globals.node, ...globals.browser } },
+  },
 );

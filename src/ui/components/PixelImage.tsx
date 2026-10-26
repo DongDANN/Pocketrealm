@@ -11,13 +11,15 @@ interface Props {
 
 export function PixelImage({ pixmap, scale = 1, alt, className }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const integerScale = Math.max(1, Math.round(scale));
+  // Size the canvas in the render pass, not only in the effect: an unsized canvas is 300x150 and
+  // collapses every wrapping line the moment the effect lands, which is a full-page layout shift.
+  const width = pixelGrid(pixmap.w, integerScale);
+  const height = pixelGrid(pixmap.h, integerScale);
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const integerScale = Math.max(1, Math.round(scale));
-    const width = pixelGrid(pixmap.w, integerScale);
-    const height = pixelGrid(pixmap.h, integerScale);
     canvas.width = width.backing;
     canvas.height = height.backing;
     canvas.style.width = `${width.css}px`;
@@ -32,6 +34,9 @@ export function PixelImage({ pixmap, scale = 1, alt, className }: Props) {
     <canvas
       ref={ref}
       className={className}
+      width={width.backing}
+      height={height.backing}
+      style={{ width: `${width.css}px`, height: `${height.css}px` }}
       role={alt ? 'img' : undefined}
       aria-label={alt || undefined}
       aria-hidden={alt ? undefined : true}
