@@ -1,11 +1,11 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { C } from '../art/palette';
 import { useOnline } from './hooks/useOnline';
 import { subscribePwa, type PwaState } from '../pwa/register';
 import { PixelText } from './components/PixelText';
 import { ToastHost } from './components/ToastHost';
-import { AppGate, OnboardingGate, RequireOnboarded } from './app/gates';
+import { AppGate, ErrorBoundary, OnboardingGate, RequireOnboarded } from './app/gates';
 import { DelveProvider } from './app/delve';
 import { SessionProvider } from './app/session';
 import { AppShell } from './app/AppShell';
@@ -70,72 +70,99 @@ function RouteFallback() {
  */
 export function App() {
   const online = useOnline();
-  const [pwa, setPwa] = useState<PwaState>({ offlineReady: false, needRefresh: false });
+  const { pathname } = useLocation();
+  const [pwa, setPwa] = useState<PwaState>({
+    offlineReady: false,
+    needRefresh: false,
+    preparing: false,
+    packReady: false,
+  });
 
   useEffect(() => subscribePwa(setPwa), []);
 
   return (
     <SessionProvider>
-      <AppGate>
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route
-              path="/onboarding"
-              element={
-                <OnboardingGate>
-                  <Onboarding />
-                </OnboardingGate>
-              }
-            />
-            <Route
-              element={
-                <RequireOnboarded>
-                  <DelveProvider>
-                    <AppShell />
-                  </DelveProvider>
-                </RequireOnboarded>
-              }
-            >
-              <Route path="/" element={<Today />} />
-              <Route path="/add" element={<Add />} />
-              <Route path="/envelopes" element={<Envelopes />} />
-              <Route path="/envelopes/:id" element={<EnvelopeDetail />} />
-              <Route path="/goals" element={<Goals />} />
-              <Route path="/history" element={<History />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/quests" element={<Quests />} />
-              <Route path="/achievements" element={<Achievements />} />
-              <Route path="/review" element={<Review />} />
-              <Route path="/insights" element={<Insights />} />
-              <Route path="/realm" element={<Realm />} />
-              <Route path="/delve" element={<Delve />} />
-              <Route path="/delve/policy" element={<DelvePolicy />} />
-              <Route path="/delve/forge" element={<DelveForge />} />
-              <Route path="/delve/workshop" element={<DelveWorkshop />} />
-              <Route path="/delve/cards" element={<DelveCards />} />
-              <Route path="/delve/codex" element={<DelveCodex />} />
-              <Route path="/delve/history" element={<DelveHistory />} />
-            </Route>
-            <Route path="/art" element={<ArtPreview />} />
-            <Route path="/mock/today" element={<TodayMock />} />
-            <Route path="/mock/foundation" element={<Foundation needRefresh={pwa.needRefresh} />} />
-            <Route path="/today" element={<Navigate to="/mock/today" replace />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </Suspense>
-        <ToastHost />
-        {!online && (
-          <p className="offline-strip" role="status">
-            <PixelText
-              text="Working offline. Everything is saved on this device."
-              color={C.paper1}
-              pixelScale={2}
-              wrap={30}
-              align="center"
-            />
-          </p>
-        )}
-      </AppGate>
+      <ErrorBoundary>
+        <AppGate>
+          <Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route
+                path="/onboarding"
+                element={
+                  <OnboardingGate>
+                    <Onboarding />
+                  </OnboardingGate>
+                }
+              />
+              <Route
+                element={
+                  <RequireOnboarded>
+                    <DelveProvider>
+                      <AppShell />
+                    </DelveProvider>
+                  </RequireOnboarded>
+                }
+              >
+                <Route path="/" element={<Today />} />
+                <Route path="/add" element={<Add />} />
+                <Route path="/envelopes" element={<Envelopes />} />
+                <Route path="/envelopes/:id" element={<EnvelopeDetail />} />
+                <Route path="/goals" element={<Goals />} />
+                <Route path="/history" element={<History />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/quests" element={<Quests />} />
+                <Route path="/achievements" element={<Achievements />} />
+                <Route path="/review" element={<Review />} />
+                <Route path="/insights" element={<Insights />} />
+                <Route path="/realm" element={<Realm />} />
+                <Route path="/delve" element={<Delve />} />
+                <Route path="/delve/policy" element={<DelvePolicy />} />
+                <Route path="/delve/forge" element={<DelveForge />} />
+                <Route path="/delve/workshop" element={<DelveWorkshop />} />
+                <Route path="/delve/cards" element={<DelveCards />} />
+                <Route path="/delve/codex" element={<DelveCodex />} />
+                <Route path="/delve/history" element={<DelveHistory />} />
+              </Route>
+              <Route path="/art" element={<ArtPreview />} />
+              <Route path="/mock/today" element={<TodayMock />} />
+              <Route
+                path="/mock/foundation"
+                element={<Foundation needRefresh={pwa.needRefresh} />}
+              />
+              <Route path="/today" element={<Navigate to="/mock/today" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+          <ToastHost />
+          {!online ? (
+            <p className="offline-strip" role="status">
+              <PixelText
+                text="Working offline. Everything is saved on this device."
+                color={C.paper1}
+                pixelScale={2}
+                wrap={30}
+                align="center"
+              />
+            </p>
+          ) : (
+            pwa.preparing &&
+            pathname !== '/onboarding' && (
+              <p className="offline-strip pack-strip" role="status">
+                <PixelText
+                  text="Preparing the offline pack. Keep using the book; this only saves a copy for later."
+                  color={C.paper1}
+                  pixelScale={2}
+                  wrap={30}
+                  align="center"
+                />
+                <span className="pack-bar" aria-hidden="true">
+                  <span />
+                </span>
+              </p>
+            )
+          )}
+        </AppGate>
+      </ErrorBoundary>
     </SessionProvider>
   );
 }

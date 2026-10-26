@@ -24,6 +24,7 @@ import { PixelText } from '../components/PixelText';
 import { LoadingPanel } from '../app/gates';
 import { useCompanion, useEnvelopes, useSettings, useToday } from '../app/hooks';
 import { useSession } from '../app/session';
+import { payOfflineEntry } from '../lib/offlineEntry';
 import { say } from '../lib/toast';
 
 const KINDS: readonly { kind: TransactionKind; label: string }[] = [
@@ -291,6 +292,7 @@ export function Add() {
       if (companion) {
         say(`${companion.name} writes it down carefully.`, 'neutral');
       }
+      await payOfflineEntry(db, ctx);
       navigate('/', { replace: true });
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));

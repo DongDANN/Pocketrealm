@@ -39,6 +39,23 @@ export async function completeOnboarding(
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
 }
 
+/**
+ * Waits for the first offline copy to be complete: an active worker whose cache already holds the
+ * app shell. Cold-launch tests must not go offline before this or they only prove the network works.
+ */
+export async function waitForOfflinePack(page: Page): Promise<void> {
+  await page.waitForFunction(async () => {
+    if (!('serviceWorker' in navigator)) return false;
+    const reg = await navigator.serviceWorker.ready;
+    if (!reg.active) return false;
+    const keys = await caches.keys();
+    if (keys.length === 0) return false;
+    const cache = await caches.open(keys[0]!);
+    const requests = await cache.keys();
+    return requests.some((r) => r.url.includes('/index.html') || r.url.endsWith('/'));
+  });
+}
+
 /** The thumb bar, so a label like "Envelopes" cannot collide with a link inside a panel. */
 export function nav(page: Page) {
   return page.getByRole('navigation', { name: 'Main' });

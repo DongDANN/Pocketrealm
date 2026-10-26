@@ -229,9 +229,15 @@ test('the realm spends Sparks on looks and never touches the budget', async ({ p
 
   // Earn the cheapest price tag in the shop: check-in and the review, then entries until it clears.
   await page.getByRole('button', { name: 'Check in' }).click();
+  await expect
+    .poll(() => visibleText(page, '.toast-host'), 'the check-in reward')
+    .toContain('Checked in.');
   await openScreen(page, '/review', 'Weekly review');
   await page.getByRole('tab', { name: 'Focus' }).click();
   await page.getByRole('button', { name: 'Finish the review' }).click();
+  await expect
+    .poll(() => visibleText(page, '.toast-host'), 'the review reward')
+    .toContain('Review done.');
   for (let entry = 0; entry < Math.max(0, cheapestCosmetic - 12); entry += 1) {
     await logTinyEntry(page);
   }

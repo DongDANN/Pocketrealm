@@ -1,12 +1,15 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { C } from '../../art/palette';
 import { isOnboarded } from '../../data/onboard';
 import { runOpenJobs } from '../../data/openJobs';
+import { isStandalone } from '../../pwa/display';
+import { ensurePersistentStorage } from '../../pwa/storage';
 import { PixelButton } from '../components/PixelButton';
 import { PixelPanel } from '../components/PixelPanel';
 import { PixelText } from '../components/PixelText';
+import { announceAchievements } from '../lib/achievements';
 import { say } from '../lib/toast';
 import { useSession } from './session';
 
@@ -47,6 +50,23 @@ export function FatalPanel({ message }: { message: string }) {
       </PixelPanel>
     </main>
   );
+}
+
+/**
+ * A last line of defence for a screen that throws in render, including a Dexie live query whose
+ * database was blocked after load. It says the same thing as the open gate: nothing changed.
+ */
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  override state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: unknown): { error: Error } {
+    return { error: error instanceof Error ? error : new Error(String(error)) };
+  }
+
+  override render(): ReactNode {
+    if (this.state.error) return <FatalPanel message={this.state.error.message} />;
+    return this.props.children;
+  }
 }
 
 export function useOnboarded(): boolean | undefined {
@@ -104,12 +124,11 @@ export function AppGate({ children }: { children: ReactNode }) {
     started.current = true;
     void (async () => {
       try {
-        const report = await runOpenJobs(db, ctx, { usedOffline: !navigator.onLine });
+        const report = await runOpenJobs(db, ctx, { installedToHomeScreen: isStandalone() });
         if (report.oil.granted) say('Daily oil +20', 'reward');
-        for (const achievement of report.achievements) {
-          say(`Achievement: ${achievement.name} · +${achievement.xp} XP`, 'reward');
-        }
+        announceAchievements(report.achievements);
         setJobsDone(true);
+        void ensurePersistentStorage();
       } catch (error) {
         setProblem(error instanceof Error ? error.message : String(error));
       }

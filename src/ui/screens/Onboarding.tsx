@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { lanternMark } from '../../art/brand';
 import { C } from '../../art/palette';
@@ -15,6 +15,7 @@ import {
 import { envelopesFromTemplate, TEMPLATES, templateById } from '../../core/templates';
 import { completeOnboarding } from '../../data/onboard';
 import { saveSettings } from '../../data/repos';
+import { pwaState, subscribePwa } from '../../pwa/register';
 import { PixelImage } from '../components/PixelImage';
 import { PixelPanel } from '../components/PixelPanel';
 import { PixelText } from '../components/PixelText';
@@ -49,6 +50,7 @@ export function Onboarding() {
   const [companionName, setCompanionName] = useState('Warden');
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const pwa = useSyncExternalStore(subscribePwa, pwaState, pwaState);
 
   const localeOptions = LOCALES.includes(locale) ? LOCALES : [locale, ...LOCALES];
   const coin: CurrencyCode = isCurrencyCode(currency) ? currency : DEFAULT_CURRENCY;
@@ -122,6 +124,21 @@ export function Onboarding() {
           />
         </p>
       </section>
+
+      {pwa.preparing && (
+        <PixelPanel className="pack-notice pack-strip" role="status">
+          <PixelText
+            text="Preparing the offline pack. Keep using the book; this only saves a copy for later."
+            color={C.paper1}
+            pixelScale={2}
+            wrap={38}
+            align="center"
+          />
+          <span className="pack-bar" aria-hidden="true">
+            <span />
+          </span>
+        </PixelPanel>
+      )}
 
       <PixelPanel className="onboard-panel" aria-labelledby="money-title">
         <h2 id="money-title" className="panel-title">

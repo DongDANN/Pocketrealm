@@ -9,8 +9,34 @@ import { ACHIEVEMENTS, newlyUnlocked, type Achievement } from '../core/achieveme
 import { achievementReward } from '../core/habits';
 import type { BudgetFacts } from '../core/types';
 import type { PocketDb } from './db';
+import { loadFacts } from './factsStore';
 import { grantMany } from './ledger';
 import { listAchievements, unlockAchievement, type WriteContext } from './repos';
+
+const ALL_TIME_START = '0000-01-01';
+
+/**
+ * Pays the badges that a just-finished action earned, without waiting for the next app open. Used
+ * where the app knows something true about *this moment* that the rows cannot say: an entry written
+ * offline, a backup file exported, or a launch from the home screen.
+ */
+export async function syncEarnedAchievements(
+  db: PocketDb,
+  ctx: WriteContext,
+  flags: {
+    backupCreated?: boolean;
+    installedToHomeScreen?: boolean;
+    usedOffline?: boolean;
+  } = {},
+): Promise<Achievement[]> {
+  const today = ctx.clock.today();
+  const facts = await loadFacts(db, {
+    today,
+    window: { start: ALL_TIME_START, end: today },
+    flags,
+  });
+  return syncAchievements(db, ctx, facts);
+}
 
 /** The achievements this call earned, oldest definition order. Empty when nothing new was met. */
 export async function syncAchievements(

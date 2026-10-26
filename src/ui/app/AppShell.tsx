@@ -16,7 +16,12 @@ import { BottomNav } from '../components/BottomNav';
  */
 export function AppShell() {
   const settings = useSettings();
-  const [pwa, setPwa] = useState<PwaState>({ offlineReady: false, needRefresh: false });
+  const [pwa, setPwa] = useState<PwaState>({
+    offlineReady: false,
+    needRefresh: false,
+    preparing: false,
+    packReady: false,
+  });
 
   useEffect(() => subscribePwa(setPwa), []);
 

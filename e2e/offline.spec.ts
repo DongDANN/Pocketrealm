@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { completeOnboarding, visibleText } from './helpers';
+import { completeOnboarding, nav, visibleText, waitForOfflinePack } from './helpers';
 
 test('cold-launches offline with the book intact and keeps logging entries', async ({
   page,
@@ -14,16 +14,7 @@ test('cold-launches offline with the book intact and keeps logging entries', asy
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
   expect(await visibleText(page, '.safe-meta')).toContain('Spent today ₱100.00');
 
-  await page.waitForFunction(async () => {
-    if (!('serviceWorker' in navigator)) return false;
-    const reg = await navigator.serviceWorker.ready;
-    if (!reg.active) return false;
-    const keys = await caches.keys();
-    if (keys.length === 0) return false;
-    const cache = await caches.open(keys[0]!);
-    const requests = await cache.keys();
-    return requests.some((r) => r.url.includes('/index.html') || r.url.endsWith('/'));
-  });
+  await waitForOfflinePack(page);
 
   await context.setOffline(true);
   await page.reload();
@@ -43,6 +34,10 @@ test('cold-launches offline with the book intact and keeps logging entries', asy
     'aria-label',
     '₱350.00 left',
   );
+  // Written offline, so the badge is earned by the entry itself, not by merely opening offline.
+  await expect
+    .poll(() => visibleText(page, '.toast-host').catch(() => ''))
+    .toContain('Lantern in the dark');
 
   const fresh = await context.newPage();
   await fresh.goto('/');
@@ -58,4 +53,36 @@ test('a fresh tab sees the same book on this device', async ({ page, context }) 
   await expect(fresh.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
   expect(await visibleText(fresh, '.safe-amount')).toContain('₱500.00');
   await fresh.close();
+});
+
+test('deep links and the thumb bar work with no network', async ({ page, context }) => {
+  await completeOnboarding(page, { income: '1000' });
+  await waitForOfflinePack(page);
+
+  await context.setOffline(true);
+  await page.goto('/envelopes');
+  await expect(page.getByRole('heading', { level: 1, name: 'Jars', exact: true })).toBeVisible();
+  await nav(page).getByRole('link', { name: 'Add' }).click();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Add entry', exact: true }),
+  ).toBeVisible();
+  await nav(page).getByRole('link', { name: 'Today', exact: true }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
+  await context.setOffline(false);
+});
+
+test('the first visit says the offline pack is being prepared', async ({ page }) => {
+  // A registration that never resolves leaves the first-copy state visible without slowing the app.
+  await page.addInitScript(() => {
+    Object.defineProperty(ServiceWorkerContainer.prototype, 'register', {
+      configurable: true,
+      value: () => new Promise(() => {}),
+    });
+  });
+
+  await page.goto('/onboarding');
+  const strip = page.locator('.pack-strip');
+  await expect(strip).toBeVisible();
+  expect(await visibleText(page, '.pack-strip')).toContain('Preparing the offline pack');
+  await expect(page.getByRole('heading', { level: 1, name: 'Pocketrealm' })).toBeVisible();
 });

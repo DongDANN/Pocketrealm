@@ -3,14 +3,9 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { C } from '../../art/palette';
 import { CURRENCIES, DEFAULT_CURRENCY, isCurrencyCode } from '../../core/currency';
 import type { Settings as SettingsValue } from '../../core/types';
-import { dateOf, daysBetween } from '../../core/dates';
-import {
-  exportDatabase,
-  importDatabase,
-  inspectImport,
-  type ImportPreview,
-} from '../../data/exportImport';
-import { latestBackup, recordBackup } from '../../data/backups';
+import { dateOf } from '../../core/dates';
+import { importDatabase, inspectImport, type ImportPreview } from '../../data/exportImport';
+import { backupReminder, latestBackup } from '../../data/backups';
 import { saveSettings } from '../../data/repos';
 import { wipeBook } from '../../data/wipe';
 import { reloadForUpdate, subscribePwa, type PwaState } from '../../pwa/register';
@@ -22,6 +17,7 @@ import { PixelText } from '../components/PixelText';
 import { LoadingPanel } from '../app/gates';
 import { useAllTransactions, useSettings, useToday } from '../app/hooks';
 import { useSession } from '../app/session';
+import { useBackupExport } from '../hooks/useBackupExport';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { bytesLabel } from '../../core/view';
 import { say } from '../lib/toast';
@@ -36,22 +32,11 @@ import {
 } from '../lib/sound';
 
 const LOCALES = ['en-PH', 'en-US', 'en-GB', 'en-SG', 'en-IN', 'de-DE', 'fr-FR'];
-const BACKUP_REMINDER_DAYS = 7;
 const SOUND_LEVEL_FIELDS: { key: keyof SoundLevels; label: string }[] = [
   { key: 'master', label: 'Master' },
   { key: 'music', label: 'Music' },
   { key: 'sfx', label: 'Effects' },
 ];
-
-function downloadJson(text: string, filename: string) {
-  const blob = new Blob([text], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
 
 export function Settings() {
   const { db, ctx } = useSession();
@@ -61,11 +46,17 @@ export function Settings() {
   const backup = useLiveQuery(() => latestBackup(db), [db]);
   const textMode = useTextMode();
   const install = useInstallPrompt();
+  const backupExport = useBackupExport();
 
-  const [pwa, setPwa] = useState<PwaState>({ offlineReady: false, needRefresh: false });
+  const [pwa, setPwa] = useState<PwaState>({
+    offlineReady: false,
+    needRefresh: false,
+    preparing: false,
+    packReady: false,
+  });
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{ usage?: number; quota?: number } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [working, setWorking] = useState(false);
   const [error, setError] = useState('');
 
   const [importText, setImportText] = useState<string | null>(null);
@@ -77,6 +68,8 @@ export function Settings() {
   const [importResult, setImportResult] = useState('');
 
   const [wipeWord, setWipeWord] = useState('');
+
+  const busy = working || backupExport.busy;
 
   useEffect(() => subscribePwa(setPwa), []);
 
@@ -140,26 +133,6 @@ export function Settings() {
     });
   }, []);
 
-  const exportBook = useCallback(
-    async (reason: 'manual' | 'reminder') => {
-      if (busy) return;
-      setBusy(true);
-      setError('');
-      try {
-        const now = ctx.clock.now();
-        const text = await exportDatabase(db, { now, appVersion: APP_VERSION });
-        downloadJson(text, `pocketrealm-${today}.json`);
-        await recordBackup(db, text, { reason, now });
-        say('A full backup file is in your downloads.', 'reward');
-      } catch (problem) {
-        setError(problem instanceof Error ? problem.message : String(problem));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [busy, ctx, db, today],
-  );
-
   const chooseFile = async (file: File | undefined) => {
     if (!file) return;
     setImportResult('');
@@ -186,7 +159,7 @@ export function Settings() {
 
   const runImport = async () => {
     if (!importText || busy || (mode === 'replace' && !replaceChecked)) return;
-    setBusy(true);
+    setWorking(true);
     setError('');
     setImportProblems([]);
     try {
@@ -208,20 +181,20 @@ export function Settings() {
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
     } finally {
-      setBusy(false);
+      setWorking(false);
     }
   };
 
   if (!settings || !transactions) return <LoadingPanel label="Opening settings" />;
 
   const coin = isCurrencyCode(settings.currency) ? settings.currency : DEFAULT_CURRENCY;
-  const backupAge = backup ? daysBetween(dateOf(backup.at), today) : null;
-  const needsBackup =
-    transactions.length >= 5 && (backupAge === null || backupAge >= BACKUP_REMINDER_DAYS);
-  const lastBackupCopy =
-    backup === undefined
-      ? 'No backup has been made yet.'
-      : `Last backup ${dateOf(backup.at)}${backupAge !== null && backupAge > 0 ? ` (${backupAge} days ago)` : ' (today)'}.`;
+  const reminder = backupReminder({
+    entries: transactions.length,
+    ...(backup ? { lastBackupAt: backup.at } : {}),
+    today,
+  });
+  const needsBackup = reminder.due;
+  const lastBackupCopy = reminder.copy;
   const localeOptions = LOCALES.includes(settings.locale) ? LOCALES : [settings.locale, ...LOCALES];
 
   return (
@@ -242,7 +215,7 @@ export function Settings() {
           <p>
             <PixelText text={lastBackupCopy} color={C.paper3} pixelScale={2} wrap={40} />
           </p>
-          <PixelButton disabled={busy} onClick={() => void exportBook('reminder')}>
+          <PixelButton disabled={busy} onClick={() => void backupExport.exportBook('reminder')}>
             <PixelText text="Export a backup now" color={C.ink900} pixelScale={2} />
           </PixelButton>
         </PixelPanel>
@@ -525,14 +498,19 @@ export function Settings() {
         <p>
           <PixelText text={lastBackupCopy} color={C.paper3} pixelScale={2} wrap={40} />
         </p>
-        <PixelButton disabled={busy} onClick={() => void exportBook('manual')}>
+        <PixelButton disabled={busy} onClick={() => void backupExport.exportBook('manual')}>
           <img className="ui-icon" src="/ui/ui-icon-check.png" width={20} height={20} alt="" />
           <PixelText
-            text={busy ? 'Packing the book' : 'Export everything'}
+            text={backupExport.busy ? 'Packing the book' : 'Export everything'}
             color={C.ink900}
             pixelScale={2}
           />
         </PixelButton>
+        {backupExport.error !== '' && (
+          <p role="alert">
+            <PixelText text={backupExport.error} color={C.ember1} pixelScale={2} wrap={40} />
+          </p>
+        )}
         <label className="pixel-button secondary link-button wide" htmlFor="import-file">
           <PixelText
             text="Choose a backup file to import"
@@ -665,7 +643,16 @@ export function Settings() {
         <h2 id="install-title" className="panel-title">
           <PixelText text="Install" color={C.paper0} pixelScale={3} />
         </h2>
-        {install.available ? (
+        {install.installed ? (
+          <p>
+            <PixelText
+              text="Pocketrealm is installed on this device. It opens without the browser."
+              color={C.moss1}
+              pixelScale={2}
+              wrap={44}
+            />
+          </p>
+        ) : install.available ? (
           <PixelButton onClick={() => void install.prompt()}>
             <PixelText text="Install Pocketrealm" color={C.ink900} pixelScale={2} />
           </PixelButton>
@@ -716,9 +703,11 @@ export function Settings() {
           <li>
             <PixelText
               text={
-                pwa.offlineReady
-                  ? 'The app shell is ready for offline use.'
-                  : 'Offline use starts after the first full visit.'
+                pwa.preparing
+                  ? 'Saving the app shell for offline use. The book is usable meanwhile.'
+                  : pwa.offlineReady || pwa.packReady
+                    ? 'The app shell is ready for offline use.'
+                    : 'Offline use starts after the first full visit.'
               }
               color={C.paper3}
               pixelScale={2}
@@ -753,7 +742,11 @@ export function Settings() {
             wrap={44}
           />
         </p>
-        <PixelButton variant="secondary" disabled={busy} onClick={() => void exportBook('manual')}>
+        <PixelButton
+          variant="secondary"
+          disabled={busy}
+          onClick={() => void backupExport.exportBook('manual')}
+        >
           <PixelText text="Export before deleting" color={C.paper0} pixelScale={2} />
         </PixelButton>
         <label className="field">

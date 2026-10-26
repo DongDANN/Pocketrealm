@@ -21,6 +21,8 @@ import { speciesIdleFrames } from '../../art/species';
 import { say } from '../lib/toast';
 import { LoadingPanel } from '../app/gates';
 import { AppHeader } from '../components/AppHeader';
+import { BackupNudge } from '../components/BackupNudge';
+import { InstallCard } from '../components/InstallCard';
 
 function dateLabel(today: string, locale: string): string {
   const [y, m, d] = today.split('-').map(Number) as [number, number, number];
@@ -151,6 +153,10 @@ export function Today() {
           <PixelText text={checkedIn ? 'Checked in' : 'Check in'} color={C.paper0} pixelScale={2} />
         </PixelButton>
       </div>
+
+      <BackupNudge />
+
+      <InstallCard />
 
       <PixelPanel className="envelopes" aria-labelledby="envelopes-title">
         <div className="panel-head">

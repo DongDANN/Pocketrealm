@@ -59,8 +59,12 @@ Last updated: 2026-10-26
       gesture gate, 4c-3 the sixteen-species bestiary and nineteen glyphs, 4c-4 the two lazy Canvas
       scenes (battle stage and realm diorama), 4d the e2e sweep and goldens. Chromium only, at
       390×844 @ DPR 3 — real-device FPS, touch parallax and haptics are MANUAL_TEST/Gate 5 items.**
-- [ ] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
+- [x] Gate 5 — PWA hardening: offline e2e, update flow, install cards, persistence, backup
       reminders, error states, manifest shortcuts.
+      **Install cards for Chromium and iOS, first-run offline-pack progress, update-and-reload,
+      automatic persistence request, shared backup reminder, honest install/offline badges and a
+      fatal-error panel. Chromium only; real install prompts, iOS Safari and the persistence grant
+      remain MANUAL_TEST items.**
 - [ ] Gate 6 — Polish/ship: a11y, reduced motion, Lighthouse, vercel.json, README,
       MANUAL_TEST.md, final report + acceptance matrix.
 
@@ -983,3 +987,69 @@ the picture is never the only place a fact lives.
   single fight in `combat.ts` and never persist onto `CombatUnitState`, so there is no list to render —
   showing them means either engine state the balance tests have not accounted for, or drawing them in the
   battle scene over a room's affixes. Recorded as a Gate 6 gameplay-clarity item rather than invented here.
+
+### Gate 5 — Install, the offline pack, and the first honest failure state (2026-10-26)
+
+Gate 5 turned the Gate 0 hello-world offline check into the behaviour a real first visit meets: an
+install card, a first copy being written while the app stays usable, an update that actually reloads,
+a persistence request, a backup nudge, and a failure panel when storage refuses to open. It also found
+two badges that could never be earned and one that was paid for the wrong fact.
+
+- **Install surface.** `useInstallPrompt` now captures `beforeinstallprompt` at module scope, not in
+  Today's effect: the one prompt a browser offers can arrive during onboarding or while another screen
+  is mounted, and losing it there made the card permanently unreachable. The event is `preventDefault`ed
+  and held; `InstallCard` on Today hands it back exactly once, and Settings can too. Dismissal is
+  remembered in `pocketrealm.installCard`; `isStandalone()` (`navigator.standalone` or
+  `display-mode: standalone`) hides the card and tells Settings the app is already installed. iOS has no
+  event at all, so it gets the one-time Share → Add to Home Screen card; Chrome on iOS is still iOS.
+  E2E dispatches a synthetic prompt, clicks Install, and checks the native prompt was called; a second
+  test dismisses, reloads and expects the card gone.
+- **The first offline copy.** `shouldPrepareOfflinePack` shows progress only when the build is
+  production, a service worker exists, and no controller exists yet. `preparing` ends on
+  `controllerchange` or a 30s patience timeout, and `packReady` is already true for a returning tab.
+  The first screenshot review found the bottom-fixed strip sitting over the income field during
+  onboarding; onboarding now shows the same message as an inline moss-bordered panel under the title,
+  and the fixed strip is suppressed on that route. Once the book exists the strip floats above the
+  thumb bar, as before. Settings reports "Saving the app shell…", "ready", or the first-visit line.
+- **Update flow, and the bug the e2e found.** The update banner came from `onNeedRefresh`, but clicking
+  it did nothing on a first session: the virtual register module only reloads on `controlling` when its
+  own "was already controlled at registration" flag is set, and on the first visit the controller
+  arrives by `clients.claim()`, so that flag is false. `reloadForUpdate` now posts `SKIP_WAITING` to the
+  waiting worker itself, reloads on `controllerchange`, and keeps a 4s fallback. The e2e appends a
+  comment to the built `dist/sw.js`, calls `registration.update()`, waits for the banner, clicks
+  Update, and verifies both Today and the logged amount survive; the worker file is restored in
+  `finally`.
+- **Persistence and backups.** After the once-per-open jobs, `ensurePersistentStorage()` checks
+  `navigator.storage.persisted()` and asks `persist()` once; a refusal changes nothing and Settings
+  keeps its manual button. The backup rule now lives in `data/backups.ts` (`≥5` entries and no export
+  or `≥7` days since the newest one), so Today's nudge and Settings cannot disagree. One
+  `useBackupExport` hook serves both places: it exports, downloads, records the backup, and pays "Safe
+  and sound" immediately through `syncEarnedAchievements`, then announces the badge. An export error
+  is shown in both surfaces instead of only a toast.
+- **Two badges that were lies.** "Home at last" required `installedToHomeScreen`, which no write path
+  ever passed; the open job now supplies `isStandalone()`. "Lantern in the dark" was paid for _opening_
+  the app offline, which is not the same act as logging while offline; `payOfflineEntry` now pays it
+  only after a new entry is written with the browser offline, from Add, a goal contribution or an
+  envelope transfer. `syncEarnedAchievements` also pays "Safe and sound" the moment the file exists.
+- **A fatal error that says what happened.** `ErrorBoundary` wraps `AppGate`, so a Dexie `liveQuery`
+  rejection after a blocked database no longer produces a blank screen. `FatalPanel` says the book is
+  unavailable, nothing was changed, and offers a reload; the e2e makes `IDBFactory.open` throw and
+  asserts all three.
+- **Manifest.** The existing manifest is now locked by a test: name/short name, standalone display,
+  `/` start and scope, 192/512 icons plus a maskable one, and the exact Add expense (`/add`) and Today
+  (`/`) shortcuts. Every icon and shortcut URL is fetched and must answer 200.
+- **E2E reliability, not product code.** The Sparks cosmetic test clicked Finish the review and
+  immediately hard-navigated away, so the reward write could be aborted; it now waits for the
+  confirmation toast. The new backup test's quick-amount helper now formats `₱1,000.00` with its comma.
+  Neither change hides an app defect; both remove races the suite had been winning by luck.
+- **Verification:** `npm run typecheck` **verified** clean; `npm run lint` **verified** clean;
+  `prettier --write .` applied; `npx vitest run` **verified** 662/662 across 65 files;
+  `npm run build` **verified** clean (PWA: 87 precache entries, 997.47 KiB); `npx playwright test`
+  **verified** 55/55 (one worker, production preview, 3.3m), including the new `e2e/pwa.spec.ts`, the
+  extended `e2e/offline.spec.ts`, persistence-request and manifest checks. Install card, backup nudge,
+  onboarding pack panel and the fatal panel were inspected at 390×844 in headless Chromium.
+- **Not verified / still open:** no real `beforeinstallprompt` on Android or desktop Chrome, no iOS
+  Safari install, no real persistence grant (the browser's engagement rules decide), and no Vercel
+  deployment or HTTPS context — all headless Chromium, and the prompt is synthesized. Network-throttled
+  first-pack timing and a real browser update prompt remain MANUAL_TEST items for Gate 6. The nudge is
+  deliberately tied to five entries and seven days rather than a date; there is no snooze.

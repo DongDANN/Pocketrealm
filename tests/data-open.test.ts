@@ -11,6 +11,7 @@ import type { Clock, Recurring } from '../src/core/types';
 import { checkinReward, reviewReward } from '../src/core/habits';
 import { offeredDailyQuests } from '../src/core/quests';
 import { grantMany, ledgerEvents } from '../src/data/ledger';
+import { syncEarnedAchievements } from '../src/data/achievementsStore';
 import { loadFacts } from '../src/data/factsStore';
 import { completeOnboarding, questSeed } from '../src/data/onboard';
 import { runOpenJobs } from '../src/data/openJobs';
@@ -197,6 +198,32 @@ describe('runOpenJobs', () => {
 
     const report = await runOpenJobs(db, ctx(), {});
     expect(report.achievements.map((a) => a.id)).toContain('first-entry');
+  });
+
+  it('pays the installed badge only when the app is launched from the home screen', async () => {
+    const db = await started();
+    const report = await runOpenJobs(db, ctx(), { installedToHomeScreen: true });
+
+    expect(report.achievements.map((a) => a.id)).toContain('installed');
+  });
+
+  it('does not pay "used offline" just for opening the app offline', async () => {
+    const db = await started();
+    const opened = await runOpenJobs(db, ctx());
+
+    expect(opened.achievements.map((a) => a.id)).not.toContain('used-offline');
+
+    // The badge belongs to the entry, not the open: an offline write announces it immediately.
+    const afterWrite = await syncEarnedAchievements(db, ctx('w'), { usedOffline: true });
+    expect(afterWrite.map((a) => a.id)).toContain('used-offline');
+  });
+
+  it('pays the backup badge as soon as the file exists', async () => {
+    const db = await started();
+    const paid = await syncEarnedAchievements(db, ctx('b'), { backupCreated: true });
+
+    expect(paid.map((a) => a.id)).toContain('backup-created');
+    expect(await syncEarnedAchievements(db, ctx('c'), { backupCreated: true })).toEqual([]);
   });
 
   it('credits a goal reached while the app was closed', async () => {

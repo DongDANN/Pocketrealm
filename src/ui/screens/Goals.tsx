@@ -19,6 +19,7 @@ import { PixelText } from '../components/PixelText';
 import { LoadingPanel } from '../app/gates';
 import { useEnvelopes, useGoals, useSettings, useToday } from '../app/hooks';
 import { useSession } from '../app/session';
+import { payOfflineEntry } from '../lib/offlineEntry';
 import { say } from '../lib/toast';
 
 function dueCopy(
@@ -148,6 +149,7 @@ export function Goals() {
       } else {
         say(`Added ${money(minor)} to ${goal.name}.`, 'reward');
       }
+      await payOfflineEntry(db, ctx);
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
     } finally {
