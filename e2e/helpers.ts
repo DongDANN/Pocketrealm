@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 /**
  * UI copy is drawn with the bitmap face, so `textContent` is empty in pixel mode: a single line
@@ -6,18 +6,23 @@ import { expect, type Page } from '@playwright/test';
  * canvases. Collects real DOM text (readable mode) and every aria-label below the root.
  */
 export function visibleText(page: Page, selector: string): Promise<string> {
-  return page
-    .locator(selector)
-    .first()
-    .evaluate((root) => {
-      const labels = Array.from(root.querySelectorAll('[aria-label]')).map(
-        (node) => node.getAttribute('aria-label') ?? '',
-      );
-      return [...new Set([root.textContent ?? '', ...labels])]
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    });
+  return locatorText(page.locator(selector).first());
+}
+
+/** `visibleText` for a handle you already hold, so a test can read one row of a list. */
+export function locatorText(node: Locator): Promise<string> {
+  return node.evaluate((root) => {
+    const labels = Array.from(root.querySelectorAll('[aria-label]')).map(
+      (el) => el.getAttribute('aria-label') ?? '',
+    );
+    return [...new Set([root.textContent ?? '', ...labels])].join(' ').replace(/\s+/g, ' ').trim();
+  });
+}
+
+/** The same read, over every matching node, kept apart so a test can tell two rows apart. */
+export async function allText(page: Page, selector: string): Promise<string[]> {
+  const nodes = await page.locator(selector).all();
+  return Promise.all(nodes.map(locatorText));
 }
 
 /**

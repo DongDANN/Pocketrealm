@@ -2726,6 +2726,67 @@ a {
   background: var(--ink-800);
 }
 
+/* The recap sits directly under the stage: the beats the last step actually dealt, newest last, each
+   with the same arithmetic line the text log carries. */
+.delve-recap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  list-style: none;
+  background: var(--ink-800);
+  border: 2px solid var(--ink-500);
+}
+
+.delve-recap li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.delve-recap .recap-more {
+  padding-top: 4px;
+  border-top: 2px solid var(--ink-600);
+}
+
+/* The threat strip belongs next to the button that commits to the room, so the numbers arrive with the
+   decision instead of after it. Each row is one enemy and one action. */
+.delve-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--ink-800);
+  border: 2px solid var(--ink-500);
+}
+
+.threat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.threat-line,
+.swing-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px;
+  background: var(--ink-700);
+  border-left: 3px solid var(--ink-500);
+}
+
+.threat-line.big {
+  background: var(--ink-600);
+  border-left-color: var(--rose);
+}
+
 .shop-grid {
   display: grid;
   /* A keepsake card has to hold its longest single word, so it goes one-up rather than overflowing. */

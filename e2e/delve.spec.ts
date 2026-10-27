@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILDINGS } from '../src/core/delve/buildings';
 import { COSMETICS } from '../src/core/cosmetics';
-import { completeOnboarding, pinClockAndIds, startRun, visibleText } from './helpers';
+import { allText, completeOnboarding, pinClockAndIds, startRun, visibleText } from './helpers';
 
 const cheapestCosmetic = Math.min(...COSMETICS.map((def) => def.price));
 
@@ -130,6 +130,79 @@ test('a run descends, each room burns a drop of oil, and retreat banks the Ember
   // The ended run is written down, not silently dropped.
   await openScreen(page, '/delve/history', 'Run history');
   expect(await visibleText(page, 'main')).toContain('Retreated');
+  expect(errors).toEqual([]);
+});
+
+/**
+ * Steps until the run is standing in front of a fight. The strip only has a threat to price once there
+ * is a room with enemies in it, and which room comes first is the floor plan's business, not the test's.
+ */
+async function walkToFight(page: Page): Promise<void> {
+  const step = page.getByRole('button', {
+    name: /Open the next room|Answer the choice first|The lantern is dry/,
+  });
+  for (
+    let room = 0;
+    room < 6 && !(await page.locator('.delve-readout').first().isVisible());
+    room++
+  ) {
+    await expect(step).toBeEnabled();
+    await step.click();
+    await answerIfWaiting(page);
+  }
+  await expect(
+    page.locator('.delve-readout').first(),
+    'a combat room within six steps',
+  ).toBeVisible();
+}
+
+test('the room prices itself before the player commits to it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await pinClockAndIds(page);
+  await completeOnboarding(page, { income: '25000' });
+
+  await page.getByRole('link', { name: 'Open the Delve' }).click();
+  await page.getByRole('button', { name: /^Descend into Rootfall Warren/ }).click();
+  await expect(page.getByRole('heading', { name: /Rootfall Warren · F1/ })).toBeVisible();
+  await walkToFight(page);
+
+  // Every enemy in the room is listed with the action it is about to take and the sum behind it.
+  const strip = page.locator('.delve-readout').first();
+  const threats = await allText(page, '.delve-readout .threat-line');
+  expect(threats.length).toBeGreaterThan(0);
+  for (const line of threats) {
+    expect(line, `a threat row with no itemized sum: ${line}`).toMatch(/−\d+ DEF .*= \d+/);
+  }
+  expect(await visibleText(page, '.delve-readout')).toContain('Your basic swing');
+
+  // The numbers arrive with the decision, not after it: the strip sits above the commit button.
+  const stripBox = await strip.boundingBox();
+  const buttonBox = await page
+    .getByRole('button', { name: /Open the next room|The lantern is dry|Answer the choice first/ })
+    .first()
+    .boundingBox();
+  expect(stripBox?.y).toBeTruthy();
+  expect(buttonBox?.y).toBeTruthy();
+  expect(stripBox!.y).toBeLessThan(buttonBox!.y);
+
+  // What the step then dealt is recapped under the canvas, with the arithmetic the log already carries.
+  await page.getByRole('button', { name: /Open the next room/ }).click();
+  await answerIfWaiting(page);
+  await expect(page.locator('.delve-recap').first()).toBeVisible();
+  // The log panel folds to its last eight lines; open it so the recap can be checked against all of them.
+  const showAll = page.getByRole('button', { name: /^All \d+$/ });
+  if (await showAll.isVisible().catch(() => false)) await showAll.click();
+  const recap = await visibleText(page, '.delve-recap');
+  const sums = recap.match(/ATK [^=]+= \d+/g) ?? [];
+  expect(sums.length).toBeGreaterThan(0);
+  const log = (await allText(page, '.log-line')).join(' | ');
+  for (const sum of sums) {
+    expect(log, `the recap sum "${sum}" is not in the run log`).toContain(`(${sum})`);
+  }
+
+  const body = await visibleText(page, 'main');
+  expect(body).not.toContain('undefined');
+  expect(body).not.toContain('NaN');
   expect(errors).toEqual([]);
 });
 

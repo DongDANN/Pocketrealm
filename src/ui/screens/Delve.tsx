@@ -37,6 +37,7 @@ import {
 } from '../lib/delveView';
 import { cuesForRun, musicTrackFor } from '../lib/delveSound';
 import { encounterOf, sceneActionFor, type SceneAction } from '../lib/delveScene';
+import { recapOf, roomSwings, roomThreats } from '../lib/delveReadout';
 import { playSfx, playStinger, requestMusic } from '../lib/sound';
 
 /** The Canvas stage is a bonus, not a dependency: it is fetched only while a run is on screen. */
@@ -98,6 +99,14 @@ export function Delve() {
   const selectedBuildOpen = buildUnlocked(buildId, meta, companionLevel);
   const heatOpen = heatUnlocked(meta, hollow);
   const sparks = ledger?.sparks ?? 0;
+
+  /**
+   * The room read as numbers, from the engine's own functions: what stands in front of us, what it is
+   * about to do, what one of our swings costs it, and what the last step actually dealt.
+   */
+  const threats = run ? roomThreats(run, meta, snapshot.signals) : [];
+  const swings = run ? roomSwings(run, meta, snapshot.signals) : [];
+  const recap = run ? recapOf(run.log) : { rows: [], omitted: 0 };
 
   /** The engine already decided what happened in this action; the sounds only say it out loud. */
   const voice = (result: DelveRunResult | null) => {
@@ -385,6 +394,30 @@ export function Delve() {
                 />
               </Suspense>
             </div>
+            {recap.rows.length > 0 && (
+              <ul className="delve-recap" aria-label="The blows the last step dealt">
+                {recap.omitted > 0 && (
+                  <li className="recap-more">
+                    <PixelText
+                      text={`${recap.omitted} earlier blows not shown`}
+                      color={C.paper3}
+                      pixelScale={2}
+                    />
+                  </li>
+                )}
+                {recap.rows.map((row, index) => (
+                  <li key={`${row.round}-${row.actor}-${row.target}-${index}`}>
+                    <PixelText
+                      text={`${row.crit ? 'CRIT ' : ''}${row.actor} → ${row.target}`}
+                      color={row.side === 'player' ? C.moss1 : C.rose1}
+                      pixelScale={2}
+                      wrap={34}
+                    />
+                    <PixelText text={row.sum} color={C.paper3} pixelScale={2} wrap={34} />
+                  </li>
+                ))}
+              </ul>
+            )}
             <Gauge
               value={hpPercent(run) / 100}
               label={`Companion HP, ${run.unit.hp} of ${run.unit.maxHp}`}
@@ -468,6 +501,101 @@ export function Delve() {
                 wrap={36}
               />
             </p>
+
+            {threats.length > 0 && (
+              <div className="delve-readout">
+                <h3 className="delve-subtitle" id="threat-title">
+                  <PixelText
+                    text={`In the ${roomKindLabel(currentRoomKind(run)).toLowerCase()} room`}
+                    color={C.amber2}
+                    pixelScale={2}
+                  />
+                </h3>
+                <ul className="threat-list" aria-labelledby="threat-title">
+                  {threats.map((threat, index) => (
+                    <li
+                      key={`${threat.name}-${index}`}
+                      className={threat.big ? 'threat-line big' : 'threat-line'}
+                    >
+                      <PixelText
+                        text={`${threat.name} · ${threat.hp} HP · DEF ${threat.def}`}
+                        color={C.paper1}
+                        pixelScale={2}
+                        wrap={34}
+                      />
+                      <PixelText
+                        text={
+                          threat.damage.length > 0
+                            ? `${threat.intent} for ${threat.damage}`
+                            : threat.intent
+                        }
+                        color={threat.big ? C.rose1 : C.paper0}
+                        pixelScale={2}
+                        wrap={34}
+                      />
+                      {threat.sum.length > 0 && (
+                        <PixelText text={threat.sum} color={C.paper3} pixelScale={2} wrap={34} />
+                      )}
+                      {threat.shield > 0 && (
+                        <PixelText
+                          text={`Your ${threat.shield} Shield soaks it first`}
+                          color={C.cyan2}
+                          pixelScale={2}
+                          wrap={34}
+                        />
+                      )}
+                      {threat.followUp.length > 0 && (
+                        <PixelText
+                          text={threat.followUp}
+                          color={C.paper2}
+                          pixelScale={2}
+                          wrap={34}
+                        />
+                      )}
+                      {threat.traits.map((trait) => (
+                        <PixelText
+                          key={trait}
+                          text={trait}
+                          color={C.ember1}
+                          pixelScale={2}
+                          wrap={34}
+                        />
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+                <h3 className="delve-subtitle" id="swing-title">
+                  <PixelText text="Your basic swing" color={C.amber2} pixelScale={2} />
+                </h3>
+                <ul className="threat-list" aria-labelledby="swing-title">
+                  {swings.map((swing, index) => (
+                    <li key={`${swing.name}-${index}`} className="swing-line">
+                      <PixelText
+                        text={`${swing.name}: ${swing.total} (up to ${swing.crit} on a crit)`}
+                        color={C.paper1}
+                        pixelScale={2}
+                        wrap={34}
+                      />
+                      <PixelText text={swing.sum} color={C.paper3} pixelScale={2} wrap={34} />
+                      <PixelText
+                        text={swing.notes.join(' · ')}
+                        color={C.paper2}
+                        pixelScale={2}
+                        wrap={34}
+                      />
+                    </li>
+                  ))}
+                </ul>
+                <p className="panel-note">
+                  <PixelText
+                    text="These are the room's own numbers, before the roll. The build may spend a skill instead of a basic swing."
+                    color={C.paper3}
+                    pixelScale={2}
+                    wrap={36}
+                  />
+                </p>
+              </div>
+            )}
 
             {run.pendingChoice && (
               <div className="pending-choice" role="group" aria-labelledby="pending-title">

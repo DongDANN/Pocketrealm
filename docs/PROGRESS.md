@@ -4,7 +4,7 @@ Read this first. Updated at every gate. Status labels: **verified** (a command/t
 and passed), **partially verified** (some checks run), **not run** (no evidence), **not possible
 here** (needs a real device / deployment).
 
-Last updated: 2026-10-26
+Last updated: 2026-10-27
 
 ## Environment reality check (Gate 0)
 
@@ -70,10 +70,16 @@ Last updated: 2026-10-26
       **High contrast + keyboard audit, Lighthouse CI, a policy emulator and security e2e,
       README/MANUAL_TEST/FINAL_REPORT. Chromium-only evidence; live deployment, real installs and a
       screen-reader pass remain MANUAL_TEST items.**
+- [x] Gate 7a — Delve legibility, the first slice of `docs/DELVE_REDESIGN.md`: enemy intent on every
+      enemy, one arithmetic function behind every damage number, the itemized sum panel and the recap
+      under the canvas. **No mechanics changed — all five golden run hashes are byte-identical.**
+- [ ] Gate 7b–7f — the turn loop and the cut, the skill collection, floor rules and bosses, the
+      patience economy, balance/docs/ship. Defined in `docs/DELVE_REDESIGN.md` §14.
 
-### SHOULD follow-up gates (not part of MVP; shipped only if explicitly requested)
+### SHOULD follow-up ideas (not part of MVP; shipped only if explicitly requested)
 
-- [ ] 7a allies & party · [ ] 7b story chapters · [ ] 7c Endless + Heat 6–10 · [ ] 7d weekly mutators.
+- Allies & party, story chapters, Endless + Heat 6–10 and weekly mutators stay post-MVP ideas; the
+  Delve redesign took the 7a–7f numbering above.
 - Other SHOULD items (app lock, CSV, rollover options, search/filter, undo, seasonal themes,
   install shortcuts) are tracked in the final report.
 
@@ -1122,3 +1128,63 @@ defect in the import control, then documented what remains unverified instead of
   header check. The Theme field is deliberately static (“Realm night”); there is no daylight theme,
   no read-only storage mode, and no Aseprite/PNG art importer. These are listed with the SHOULD gaps
   in `docs/FINAL_REPORT.md`.
+
+### Gate 7a — The Delve shows its arithmetic (2026-10-27)
+
+The complaint this gate answers is not balance, it is legibility: a room resolved in one tap, HP moved
+from 60 to 58, and nothing on screen said how. 7a changes only what the player can see. No rule, no
+constant, no RNG draw moved — and because that claim is exactly the kind a progress log should not take
+on faith, the gate is signed off by the five golden run hashes staying byte-identical rather than by
+prose.
+
+- **One sum, shared by the engine and the screen.** `src/core/delve/damage.ts` owns `attackBreakdown`,
+  `incomingBreakdown`, `attackRange` and `damageSumText`. `runCombat` calls them to resolve hits and the
+  readouts call the same functions to explain them, so a printed total cannot drift from a landed one.
+  The chain is itemized in the order the engine applies it (power → burning bonus → mark/element →
+  mastery → elite bonus → target shield → the floor of 1), each factor rounded where the engine rounds
+  it, and only the factors that actually changed the number are shown — a plain hit reads
+  `ATK 10 −2 DEF = 8`, not a form. Variance and crit come from the roll the engine already made; the
+  breakdown never re-rolls, and the panel prints the roll's bracket next to the likely value
+  (`8 (7–14)`).
+- **Every hit leaves its own receipts.** A resolved hit is written to the run log as a structured
+  `HitRecord` inside the already-optional `RunLogEntry.data` — inputs, sum, dealt, crit, side, round —
+  so the recap re-derives what happened instead of re-guessing it, and no schema migration was needed.
+  `tests/delve-damage.test.ts` re-derives every logged hit from its own recorded inputs, adds the
+  enemy-side sums up to the HP the companion actually lost, proves the kill lands on exactly the damage
+  recorded, and checks the text log line ends with the same `= N` the structured sum says.
+- **Intent on every enemy.** `src/core/delve/intent.ts` forecasts the next incoming blow from a
+  snapshot — enemy ATK and its affixes, the boss's phase rhythm, the companion's own DEF, shield and
+  damage reduction. It is a pure read: no RNG draw, no state write, so it is safe to run on every
+  render. It names the beat a boss telegraphs and which action it lands on; the mechanic's _name_ stays
+  hidden until Boss Study, the rule the combat log already followed, which is why the panel says
+  "Telegraphs a heavy blow on action 4" rather than giving it away (`mechanicTitle()` is the
+  mid-sentence form both share).
+- **The panel and the recap.** `src/ui/lib/delveReadout.ts` builds three views — `roomThreats`,
+  `roomSwings`, `recapOf` — and prints nothing it cannot source from the engine; what is not known stays
+  unsaid rather than estimated. The Delve screen now prices the room _between_ the map and the commit
+  buttons, so the numbers arrive with the decision instead of after it, and lists the last blows under
+  the canvas, colour-coded by side, crits marked, with the folded-away count stated instead of hidden.
+  To keep the readout honest the engine's opening state had to become a function instead of code inside
+  `runCombat`, so `spawnEnemies`, `openingShield` and `openingDefence` were extracted verbatim; the
+  shield lines the panel shows are the same parts the log line is built from.
+- **What the gate deliberately did not touch.** The room still resolves in one tap, Autopilot still
+  plays it, and oil still trickles in from the budget side. Those are 7b's cut. 7a ships alone so the
+  difference in legibility can be felt before anything is deleted.
+- **Verification:** `npm run typecheck` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 755/755 across 69 files**
+  (24 damage-sum tests, 31 intent tests, 18 new readout tests); `npm run art:validate` **verified PASS**
+  (121 assets / 309 frames); `npm run build` **verified** clean (91 precache entries, 1019.14 KiB);
+  `npx playwright test` **verified 64/64** in Chromium against the production build, including the new
+  Delve check that the strip sits above the commit button, that every sum it prints also appears in the
+  run log, and that the screen contains no `undefined` or `NaN`. `npm run sim:golden` **verified** all
+  five hashes unchanged — `9d19056d77350efd`, `b118ad62f586787c`, `78fab713e6261f79`, `ad6e6dddfc834c59`,
+  `96d2bfc2f4991c83` — which is the evidence that nothing in the simulation moved. The `delve-run`
+  visual golden was regenerated and reviewed; it was the only golden that changed, and the new shot
+  shows the readout with no clipped labels.
+- **Not verified / still open:** the owner has not hand-played a run with the readout yet, and for a
+  legibility gate that is the acceptance test that matters. The prices are the room's own pre-roll
+  numbers, so a build that spends a skill instead of a basic swing will land something the line above
+  the button did not name — the panel says so in one line, and per-skill pricing belongs to 7b's action
+  UI. At 390 px a long sum wraps and can leave `= 4` alone on its own line: readable, but rough.
+  Firefox and WebKit are still outside the e2e matrix.
+  New files: `src/ui/lib/delveReadout.ts`, `tests/ui/delve-readout.test.ts`.

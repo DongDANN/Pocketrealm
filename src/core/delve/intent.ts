@@ -134,8 +134,13 @@ function shieldStacks(statuses: readonly StatusInstance[]): number {
 
 /** The mechanic name only a studied boss surrenders; its damage is always legible. */
 function mechanicName(boss: BossDef, studied: boolean): string {
-  if (!studied) return 'A heavy blow';
-  return boss.mechanic.split(':')[0]?.trim() ?? 'A heavy blow';
+  return studied ? mechanicTitle(boss, true) : 'A heavy blow';
+}
+
+/** The same tell, phrased for the middle of a sentence — what a screen has to say when it is unnamed. */
+export function mechanicTitle(boss: BossDef, studied: boolean): string {
+  if (!studied) return 'a heavy blow';
+  return boss.mechanic.split(':')[0]?.trim() ?? 'a heavy blow';
 }
 
 /**

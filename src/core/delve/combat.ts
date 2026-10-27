@@ -275,7 +275,7 @@ function damageRoll(
   return { variance, crit };
 }
 
-interface EnemyState {
+export interface EnemyState {
   id: string;
   /** Original enemy id (mastery keys off the species, not the instance). */
   species: string;
@@ -298,6 +298,94 @@ interface EnemyState {
   split: boolean;
   statuses: StatusInstance[];
   turnsSinceStun: number;
+}
+
+/**
+ * The roster a room opens with. Split out of `runCombat` so the on-screen threat readout prices the
+ * same enemies the fight actually spawns.
+ */
+export function spawnEnemies(
+  room: { enemies: readonly string[]; affixes?: string[] },
+  floor: number,
+  heat: number,
+): EnemyState[] {
+  const roomAffixes = room.affixes ?? [];
+  const heatAtk = heat >= 1 ? 1.1 : 1; // Heat 1+: stronger enemies
+  return room.enemies.map((id, i) => {
+    const def = enemyById(id)!;
+    const elite = ELITES.some((e) => e.id === id);
+    const boss = BOSSES.find((e) => e.id === id);
+    const s = scaledStats(def, floor, elite, boss !== undefined);
+    const affixes = boss ? [] : roomAffixes;
+    const armored = affixes.includes('armored');
+    return {
+      id: `${id}#${i}`,
+      species: id,
+      name: def.name,
+      hp: s.hp,
+      maxHp: s.hp,
+      atk: Math.round(s.atk * heatAtk),
+      def: armored ? s.def + Math.max(1, Math.round(s.def * 0.3)) : s.def,
+      spd: s.spd + (affixes.includes('swift') ? 2 : 0),
+      elite,
+      bossId: boss?.id,
+      turn: 0,
+      phaseIndex: 0,
+      element: def.element,
+      weakness: def.weakness,
+      resistance: def.resistance,
+      affixes,
+      split: false,
+      statuses: affixes.includes('warded')
+        ? [{ id: 'shield', stacks: 8, duration: Number.POSITIVE_INFINITY }]
+        : [],
+      turnsSinceStun: STUN_RESIST_GRACE,
+    };
+  });
+}
+
+export interface ShieldPart {
+  /** Copy for the combat log. Empty for the room's own ward, which was never announced. */
+  label: string;
+  amount: number;
+}
+
+/** The Shield a fight opens with: the room's ward, then build passives, then an unspent Shield Charm. */
+export function openingShield(run: RunState, modifiers: CombatModifiers): ShieldPart[] {
+  const build = buildById(run.buildId) ?? buildById(DEFAULT_BUILD)!;
+  const parts: ShieldPart[] = [{ label: '', amount: modifiers.roomShield }];
+  for (const s of build.skills) {
+    if (s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'startShield') {
+      parts.push({ label: `${s.name} grants ${s.fx.amount} Shield.`, amount: s.fx.amount });
+    }
+  }
+  if (run.consumables.includes('shield-charm') && !run.consumablesUsed['shield-charm']) {
+    parts.push({ label: 'Shield Charm: +8 Shield.', amount: 8 });
+  }
+  return parts;
+}
+
+export interface CombatDefence {
+  def: number;
+  hp: number;
+  maxHp: number;
+  damageReduction: number;
+  shield: number;
+}
+
+/** Everything an enemy swing has to get through on the first action of a fight. */
+export function openingDefence(run: RunState, modifiers: CombatModifiers): CombatDefence {
+  const base = companionBase(run.companionLevel);
+  const maxHp = base.maxHp + modifiers.maxHp;
+  let shield = 0;
+  for (const part of openingShield(run, modifiers)) shield += part.amount;
+  return {
+    def: base.def + modifiers.def,
+    hp: Math.min(Math.max(0, run.unit.hp), maxHp),
+    maxHp,
+    damageReduction: modifiers.damageReduction,
+    shield,
+  };
 }
 
 function skillMultiplier(
@@ -340,15 +428,9 @@ export function runCombat(
   );
 
   const base = companionBase(run.companionLevel);
-  const maxHp = base.maxHp + modifiers.maxHp;
-  let hp = Math.min(Math.max(0, run.unit.hp), maxHp);
-  let shield = modifiers.roomShield;
-  for (const s of build.skills) {
-    if (s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'startShield') {
-      shield += s.fx.amount;
-      logLine(`${s.name} grants ${s.fx.amount} Shield.`);
-    }
-  }
+  const defence = openingDefence(run, modifiers);
+  const maxHp = defence.maxHp;
+  let hp = defence.hp;
 
   let energy = 0;
   const cooldowns: Record<string, number> = {};
@@ -359,56 +441,25 @@ export function runCombat(
   const hasConsumable = (id: string): boolean => run.consumables.includes(id) && !used[id];
   let fled = false;
 
-  if (hasConsumable('shield-charm')) {
-    shield += 8;
-    used['shield-charm'] = true;
-    logLine('Shield Charm: +8 Shield.');
+  let shield = 0;
+  for (const part of openingShield(run, modifiers)) {
+    shield += part.amount;
+    if (part.label) logLine(part.label);
   }
+  if (hasConsumable('shield-charm')) used['shield-charm'] = true;
   const fireOil = hasConsumable('fire-oil');
   if (fireOil) {
     used['fire-oil'] = true;
     logLine('Fire Oil: enemies start Burning.');
   }
 
-  const roomAffixes = room.affixes ?? [];
-  const heatAtk = run.heat >= 1 ? 1.1 : 1; // Heat 1+: stronger enemies
-  const enemies: EnemyState[] = room.enemies.map((id, i) => {
-    const def = enemyById(id)!;
-    const elite = ELITES.some((e) => e.id === id);
-    const boss = BOSSES.find((e) => e.id === id);
-    const s = scaledStats(def, floor, elite, boss !== undefined);
-    const affixes = boss ? [] : roomAffixes;
-    const armored = affixes.includes('armored');
-    return {
-      id: `${id}#${i}`,
-      species: id,
-      name: def.name,
-      hp: s.hp,
-      maxHp: s.hp,
-      atk: Math.round(s.atk * heatAtk),
-      def: armored ? s.def + Math.max(1, Math.round(s.def * 0.3)) : s.def,
-      spd: s.spd + (affixes.includes('swift') ? 2 : 0),
-      elite,
-      bossId: boss?.id,
-      turn: 0,
-      phaseIndex: 0,
-      element: def.element,
-      weakness: def.weakness,
-      resistance: def.resistance,
-      affixes,
-      split: false,
-      statuses: affixes.includes('warded')
-        ? [{ id: 'shield', stacks: 8, duration: Number.POSITIVE_INFINITY }]
-        : [],
-      turnsSinceStun: STUN_RESIST_GRACE,
-    };
-  });
+  const enemies = spawnEnemies(room, floor, run.heat);
   if (fireOil) {
     for (const e of enemies) e.statuses = applyStatus(e.statuses, 'burn', rng, {});
   }
 
   const atk = base.atk + modifiers.atk;
-  const def = base.def + modifiers.def;
+  const def = defence.def;
   const spd = base.spd + modifiers.spd;
   const luck = base.luck + modifiers.luck;
 
