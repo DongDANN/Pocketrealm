@@ -101,6 +101,14 @@ export function emptyMeta(): DelveMeta {
     dailyBest: 0,
     maxSeenAt: 0,
     lastStepAt: 0,
+    skills: {},
+    knownSkills: [],
+    equippedSkills: [],
+    dust: 0,
+    capsules: {},
+    capsuleIndex: 0,
+    pitySinceEpic: 0,
+    capsuleTagStreak: 0,
   };
 }
 
@@ -160,6 +168,9 @@ export function newRun(
     pendingChoice: null,
     log: [],
     roomsVisited: [],
+    orders: [],
+    floorRule: null,
+    skipOutstanding: false,
   };
 }
 

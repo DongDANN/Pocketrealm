@@ -3,6 +3,12 @@
  * same seed must always replay to the same hash, the hash must ignore key insertion order, and the
  * pinned values catch any accidental change to generation, combat, or reward math. Logs are
  * stripped from the hash so rewording a line cannot rot a golden.
+ *
+ * Gate 7b-1 re-recorded all five because the hashed *shape* grew: `RunState` gained `orders`,
+ * `floorRule` and `skipOutstanding`, and `DelveMeta` gained the collection fields. Delete those
+ * eleven keys and the same five replays return the Gate 7a digests (9d19056d…, b118ad62…, 78fab713…,
+ * ad6e6ddd…, 96d2bfc2…) exactly, which is the proof that no generation, combat or reward number
+ * moved.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -19,17 +25,17 @@ interface GoldenCase {
 }
 
 const CASES: GoldenCase[] = [
-  { label: 'H1 seed 12345', seed: 12345, hollow: 1, level: 5, hash: '9d19056d77350efd' },
+  { label: 'H1 seed 12345', seed: 12345, hollow: 1, level: 5, hash: '103db8fe052548c8' },
   {
     label: 'H2 golden-ratio seed',
     seed: 0x9e3779b1,
     hollow: 2,
     level: 6,
-    hash: 'b118ad62f586787c',
+    hash: 'bc14e7152d65da7f',
   },
-  { label: 'H3 seed 777', seed: 777, hollow: 3, level: 8, hash: '78fab713e6261f79' },
-  { label: 'H2 seed 4242', seed: 4242, hollow: 2, level: 9, hash: 'ad6e6dddfc834c59' },
-  { label: 'H3 seed 20261025', seed: 20261025, hollow: 3, level: 12, hash: '96d2bfc2f4991c83' },
+  { label: 'H3 seed 777', seed: 777, hollow: 3, level: 8, hash: '8250a6f2fd0458da' },
+  { label: 'H2 seed 4242', seed: 4242, hollow: 2, level: 9, hash: 'ee51ae8cd4496032' },
+  { label: 'H3 seed 20261025', seed: 20261025, hollow: 3, level: 12, hash: '2909fc47d48f231a' },
 ];
 
 function hashOf(c: Pick<GoldenCase, 'seed' | 'hollow' | 'level'>): string {

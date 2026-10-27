@@ -146,6 +146,21 @@ function dailyState(value: unknown): DelveMeta['daily'] {
   return out;
 }
 
+/** Collected skills: level 1-5, and the two use counters that feed it. */
+function skillStates(value: unknown): DelveMeta['skills'] {
+  const out: DelveMeta['skills'] = {};
+  for (const [id, state] of Object.entries(asRecord(value))) {
+    if (id === '') continue;
+    const raw = asRecord(state);
+    out[id] = {
+      level: Math.min(5, Math.max(1, count(raw.level) || 1)),
+      uses: count(raw.uses),
+      lifetime: count(raw.lifetime),
+    };
+  }
+  return out;
+}
+
 /**
  * Fill a stored meta with the current shape. Rows written by an older Gate, or a hand-edited
  * backup, keep every field they have and gain the defaults they lack, so no screen has to guard
@@ -191,6 +206,14 @@ export function normalizeMeta(raw?: unknown): DelveMeta {
     dailyBest: count(m.dailyBest),
     maxSeenAt: count(m.maxSeenAt),
     lastStepAt: count(m.lastStepAt),
+    skills: skillStates(m.skills),
+    knownSkills: uniqueText(m.knownSkills),
+    equippedSkills: uniqueText(m.equippedSkills).slice(0, 4),
+    dust: count(m.dust),
+    capsules: numberRecord(m.capsules),
+    capsuleIndex: count(m.capsuleIndex),
+    pitySinceEpic: count(m.pitySinceEpic),
+    capsuleTagStreak: count(m.capsuleTagStreak),
   };
 }
 

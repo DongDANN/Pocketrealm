@@ -1188,3 +1188,77 @@ prose.
   UI. At 390 px a long sum wraps and can leave `= 4` alone on its own line: readable, but rough.
   Firefox and WebKit are still outside the e2e matrix.
   New files: `src/ui/lib/delveReadout.ts`, `tests/ui/delve-readout.test.ts`.
+
+### Gate 7b-1 — Schema v3, and the run the update leaves behind (2026-10-27)
+
+The redesign names this the highest-risk single item in `docs/DELVE_REDESIGN.md` (§15.4) and orders it
+before any other 7b work, and the reason is concrete: the app is live, so the book that opens tomorrow
+morning was written by a build where rooms advanced themselves. v3 changes no index and no store. It
+settles the runs that no longer have a future to walk into, and it pays for them.
+
+- **A version that declares no stores.** `MIGRATIONS`'s `stores` is now optional
+  (`src/data/migrations.ts:27-31`) and `openDatabase` branches on it (`src/data/db.ts:150-152`), because
+  v3 rewrites rows rather than shapes — IndexedDB has nothing to do on the open except run the upgrade.
+  Dexie multiplies the schema version by ten for the raw IDB version, which is why the browser test
+  seeds at **20** and asserts **30**: pinning the arithmetic keeps a future `SCHEMA_VERSION` bump from
+  turning the fixture into a v1 replay by accident.
+- **One settlement, two front doors.** `upgradeDelveRowsToV3(rows, on)`
+  (`src/data/migrations.ts:170`) is pure and takes its date as an argument: the Dexie upgrade
+  (`src/data/migrations.ts:226`) feeds it the two Delve tables inside the upgrade transaction and
+  `bulkPut`s the result, and `inspectImport(text, on)` (`src/data/exportImport.ts:317`) feeds it the rows
+  of a v2 backup file. So opening the book and restoring a backup from it cannot disagree — which matters
+  because a restored run that this build cannot advance is worse than a lost one
+  (`src/data/exportImport.ts:369`). Only the tables the file actually carries get rewritten; a partial
+  backup must not clear live rows in replace mode.
+- **What the player keeps.** Every run still `active` — including one left waiting on a boon or a route
+  choice — is retreated through the engine's own `retreatRun`, so it banks 100% of the Embers it had
+  earned, at the step it reached, with its materials and its history entry intact. The line that
+  explains it is appended _after_ the engine's bank line (`src/data/migrations.ts:139`), so the run log
+  ends on "The update ended this run in camp: the Delve now
+  plays one round at a time" rather than on a retreat nobody pressed — a detail the unit test asserts by
+  position, not by `toContain` anywhere. Then the two things the update takes away are paid back: each
+  equipped Habit Card becomes 5 Skill Dust (`src/data/migrations.ts:108`), and each abandoned non-Daily
+  run grants one capsule at the ceiling its Hollow could reach — rare / epic / mythic
+  (`src/data/migrations.ts:111`) — because that is what the oil it spent was buying. A book with no meta
+  row is the exception on purpose: it gets the new run fields but keeps its runs `active`, because with
+  nowhere to bank them, ending them would be a loss with no payment.
+- **Idempotence, tested as twice-over.** Reopening an upgraded book settles nothing twice
+  (`tests/data-migrations.test.ts:401`), and importing a v2 file into a book that already moved is a no-op
+  (`tests/data-migrations.test.ts:448`). Both come from the same fact the pure function is written around:
+  a run whose `result` is not `active` is copied, never re-priced.
+- **The v3 shape arrives a gate early.** `TurnOrder` (`src/core/delve/types.ts:97`), the three
+  `RunState` fields it feeds (`:170`, `:176`, `:181`) and the eight collection fields on `DelveMeta` are
+  declared now, so the migration writes the final shape once instead of needing a v4 the moment the turn
+  loop lands. `normalizeMeta` learns to read all of them (`src/data/delve.ts:150-161`, `:209-216`) — level
+  clamped 1–5, four equip slots max, unknown ids dropped — so a hand-edited or future backup cannot
+  smuggle a nonsense state into a live save.
+- **The goldens moved, and moved only in shape.** All five hashes changed (§11 demanded exactly that),
+  which is a claim worth proving rather than asserting: delete the eleven new keys and the same five
+  replays return the Gate 7a digests `9d19056d…`, `b118ad62…`, `78fab713…`, `ad6e6ddd…`, `96d2bfc2…`
+  byte-for-byte. Not one generation, combat or reward number moved; the recorded reason and the new pins
+  are in `tests/delve-golden.test.ts:6-11`.
+- **A browser test, because this is the one gate that can break a live save.**
+  `e2e/migration.spec.ts` seeds a genuine v2 book into Chromium's own IndexedDB at raw version 20 with no
+  Dexie in sight, boots the production bundle over it, and reads the book back. It carries the real risk
+  list: a version bump with no stores still opens; a run left mid-Hollow comes out settled, readable and
+  _rendered_ as `Retreated` in Run history rather than "Still delving"; the budgeting rows are
+  byte-identical, because the Delve does not get to rewrite the wallet; and the boot logs zero console and
+  page errors. The old schema in that file is derived from the exported `LEGACY_STORES` / `V2_STORES`
+  specs rather than retyped, so the one place the schema is expressed twice cannot silently drift.
+- **Verification:** `npm run typecheck` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 767/767 across 69 files** (12 new,
+  all in the migration and import paths); `npm run art:validate` **verified PASS** (121 assets / 309
+  frames, unchanged); `npm run build` **verified** clean (92 precache entries, 1022.06 KiB);
+  `npx playwright test` **verified 65/65** in Chromium against the production build, including
+  `e2e/migration.spec.ts` alone re-run afterwards against the final tree; `npm run sim:golden` prints
+  `103db8fe052548c8`, `bc14e7152d65da7f`, `8250a6f2fd0458da`, `ee51ae8cd4496032`, `2909fc47d48f231a`,
+  matching the pins.
+- **Not verified / still open:** nothing here has run against the owner's real saved book on the deployed
+  site — the browser test uses a synthetic v2 book on localhost, and the live upgrade still needs the
+  owner to open the app once with a run genuinely in progress. Inside the upgrade the daily Embers cap is
+  keyed on `today()` read from the device clock, which is the only place a migration touches the clock;
+  a player whose clock is a day off will bank into a different cap bucket, and no test covers a device
+  clock that disagrees with its stored dates. The away-play model is still fully alive: Autopilot advances
+  rooms, `orders` is written but never read, and Habit Cards are still equippable until 7b-6 deletes them,
+  so this gate pays dust for cards a player can still earn. Firefox and WebKit remain outside the matrix.
+  New files: `e2e/migration.spec.ts`.

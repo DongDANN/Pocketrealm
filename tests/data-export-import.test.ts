@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { applySteps, emptyMeta, newRun, spendOil } from '../src/core/delve';
+import { applySteps, emptyMeta, newRun, spendOil, type RunState } from '../src/core/delve';
 import type { Clock, Envelope } from '../src/core/types';
 import { DB_TABLES, SCHEMA_VERSION, type PocketDb } from '../src/data/db';
 import { commitBatch } from '../src/data/delveStore';
@@ -332,6 +332,82 @@ describe('import', () => {
     expect(await target.transactions.toArray()).toEqual(localTxns); // the clear rolled back too
     expect((await target.envelopes.toArray()).map((e) => e.id)).toEqual(['rent']);
     await expect(target.backups.count()).resolves.toBe(0);
+    source.close();
+    target.close();
+  });
+});
+
+/**
+ * Gate 7b §10.3: a v2 backup file still imports, and it goes through the same settlement the
+ * database upgrade does. A restored book must not hand back a run this build cannot advance.
+ */
+describe('importing a book written before the turn loop', () => {
+  it('settles its active run and pays the cards and the oil back', async () => {
+    const db = testDb('import-v2-settle');
+    const state: RunState = {
+      ...newRun(0xa11ce, 1, 5, {
+        ...emptyMeta(),
+        cards: ['card-steady', 'card-ember', 'card-scout'],
+      }),
+      stepIndex: 5,
+      embersEarned: 34,
+    };
+    // A v2 file has none of the v3 run keys at all, which is the exact hole the settlement fills.
+    for (const key of ['orders', 'floorRule', 'skipOutstanding']) {
+      delete (state as unknown as Record<string, unknown>)[key];
+    }
+    const text = payload(
+      {
+        delveMeta: [
+          {
+            key: 'meta',
+            oil: 40,
+            updatedAt: NOW,
+            value: {
+              ...emptyMeta(),
+              cards: ['card-steady', 'card-ember', 'card-scout'],
+              embers: 100,
+            },
+          },
+        ],
+        delveRuns: [
+          {
+            runId: state.runId,
+            startedAt: NOW,
+            updatedAt: NOW,
+            hollowId: 1,
+            result: 'active',
+            stepIndex: 5,
+            daily: false,
+            state,
+          },
+        ],
+      },
+      { schemaVersion: 2 },
+    );
+
+    const result = await importDatabase(db, text, { mode: 'replace', now: NOW });
+    expect(result.ok).toBe(true);
+
+    const run = await db.delveRuns.get(state.runId);
+    expect(run?.result).toBe('retreated');
+    expect(run?.state.orders).toEqual([]);
+    const meta = await db.delveMeta.get('meta');
+    expect(meta?.value.embers).toBe(134);
+    expect(meta?.value.dust).toBe(15);
+    expect(meta?.value.capsules).toEqual({ rare: 1 });
+    db.close();
+  });
+
+  it('leaves a v3 file exactly as it was written', async () => {
+    const source = testDb('import-v3-src');
+    const target = testDb('import-v3-dst');
+    await seed(source);
+    const text = await exportDatabase(source, { now: NOW, appVersion: '1.0.0' });
+
+    expect((await importDatabase(target, text, { mode: 'replace', now: NOW })).ok).toBe(true);
+    expect(await target.delveRuns.toArray()).toEqual(await source.delveRuns.toArray());
+    expect(await target.delveMeta.toArray()).toEqual(await source.delveMeta.toArray());
     source.close();
     target.close();
   });

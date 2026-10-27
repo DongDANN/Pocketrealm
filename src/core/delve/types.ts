@@ -88,6 +88,23 @@ export interface ChoiceOption {
   detail?: string;
 }
 
+/**
+ * One round of the player's input, as the turn loop stores it (DELVE_REDESIGN §4 A.2).
+ *
+ * It is a decision, not a result: a room is rebuilt by replaying its orders against the same seed,
+ * which is what keeps a hand-played run as deterministic as an auto-resolved one.
+ */
+export interface TurnOrder {
+  /** The skill the player fired; null is the basic attack. */
+  skillId: string | null;
+  /** Index into the room's live enemy list. */
+  targetIndex: number;
+  /** True to brace this round instead of attacking. */
+  guard: boolean;
+  /** A consumable spent on the round, which costs the action. */
+  consumableId?: string;
+}
+
 export type RunResult = 'active' | 'cleared' | 'retreated' | 'fainted';
 
 export interface RunLogEntry {
@@ -146,6 +163,22 @@ export interface RunState {
   log: RunLogEntry[];
   /** Room ids visited (anti-scumming trail). */
   roomsVisited: string[];
+  /**
+   * The player's orders for the room they are standing in, replayed in order to rebuild it one
+   * round at a time. Empty once the room resolves — the run log is the history from then on.
+   */
+  orders: TurnOrder[];
+  /**
+   * The id of the floor rule in force (`no-ward-boons`, `guard-reflects`, …), or null on a floor
+   * with no rule. Announced the moment the floor begins, with the next floor's rule already
+   * printed (§8 E.1). Declared with the v3 shape so a stored run always answers for it.
+   */
+  floorRule: string | null;
+  /**
+   * True while the player has declined a reward for the ×1.8 that follows it. Only one skip can be
+   * outstanding at a time, which is what stops skipping from compounding into a required line (§9).
+   */
+  skipOutstanding: boolean;
 }
 
 export interface ForgeLevels {
@@ -195,6 +228,26 @@ export interface DelveMeta {
   maxSeenAt: number;
   /** When the last step was applied (ms). */
   lastStepAt: number;
+  /**
+   * Collected skills, keyed by id: the level bought with Skill Dust, the uses that earned it, and
+   * the lifetime total the Codex reports. Arrives with the collection in Gate 7c; declared here so
+   * the v3 shape is settled once (DELVE_REDESIGN §10.1).
+   */
+  skills: Record<string, { level: number; uses: number; lifetime: number }>;
+  /** Species-and-skill ids the companion knows, i.e. can be equipped at all. */
+  knownSkills: string[];
+  /** The four slots the companion fights with. Respec is free between runs. */
+  equippedSkills: string[];
+  /** Skill Dust: the single progression currency, earned by use and by duplicates. */
+  dust: number;
+  /** Held capsules, counted per tier ceiling — see §7 D.3. */
+  capsules: Record<string, number>;
+  /** How many capsules this book has ever issued; the draw key for a capsule's contents. */
+  capsuleIndex: number;
+  /** Capsules opened since the last Epic-or-better. At 10 the next one is an Epic. */
+  pitySinceEpic: number;
+  /** Capsules opened since the last one matched the player's most-used tag (§7 D.4, layer 3). */
+  capsuleTagStreak: number;
 }
 
 /** Narrow, read-only snapshot of budgeting behaviour. Delve never mutates it. */

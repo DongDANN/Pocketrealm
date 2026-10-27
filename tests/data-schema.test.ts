@@ -63,7 +63,7 @@ describe('database schema', () => {
     // Dexie has no descending-index syntax: '-createdAt' would become an index literally named
     // "-createdAt" and blow up the upgrade transaction on a real browser too.
     for (const step of MIGRATIONS) {
-      for (const spec of Object.values(step.stores)) {
+      for (const spec of Object.values(step.stores ?? {})) {
         for (const index of spec.split(',')) {
           expect(index.trim().startsWith('-'), `${step.version}: ${spec}`).toBe(false);
         }

@@ -15,8 +15,16 @@
 
 import { z } from 'zod';
 import type { IndexableType, Table } from 'dexie';
+import { today } from '../core/dates';
 import type { LocalDate } from '../core/types';
-import { SCHEMA_VERSION, type PocketDb, type TableName } from './db';
+import {
+  SCHEMA_VERSION,
+  type DelveMetaRow,
+  type DelveRunRow,
+  type PocketDb,
+  type TableName,
+} from './db';
+import { upgradeDelveRowsToV3 } from './migrations';
 
 export const EXPORT_APP = 'pocketrealm' as const;
 
@@ -284,10 +292,29 @@ function tableProblems(name: string, rows: unknown[], schema: z.ZodType): Import
 }
 
 /**
+ * Runs the v3 settlement over a payload written by an older build. Only the tables the file actually
+ * carries are replaced — a file may hold a subset, and writing back an empty list would clear live
+ * rows the moment the import runs in replace mode.
+ */
+function upgradeDelveTablesToV3(
+  tables: Record<string, Record<string, unknown>[]>,
+  from: number,
+  on: LocalDate,
+): void {
+  if (from >= SCHEMA_VERSION) return;
+  const meta = tables.delveMeta as unknown as DelveMetaRow[] | undefined;
+  const runs = tables.delveRuns as unknown as DelveRunRow[] | undefined;
+  if (!meta && !runs) return;
+  const settled = upgradeDelveRowsToV3({ meta: meta ?? [], runs: runs ?? [] }, on);
+  if (meta) tables.delveMeta = settled.meta as unknown as Record<string, unknown>[];
+  if (runs) tables.delveRuns = settled.runs as unknown as Record<string, unknown>[];
+}
+
+/**
  * Parse and validate a file without touching a database. Returns per-row problems instead of one
  * opaque error, because "your file is invalid" is not something a person can act on.
  */
-export function inspectImport(text: string): InspectOutcome {
+export function inspectImport(text: string, on: LocalDate = today()): InspectOutcome {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -336,6 +363,10 @@ export function inspectImport(text: string): InspectOutcome {
   }
 
   if (problems.length > 0) return { ok: false, problems };
+
+  // A file written before the turn loop carries runs this build can no longer advance. Restoring it
+  // settles them the same way opening the book would (§10.3), so a backup is never a loss.
+  upgradeDelveTablesToV3(tables, data.schemaVersion, on);
 
   const counts: Partial<Record<TableName, number>> = {};
   for (const [name, rows] of Object.entries(tables)) counts[name as TableName] = rows.length;

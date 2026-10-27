@@ -147,7 +147,9 @@ export function openDatabase(options: OpenOptions = {}): PocketDb {
       })
     : new Dexie(options.name ?? DB_NAME)) as unknown as PocketDb;
   for (const step of MIGRATIONS) {
-    const version = db.version(step.version).stores(step.stores);
+    const version = step.stores
+      ? db.version(step.version).stores(step.stores)
+      : db.version(step.version);
     if (step.upgrade) version.upgrade(step.upgrade);
   }
   return db;
