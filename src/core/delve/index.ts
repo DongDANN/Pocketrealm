@@ -2,6 +2,7 @@
 
 export * from './types';
 export * from './map';
+export * from './damage';
 export * from './combat';
 export * from './forge';
 export * from './signals';

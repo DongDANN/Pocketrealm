@@ -32,6 +32,15 @@ import {
 } from './data/enemies';
 import { elementMultiplier, type Element } from './data/elements';
 import {
+  attackBreakdown,
+  damageSumText,
+  incomingBreakdown,
+  type AttackInput,
+  type DamageBreakdown,
+  type HitRecord,
+  type IncomingInput,
+} from './damage';
+import {
   cardById,
   evaluateCards,
   resolveCardAction,
@@ -244,18 +253,18 @@ export function combatRng(runId: string, stepIndex: number): Rng {
   return mulberry32(hashCombine(hashString(runId), Math.imul(stepIndex, 7919) ^ 0x5bd1e995));
 }
 
-function rollDamage(
+/**
+ * The stochastic half of a hit. Always two draws, in this order: a call site that skipped the crit roll
+ * because it cannot crit would still shift the stream and re-randomize every seeded run after it.
+ */
+function damageRoll(
   rng: Rng,
-  atk: number,
-  def: number,
   luck: number,
   critChance: number,
-  critMult: number,
-): { dmg: number; crit: boolean } {
+): { variance: number; crit: boolean } {
   const variance = rng.int(3) - 1;
-  const raw = Math.max(1, atk + variance - def);
   const crit = rng.int(100) < Math.min(60, luck * 2 + critChance);
-  return { dmg: crit ? Math.max(raw, Math.round(raw * critMult)) : raw, crit };
+  return { variance, crit };
 }
 
 interface EnemyState {
@@ -311,8 +320,8 @@ export function runCombat(
   const rng = combatRng(run.runId, run.stepIndex);
   const log: RunLogEntry[] = [];
   const step = run.stepIndex;
-  const logLine = (text: string): void => {
-    log.push({ step, type: 'combat', text });
+  const logLine = (text: string, data?: Record<string, unknown>): void => {
+    log.push(data ? { step, type: 'combat', text, data } : { step, type: 'combat', text });
   };
   const studied = (id: string): boolean => studiedBosses.includes(id);
 
@@ -437,21 +446,26 @@ export function runCombat(
     logLine(`${e.name} splits into a lesser copy!`);
   }
 
-  const hitEnemy = (target: EnemyState, dmgIn: number, crit: boolean, skill?: SkillDef): void => {
-    let dmg = dmgIn;
+  /** Attach the itemization to the line the recap and the text log both read from. */
+  const hitRecord = (
+    side: HitRecord['side'],
+    actor: string,
+    target: string,
+    input: AttackInput | IncomingInput,
+    sum: DamageBreakdown,
+    skillId?: string,
+  ): Record<string, unknown> => {
+    const record: HitRecord = { kind: 'hit', side, round, actor, target, input, sum };
+    if (skillId) record.skillId = skillId;
+    return { ...record };
+  };
+
+  const hitEnemy = (target: EnemyState, input: AttackInput, skill?: SkillDef): void => {
+    const sum = attackBreakdown(input);
+    const dmg = sum.dealt;
     const fx = skill?.fx;
-    if (fx && !isPassiveFx(fx) && fx.bonusIfBurning && hasStatus(target.statuses, 'burn')) {
-      dmg = Math.round(dmg * (1 + fx.bonusIfBurning));
-    }
-    dmg = Math.round(
-      dmg * markMultOf(target) * (skill ? skillMultiplier(target, skill, knownWeaknesses) : 1),
-    );
-    const masteryLvl = Math.min(10, Math.floor((mastery[target.species] ?? 0) / 10));
-    if (masteryLvl > 0) dmg = Math.round((dmg * (100 + masteryLvl)) / 100);
-    if (target.elite) dmg = Math.round((dmg * (100 + modifiers.eliteDamageBonus)) / 100);
-    const absorbed = Math.min(statusShield(target.statuses), dmg);
-    if (absorbed > 0) {
-      dmg -= absorbed;
+    if (sum.absorbed > 0) {
+      const absorbed = sum.absorbed;
       target.statuses = target.statuses
         .map((s) => (s.id === 'shield' ? { ...s, stacks: s.stacks - absorbed } : s))
         .filter((s) => s.stacks > 0);
@@ -459,7 +473,11 @@ export function runCombat(
     }
     target.hp -= dmg;
     const label = skill ? `use ${skill.name} (${skill.element}) and hit` : 'hit';
-    logLine(`${crit ? 'CRIT! ' : ''}You ${label} ${target.name} for ${dmg}.`);
+    const line = `${sum.crit ? 'CRIT! ' : ''}You ${label} ${target.name} for ${dmg}.`;
+    logLine(
+      `${line} (${damageSumText(sum)})`,
+      hitRecord('player', 'You', target.name, input, sum, skill?.id),
+    );
     if (skill?.element) {
       const mult = skillMultiplier(target, skill, knownWeaknesses);
       if (mult > 1) logLine(`Weakness! +25% ${skill.element} damage.`);
@@ -480,7 +498,7 @@ export function runCombat(
         logLine(`${target.name} gains ${def.name}.`);
       }
     }
-    if (crit && critBurn && isPassiveFx(critBurn.fx) && critBurn.fx.kind === 'critBurn') {
+    if (sum.crit && critBurn && isPassiveFx(critBurn.fx) && critBurn.fx.kind === 'critBurn') {
       const out = applyStatus(target.statuses, 'burn', rng, {});
       if (out !== target.statuses) {
         target.statuses = out;
@@ -490,7 +508,7 @@ export function runCombat(
     if (
       bossTelegraph &&
       target.bossId &&
-      crit &&
+      sum.crit &&
       skill &&
       fx &&
       !isPassiveFx(fx) &&
@@ -590,6 +608,8 @@ export function runCombat(
           ? (enemies.find((e) => e.hp > 0 && hasStatus(e.statuses, 'mark')) ??
             enemies.find((e) => e.hp > 0)!)
           : enemies.find((e) => e.hp > 0)!;
+        const fx = chosen?.fx;
+        const bonusCrit = fx && !isPassiveFx(fx) ? (fx.bonusCrit ?? 0) : 0;
         if (chosen) {
           energy -= chosen.energyCost ?? 1;
           cooldowns[chosen.id] = chosen.cooldown ?? 1;
@@ -597,28 +617,26 @@ export function runCombat(
             guardActive = true;
             logLine('You brace your guard.');
           }
-          const fx = chosen.fx;
-          const bonusCrit = fx && !isPassiveFx(fx) ? (fx.bonusCrit ?? 0) : 0;
-          const roll = rollDamage(
-            rng,
-            Math.round(atk * (chosen.power ?? 1)),
-            target.def,
-            luck,
-            modifiers.critChance + bonusCrit,
-            modifiers.critDamageMult,
-          );
-          hitEnemy(target, roll.dmg, roll.crit, chosen);
-        } else {
-          const roll = rollDamage(
-            rng,
-            atk,
-            target.def,
-            luck,
-            modifiers.critChance,
-            modifiers.critDamageMult,
-          );
-          hitEnemy(target, roll.dmg, roll.crit);
         }
+        const roll = damageRoll(rng, luck, modifiers.critChance + bonusCrit);
+        const input: AttackInput = {
+          atk,
+          power: chosen?.power ?? 1,
+          def: target.def,
+          variance: roll.variance,
+          crit: roll.crit,
+          critMult: modifiers.critDamageMult,
+          burningBonus: fx && !isPassiveFx(fx) ? (fx.bonusIfBurning ?? 0) : 0,
+          targetBurning: hasStatus(target.statuses, 'burn'),
+          markMult: markMultOf(target),
+          elementMult: chosen ? skillMultiplier(target, chosen, knownWeaknesses) : 1,
+          masteryLvl: Math.min(10, Math.floor((mastery[target.species] ?? 0) / 10)),
+          eliteBonus: modifiers.eliteDamageBonus,
+          targetElite: target.elite,
+          shield: statusShield(target.statuses),
+          hp: target.hp,
+        };
+        hitEnemy(target, input, chosen);
         continue;
       }
 
@@ -644,18 +662,24 @@ export function runCombat(
           const phases = bossPhasesOf(boss);
           const phase = e.phaseIndex > 0 ? phases[e.phaseIndex - 1] : undefined;
           const mult = phase?.mechanicMultiplier ?? boss.mechanicMultiplier;
-          let raw = Math.max(1, Math.round(e.atk * mult) + 2 - def);
-          if (guardActive) {
-            raw = Math.round(raw / 2);
-            logLine('Your guard softens the blow.');
-          }
+          const guard = guardActive;
+          if (guard) logLine('Your guard softens the blow.');
           guardActive = false;
-          const reduced = Math.round((raw * (100 - modifiers.damageReduction)) / 100);
-          const absorbed = Math.min(shield, reduced);
-          shield -= absorbed;
-          hp -= reduced - absorbed;
+          const input: IncomingInput = {
+            atk: e.atk,
+            def,
+            variance: 0,
+            damageReduction: modifiers.damageReduction,
+            shield,
+            hp,
+            mechanic: { multiplier: mult, guard },
+          };
+          const sum = incomingBreakdown(input);
+          shield -= sum.absorbed;
+          hp -= sum.dealt;
           logLine(
-            `${e.name} unleashes its mechanic! ${absorbed > 0 ? `Shield absorbs ${absorbed}. ` : ''}You take ${reduced - absorbed}.`,
+            `${e.name} unleashes its mechanic! ${sum.absorbed > 0 ? `Shield absorbs ${sum.absorbed}. ` : ''}You take ${sum.dealt}. (${damageSumText(sum)})`,
+            hitRecord('enemy', e.name, 'You', input, sum),
           );
           bossTelegraph = false;
         } else {
@@ -670,29 +694,45 @@ export function runCombat(
       }
       const enraged = e.affixes.includes('enraged') && e.hp * 100 < e.maxHp * 30;
       const atkNow = enraged ? Math.round(e.atk * 1.5) : e.atk;
-      const roll = rollDamage(rng, atkNow, def, 0, 0, 1);
-      const reduced = Math.round((roll.dmg * (100 - modifiers.damageReduction)) / 100);
-      const absorbed = Math.min(shield, reduced);
-      shield -= absorbed;
-      hp -= reduced - absorbed;
+      const roll = damageRoll(rng, 0, 0);
+      const input: IncomingInput = {
+        atk: atkNow,
+        def,
+        variance: roll.variance,
+        damageReduction: modifiers.damageReduction,
+        shield,
+        hp,
+      };
+      const sum = incomingBreakdown(input);
+      shield -= sum.absorbed;
+      hp -= sum.dealt;
       energy += 1;
       logLine(
-        `${e.name} hits for ${reduced - absorbed}${absorbed > 0 ? ` (shield absorbs ${absorbed})` : ''}.`,
+        `${e.name} hits for ${sum.dealt}${sum.absorbed > 0 ? ` (shield absorbs ${sum.absorbed})` : ''}. (${damageSumText(sum)})`,
+        hitRecord('enemy', e.name, 'You', input, sum),
       );
-      if (e.affixes.includes('vampiric') && reduced - absorbed > 0) {
-        const drain = Math.max(1, Math.round((reduced - absorbed) / 2));
+      if (e.affixes.includes('vampiric') && sum.dealt > 0) {
+        const drain = Math.max(1, Math.round(sum.dealt / 2));
         e.hp = Math.min(e.maxHp, e.hp + drain);
         logLine(`${e.name} drains ${drain} HP.`);
       }
       if (e.affixes.includes('frenzied') && e.hp > 0 && hp > 0) {
-        const roll2 = rollDamage(rng, Math.max(1, Math.round(atkNow * 0.6)), def, 0, 0, 1);
-        const reduced2 = Math.round((roll2.dmg * (100 - modifiers.damageReduction)) / 100);
-        const absorbed2 = Math.min(shield, reduced2);
-        shield -= absorbed2;
-        hp -= reduced2 - absorbed2;
+        const roll2 = damageRoll(rng, 0, 0);
+        const input2: IncomingInput = {
+          atk: Math.max(1, Math.round(atkNow * 0.6)),
+          def,
+          variance: roll2.variance,
+          damageReduction: modifiers.damageReduction,
+          shield,
+          hp,
+        };
+        const sum2 = incomingBreakdown(input2);
+        shield -= sum2.absorbed;
+        hp -= sum2.dealt;
         energy += 1;
         logLine(
-          `${e.name} strikes again for ${reduced2 - absorbed2}${absorbed2 > 0 ? ` (shield absorbs ${absorbed2})` : ''}.`,
+          `${e.name} strikes again for ${sum2.dealt}${sum2.absorbed > 0 ? ` (shield absorbs ${sum2.absorbed})` : ''}. (${damageSumText(sum2)})`,
+          hitRecord('enemy', e.name, 'You', input2, sum2),
         );
       }
       // Smoke Scroll: a killing blow outside a boss room becomes a 1-HP escape.
