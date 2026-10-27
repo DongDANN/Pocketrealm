@@ -30,7 +30,7 @@ function sourceMatcher(source) {
       return /^\/.*$/;
     case '/assets/(.*)':
       return /^\/assets\/.*$/;
-    case '/workbox-.*\\.js':
+    case '/(workbox-[^.]*\\.js)':
       return /^\/workbox-[^/]*\.js$/;
     case '/((?!assets/|ui/|icons/)[^.]*)':
       return /^\/((?!assets\/|ui\/|icons\/)[^.]*)$/;
