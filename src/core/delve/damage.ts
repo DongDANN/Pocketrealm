@@ -77,6 +77,11 @@ export interface IncomingInput {
   hp: number;
   /** A telegraphed boss mechanic: no variance, a flat +2, and a guard that halves it. */
   mechanic?: { multiplier: number; guard: boolean };
+  /**
+   * The player braced this round (§4 A.3). It halves the blow exactly as bracing against a mechanic
+   * does — the same factor, so Guard has one price in the game rather than two.
+   */
+  guard?: boolean;
 }
 
 const mult = (value: number): number => Math.round(value * 100) / 100;
@@ -179,7 +184,8 @@ export function incomingBreakdown(input: IncomingInput): DamageBreakdown {
   const raw = Math.max(1, value);
 
   let damage = raw;
-  if (m?.guard) {
+  // One halving, whichever route raised the guard: a brace against a mechanic is not halved twice.
+  if (m?.guard || input.guard) {
     damage = Math.round(damage / 2);
     terms.push({ label: 'Guard', op: 'mult', value: 0.5 });
   }

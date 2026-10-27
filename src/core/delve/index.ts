@@ -63,7 +63,6 @@ export {
   evaluateCards,
   resolveCardAction,
   type CardAction,
-  type CardCombatState,
   type CardCondition,
   type CardDecision,
   type CardDef,

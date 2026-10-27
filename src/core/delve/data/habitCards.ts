@@ -5,7 +5,7 @@
  * to a basic attack. The combat log records which card fired and why others were skipped.
  */
 
-import type { HollowId } from '../types';
+import type { HollowId, TurnState } from '../types';
 import type { SkillDef } from './builds';
 import type { Element } from './elements';
 
@@ -140,31 +140,17 @@ export function cardUnlocked(
   }
 }
 
-export interface CardTarget {
-  hp: number;
-  maxHp: number;
-  marked: boolean;
-  weakness: Element;
-}
-
-export interface CardCombatState {
-  round: number;
-  energy: number;
-  hp: number;
-  maxHp: number;
-  cooldowns: Record<string, number>;
-  actives: SkillDef[];
-  /** Living enemies in the companion's priority order (first living first). */
-  targets: CardTarget[];
-}
-
+/**
+ * The state a card is evaluated against is `TurnState` in `../types` — the same snapshot the turn
+ * loop hands the player, so the fallback policy and the human are never priced from two shapes.
+ */
 export interface CardDecision {
   fired: CardDef | null;
   skipped: { name: string; reason: string }[];
 }
 
 /** null when the condition holds; otherwise a human-readable reason it was skipped. */
-function conditionReason(c: CardCondition, s: CardCombatState): string | null {
+function conditionReason(c: CardCondition, s: TurnState): string | null {
   switch (c.kind) {
     case 'hpBelow': {
       const pct = Math.floor((100 * s.hp) / s.maxHp);
@@ -191,7 +177,7 @@ function conditionReason(c: CardCondition, s: CardCombatState): string | null {
   }
 }
 
-function readySkills(s: CardCombatState): SkillDef[] {
+function readySkills(s: TurnState): SkillDef[] {
   return s.actives.filter(
     (sk) => (s.cooldowns[sk.id] ?? 0) <= 0 && s.energy >= (sk.energyCost ?? 1),
   );
@@ -211,7 +197,7 @@ export interface ResolvedAction {
 }
 
 /** Resolve a card action against combat state; availability failures carry a reason. */
-export function resolveCardAction(action: CardAction, s: CardCombatState): ResolvedAction {
+export function resolveCardAction(action: CardAction, s: TurnState): ResolvedAction {
   const ready = readySkills(s);
   switch (action.kind) {
     case 'prefer': {
@@ -239,7 +225,7 @@ export function resolveCardAction(action: CardAction, s: CardCombatState): Resol
 }
 
 /** Evaluate cards top to bottom; the first available card wins. */
-export function evaluateCards(cards: readonly CardDef[], state: CardCombatState): CardDecision {
+export function evaluateCards(cards: readonly CardDef[], state: TurnState): CardDecision {
   const skipped: CardDecision['skipped'] = [];
   for (const c of cards) {
     const cond = conditionReason(c.condition, state);

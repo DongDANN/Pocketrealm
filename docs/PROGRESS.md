@@ -1262,3 +1262,64 @@ settles the runs that no longer have a future to walk into, and it pays for them
   rooms, `orders` is written but never read, and Habit Cards are still equippable until 7b-6 deletes them,
   so this gate pays dust for cards a player can still earn. Firefox and WebKit remain outside the matrix.
   New files: `e2e/migration.spec.ts`.
+
+### Gate 7b-2 — The turn loop learns to wait for an order (2026-10-28)
+
+`docs/DELVE_REDESIGN.md` §4 A.1 described the change as a seam, and this gate is only the seam: the
+fight now has a place to ask the player what to do, and nothing on the other side of the table yet. No
+UI, no persistence, no deletions — those are 7b-3 through 7b-6.
+
+- **An eighth argument, not a second engine.** `runCombat` takes an optional `decide`
+  (`src/core/delve/combat.ts:447`). Without it the loop is the old one — ready skills most expensive
+  first, Habit Cards on top — which is why Autopilot, the worker, catch-up and every headless suite
+  still pass untouched. With it, every companion action is an order and nothing fires that the order
+  did not name; energy, cooldowns, seeded rolls, statuses, phases, enemy turns, `ROUND_CAP` and the log
+  remain the engine's. The five golden digests did not move, which is the evidence that this gate
+  changed who decides and not what any number is.
+- **One snapshot is both the menu and the engine's input.** `TurnState`
+  (`src/core/delve/types.ts:133`) is the old Habit `CardCombatState`, moved into the engine's types and
+  renamed; `CardTarget` and `CardCombatState` are gone, and `habitCards.ts` now reads the engine's
+  snapshot (`src/core/delve/data/habitCards.ts:8`). `menuState()` (`src/core/delve/combat.ts:631`)
+  builds it at every companion action and hands out a copy of the cooldown map, so a decider that keeps
+  the menu it was given cannot watch the fight rewrite it afterwards. The card fallback and the player
+  are priced from one computation, not two that must be kept in agreement.
+- **No order is a pause, not a default.** `TurnDecider` returns `TurnOrder | null`, and `null` stops
+  the room. So does any order the rules cannot honour (`src/core/delve/combat.ts:655`): a skill that
+  costs more energy than the round has, an unknown skill, a target index outside the living roster, a
+  brace that also names a swing, or an item. Substituting the old heuristic would have been the easy
+  path and the wrong one — the menu would have printed a number for an action that never happened. The
+  pause (`src/core/delve/combat.ts:253`) carries the menu snapshot, the full enemy roster so the
+  readout can price what is left, the shield pool and the orders already acted on. `kills` stays empty
+  on purpose: the replay that finishes the room reports the kills and the after-combat healing, exactly
+  once, which is why the run is meant to store orders rather than results (§4 A.2, wired in 7b-3).
+- **The Item action is a spec gap, and it is refused rather than invented.** §4 A.3 lists Skill /
+  Attack / Guard / Item as one round each, but every consumable in `workshop.ts` is a run- or
+  room-scoped trigger — a charm that raises a shield before the first swing, an oil that burns a whole
+  fight — and none can be activated mid-round. An order that names one is refused
+  (`src/core/delve/types.ts:114`), which makes the gap visible in the type and in a test instead of
+  quietly turning an item into an attack. The Item action needs rules before it can have a button.
+- **A brace is a round, and it costs one halving.** `bracedRound` (`src/core/delve/combat.ts:709`)
+  records which round was braced rather than a flag that has to be reset, so the brace expires by
+  comparison and cannot leak past its round. Incoming damage reads it through `IncomingInput.guard`
+  (`src/core/delve/damage.ts:84`) and pays the mechanic guard's own `Math.round(damage / 2)`
+  (`src/core/delve/damage.ts:188`) — one Guard price in the game, not two. A braced round swings
+  nothing, so it earns no energy from a kill. An _unbraced_ hit omits the key entirely, which keeps the
+  record byte-identical to the object `enemyIntent` forecasts; the intent suite already owned that
+  equality and it failed the moment the engine briefly wrote `guard: false` into every hit.
+- **Rebuild is the resume.** A paused room is not serialized and restored; it is replayed from its
+  orders against the seed the room already had (`combatRng(runId, stepIndex)`).
+  `tests/delve-turns.test.ts` pauses after two orders, replays them, lets the same policy finish, and
+  asserts the log line for line, the rounds, the orders and the final HP equal the uninterrupted fight
+  — the property §4 A.2 leans on when the run starts storing orders instead of results.
+- **Verification:** `npm run typecheck` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 779/779 across 70 files** (12
+  new, all in `tests/delve-turns.test.ts`); `npm run sim:golden` prints `103db8fe052548c8`,
+  `bc14e7152d65da7f`, `8250a6f2fd0458da`, `ee51ae8cd4496032`, `2909fc47d48f231a` — the same five pins
+  as 7b-1, byte for byte; `npx playwright test` **verified 65/65** in Chromium against the production
+  build (the edits made after the build started were comments and formatting only, so the tested
+  bundle is the shipped one).
+- **Not verified / still open:** nothing in the UI reaches the seam yet, so no browser test can
+  exercise `decide` until the four-action panel lands in 7b-5; the pause snapshot is not persisted, so
+  a reload mid-room still abandons it until 7b-3; item orders stay refused until the Item action has
+  rules. `resolveCardAction` still answers for the fallback path, and Autopilot, catch-up and the
+  worker remain alive and scheduled for deletion in 7b-6. New file: `tests/delve-turns.test.ts`.

@@ -5,6 +5,7 @@
  */
 
 import type { LocalDate } from '../types';
+import type { SkillDef } from './data/builds';
 import type { Element } from './data/elements';
 
 export type HollowId = 1 | 2 | 3;
@@ -93,17 +94,60 @@ export interface ChoiceOption {
  *
  * It is a decision, not a result: a room is rebuilt by replaying its orders against the same seed,
  * which is what keeps a hand-played run as deterministic as an auto-resolved one.
+ *
+ * The four actions of §4 A.3 are one round each: a skill, a brace, an item, or the basic attack
+ * (`skillId` null and `guard` false). An order that asks for two actions at once, or for something the
+ * rules cannot deliver this round, is not silently substituted — the seam stops and asks again.
  */
 export interface TurnOrder {
-  /** The skill the player fired; null is the basic attack. */
+  /** The skill to fire; null is the basic attack. */
   skillId: string | null;
-  /** Index into the room's live enemy list. */
+  /** Index into `TurnState.targets` — the living enemies, in the order the menu lists them. */
   targetIndex: number;
-  /** True to brace this round instead of attacking. */
+  /** True to brace this round, which costs the action: no swing, and incoming blows are halved. */
   guard: boolean;
-  /** A consumable spent on the round, which costs the action. */
+  /**
+   * An item spent instead of an attack. Nothing in the game can be activated mid-round yet — the
+   * consumables in `workshop.ts` are run-scoped triggers — so an order that names one is refused
+   * rather than guessed at, until the Item action has rules to price (§4 A.3).
+   */
   consumableId?: string;
 }
+
+/** One living enemy, as the decider is allowed to see it. */
+export interface TurnTarget {
+  hp: number;
+  maxHp: number;
+  marked: boolean;
+  weakness: Element;
+}
+
+/**
+ * The round being decided, assembled by `runCombat` immediately before it asks for an order. This is
+ * the whole menu: energy, cooldowns and the living targets are everything the rules let a round turn
+ * on, so an option can be priced from it without peeking at anything else (§4 A.1).
+ *
+ * Named for the turn loop rather than Habit Cards, because after 7b it describes the human's choice
+ * as well as the card fallback's.
+ */
+export interface TurnState {
+  round: number;
+  energy: number;
+  hp: number;
+  maxHp: number;
+  cooldowns: Record<string, number>;
+  actives: SkillDef[];
+  /** Living enemies in the companion's priority order (first living first). */
+  targets: TurnTarget[];
+}
+
+/**
+ * Who acts on the companion's turn. `null` means "no order yet", which stops the room and hands the
+ * round back rather than letting a policy answer for the player — the one behaviour that separates a
+ * hand-played Delve from Autopilot by another name (§4 A.2). Headless suites supply a decider that
+ * always answers.
+ */
+export type TurnDecider = (state: TurnState) => TurnOrder | null;
 
 export type RunResult = 'active' | 'cleared' | 'retreated' | 'fainted';
 

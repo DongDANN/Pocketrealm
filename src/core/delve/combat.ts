@@ -48,13 +48,7 @@ import {
   type HitRecord,
   type IncomingInput,
 } from './damage';
-import {
-  cardById,
-  evaluateCards,
-  resolveCardAction,
-  type CardCombatState,
-  type CardDef,
-} from './data/habitCards';
+import { cardById, evaluateCards, resolveCardAction, type CardDef } from './data/habitCards';
 import {
   STUN_BOSS_RESIST,
   STUN_RECENT_RESIST,
@@ -62,7 +56,14 @@ import {
   statusById,
   type StatusDef,
 } from './data/statuses';
-import type { RunLogEntry, RunState, StatusInstance } from './types';
+import type {
+  RunLogEntry,
+  RunState,
+  StatusInstance,
+  TurnDecider,
+  TurnOrder,
+  TurnState,
+} from './types';
 
 export const ROUND_CAP = 40;
 
@@ -242,6 +243,26 @@ function isPassiveFx(fx: SkillDef['fx']): fx is PassiveFx {
   return !!fx && 'kind' in fx;
 }
 
+/**
+ * The room as the turn loop leaves it when the player has not ordered this round yet (§4 A.1).
+ *
+ * Only the orders are persisted, never this snapshot: the room is rebuilt by replaying the orders
+ * against the same seed, so a saved run carries a decision trail instead of a pile of mutable state —
+ * and a trail is what the golden hashes can pin.
+ */
+export interface CombatPause {
+  /** The round being asked about, as the menu sees it. */
+  state: TurnState;
+  /** The roster at this instant, living and dead, so the readout prices the enemies the fight has. */
+  enemies: EnemyState[];
+  shield: number;
+  /** The orders already acted on in this room, in order. */
+  orders: TurnOrder[];
+}
+
+/** One order the rules could honour, resolved into what the round actually does. */
+type HonouredOrder = { brace: true } | { brace: false; skill?: SkillDef; target: EnemyState };
+
 export interface CombatResult {
   won: boolean;
   drawn: boolean;
@@ -255,6 +276,17 @@ export interface CombatResult {
   /** Consumables spent during this combat (each fires at most once per run). */
   consumablesUsed: Record<string, boolean>;
   log: RunLogEntry[];
+  /**
+   * The player's orders for this room, in the order they were acted on. Empty on the auto-resolved
+   * path, which has no player in it.
+   */
+  orders: TurnOrder[];
+  /**
+   * Set when the room did not finish because a decider had no order for a round. The caller asks the
+   * player and replays; `kills` and the post-fight healing are deliberately not counted while a room
+   * is unfinished, so a replay can credit them exactly once.
+   */
+  pause?: CombatPause;
 }
 
 export function combatRng(runId: string, stepIndex: number): Rng {
@@ -403,7 +435,15 @@ function skillMultiplier(
   );
 }
 
-/** Run one deterministic battle. Companion casts ready skills (most expensive first), else basics. */
+/**
+ * Run one deterministic battle.
+ *
+ * Without `decide` the companion acts as it always has — ready skills most expensive first, else a
+ * basic swing, Habit Cards on top when the run carries a deck. That path is what Autopilot and the
+ * headless suites use, and it is the part Gate 7b-6 deletes. With `decide`, the same loop asks for an
+ * order on every companion action and nothing fires that the order did not name (§4 A.1): energy,
+ * cooldowns, rolls, statuses, phases, enemy turns, the `ROUND_CAP` and the log are untouched.
+ */
 export function runCombat(
   run: RunState,
   room: { kind?: string; enemies: string[]; affixes?: string[] },
@@ -412,6 +452,7 @@ export function runCombat(
   knownWeaknesses: readonly Element[] = [],
   studiedBosses: readonly string[] = [],
   mastery: Record<string, number> = {},
+  decide?: TurnDecider,
 ): CombatResult {
   const rng = combatRng(run.runId, run.stepIndex);
   const log: RunLogEntry[] = [];
@@ -582,9 +623,91 @@ export function runCombat(
     }
   };
 
+  /**
+   * Everything a round decision is allowed to read. The turn loop's menu and the card fallback are
+   * priced from this one snapshot, so an option the player was shown and an option the engine could
+   * have taken are never two different computations (§4 A.1).
+   */
+  const menuState = (): TurnState => ({
+    round,
+    energy,
+    hp,
+    maxHp,
+    // Copies, not the live maps: a policy that keeps the menu it was handed must not watch the fight
+    // rewrite it after the fact.
+    cooldowns: { ...cooldowns },
+    actives,
+    targets: enemies
+      .filter((e) => e.hp > 0)
+      .map((e) => ({
+        hp: e.hp,
+        maxHp: e.maxHp,
+        marked: hasStatus(e.statuses, 'mark'),
+        weakness: e.weakness,
+      })),
+  });
+
+  /**
+   * Whether the rules can deliver this order right now, and what they deliver if they can. Nothing is
+   * substituted: an order the round cannot honour stops the fight and asks again, because silently
+   * swinging something else would make the number the menu printed a lie.
+   */
+  const honour = (order: TurnOrder): HonouredOrder | null => {
+    // No consumable in the game can be activated inside a round yet, so an Item order is refused
+    // rather than invented; the Item action needs the rules §4 A.3 assumes but `workshop.ts` lacks.
+    if (order.consumableId) return null;
+    if (order.guard) {
+      // Bracing is the action of the round, so it cannot also name a swing.
+      return order.skillId === null ? { brace: true } : null;
+    }
+    const living = enemies.filter((e) => e.hp > 0);
+    const target =
+      Number.isInteger(order.targetIndex) &&
+      order.targetIndex >= 0 &&
+      order.targetIndex < living.length
+        ? living[order.targetIndex]
+        : undefined;
+    if (!target) return null;
+    if (order.skillId === null) return { brace: false, target };
+    const skill = actives.find((s) => s.id === order.skillId);
+    if (!skill) return null;
+    if ((cooldowns[skill.id] ?? 0) > 0) return null;
+    if (energy < (skill.energyCost ?? 1)) return null;
+    return { brace: false, skill, target };
+  };
+
+  /** The room, unfinished: the caller asks the player and replays these orders to get back here. */
+  const pausedAt = (): CombatResult => ({
+    won: false,
+    drawn: false,
+    fled,
+    hpAfter: Math.max(0, hp),
+    maxHp,
+    rounds: round,
+    // A paused room credits nothing. The replay that finishes it reports the kills and the post-fight
+    // healing once, which is why the run state stores orders rather than results.
+    kills: [],
+    consumablesUsed: used,
+    log,
+    orders: [...ordersTaken],
+    pause: {
+      state: menuState(),
+      enemies: enemies.map((e) => ({ ...e, statuses: [...e.statuses] })),
+      shield,
+      orders: [...ordersTaken],
+    },
+  });
+
   let bossTelegraph = false;
   /** True when a guard skill was cast during the current telegraph window. */
   let guardActive = false;
+  /**
+   * The round the player braced in, or 0 for none. Kept apart from `guardActive` because that one is
+   * a boss-mechanic counter and survives rounds until the mechanic lands; a brace the player chose
+   * covers every swing in its own round and nothing after it, which the round number makes explicit.
+   */
+  let bracedRound = 0;
+  const ordersTaken: TurnOrder[] = [];
   let round = 1;
 
   for (; round <= ROUND_CAP; round++) {
@@ -614,53 +737,54 @@ export function runCombat(
           logLine('You are stunned and lose your turn.');
           continue;
         }
-        const equipped = (run.cards ?? [])
-          .map((id) => cardById(id))
-          .filter((c): c is CardDef => c !== undefined)
-          .slice(0, 3);
         let chosen: SkillDef | undefined;
-        let attackMarked = false;
-        if (equipped.length > 0) {
-          const state: CardCombatState = {
-            round,
-            energy,
-            hp,
-            maxHp,
-            cooldowns,
-            actives,
-            targets: enemies
-              .filter((e) => e.hp > 0)
-              .map((e) => ({
-                hp: e.hp,
-                maxHp: e.maxHp,
-                marked: hasStatus(e.statuses, 'mark'),
-                weakness: e.weakness,
-              })),
-          };
-          const decision = evaluateCards(equipped, state);
-          const skippedTxt = decision.skipped.map((s) => `${s.name} (${s.reason})`).join(', ');
-          if (decision.fired) {
-            logLine(
-              `Cards: fired ${decision.fired.name}${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`,
-            );
-            const res = resolveCardAction(decision.fired.action, state);
-            chosen = res.skill;
-            attackMarked = !!res.attackMarked;
-          } else {
-            logLine(`Cards: none fired${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`);
+        let target: EnemyState | undefined;
+        if (decide) {
+          const state = menuState();
+          const order = decide(state);
+          const acted = order === null ? null : honour(order);
+          if (!order || !acted) return pausedAt();
+          ordersTaken.push(order);
+          if (acted.brace) {
+            bracedRound = round;
+            logLine('You brace, and take half of what lands this round.');
+            continue;
           }
+          chosen = acted.skill;
+          target = acted.target;
         } else {
-          const ready = actives.filter(
-            (s) => (cooldowns[s.id] ?? 0) <= 0 && energy >= (s.energyCost ?? 1),
-          );
-          for (const s of ready) {
-            if (!chosen || (s.energyCost ?? 1) > (chosen.energyCost ?? 1)) chosen = s;
+          const equipped = (run.cards ?? [])
+            .map((id) => cardById(id))
+            .filter((c): c is CardDef => c !== undefined)
+            .slice(0, 3);
+          let attackMarked = false;
+          if (equipped.length > 0) {
+            const state = menuState();
+            const decision = evaluateCards(equipped, state);
+            const skippedTxt = decision.skipped.map((s) => `${s.name} (${s.reason})`).join(', ');
+            if (decision.fired) {
+              logLine(
+                `Cards: fired ${decision.fired.name}${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`,
+              );
+              const res = resolveCardAction(decision.fired.action, state);
+              chosen = res.skill;
+              attackMarked = !!res.attackMarked;
+            } else {
+              logLine(`Cards: none fired${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`);
+            }
+          } else {
+            const ready = actives.filter(
+              (s) => (cooldowns[s.id] ?? 0) <= 0 && energy >= (s.energyCost ?? 1),
+            );
+            for (const s of ready) {
+              if (!chosen || (s.energyCost ?? 1) > (chosen.energyCost ?? 1)) chosen = s;
+            }
           }
+          target = attackMarked
+            ? (enemies.find((e) => e.hp > 0 && hasStatus(e.statuses, 'mark')) ??
+              enemies.find((e) => e.hp > 0)!)
+            : enemies.find((e) => e.hp > 0)!;
         }
-        const target = attackMarked
-          ? (enemies.find((e) => e.hp > 0 && hasStatus(e.statuses, 'mark')) ??
-            enemies.find((e) => e.hp > 0)!)
-          : enemies.find((e) => e.hp > 0)!;
         const fx = chosen?.fx;
         const bonusCrit = fx && !isPassiveFx(fx) ? (fx.bonusCrit ?? 0) : 0;
         if (chosen) {
@@ -713,7 +837,7 @@ export function runCombat(
       if (boss && e.turn % boss.mechanicEvery === 0) {
         if (bossTelegraph) {
           const mult = mechanicMultiplier(boss, e.phaseIndex, run.heat);
-          const guard = guardActive;
+          const guard = guardActive || bracedRound === round;
           if (guard) logLine('Your guard softens the blow.');
           guardActive = false;
           const input: IncomingInput = {
@@ -753,6 +877,9 @@ export function runCombat(
         damageReduction: modifiers.damageReduction,
         shield,
         hp,
+        // A brace is the player's choice, so it is recorded only when it actually happened: an
+        // unbraced hit stays the exact object the intent forecast predicts.
+        ...(bracedRound === round ? { guard: true } : {}),
       };
       const sum = incomingBreakdown(input);
       shield -= sum.absorbed;
@@ -776,6 +903,7 @@ export function runCombat(
           damageReduction: modifiers.damageReduction,
           shield,
           hp,
+          ...(bracedRound === round ? { guard: true } : {}),
         };
         const sum2 = incomingBreakdown(input2);
         shield -= sum2.absorbed;
@@ -880,5 +1008,16 @@ export function runCombat(
     logLine(`Healing Draught: healed ${heal} HP.`);
   }
   const kills = enemies.filter((e) => e.hp <= 0).map((e) => e.species);
-  return { won, drawn, fled, hpAfter, maxHp, rounds: round, kills, consumablesUsed: used, log };
+  return {
+    won,
+    drawn,
+    fled,
+    hpAfter,
+    maxHp,
+    rounds: round,
+    kills,
+    consumablesUsed: used,
+    log,
+    orders: ordersTaken,
+  };
 }
