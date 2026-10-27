@@ -29,3 +29,14 @@ export const AFFIXES: readonly AffixDef[] = [
 export function affixById(id: string): AffixDef | undefined {
   return AFFIXES.find((a) => a.id === id);
 }
+
+/**
+ * The numbers the effect copy above describes. combat.ts resolves with them and intent.ts forecasts
+ * with the same ones, so a promise about what an affix does cannot drift from what it actually does.
+ */
+export const ENRAGE_HP_PERCENT = 30;
+export const ENRAGE_ATK_MULTIPLIER = 1.5;
+export const FRENZY_FOLLOWUP_MULTIPLIER = 0.6;
+export const VAMPIRIC_DRAIN_DIVISOR = 2;
+export const THORN_DAMAGE = 2;
+export const SPLIT_HP_DIVISOR = 2;

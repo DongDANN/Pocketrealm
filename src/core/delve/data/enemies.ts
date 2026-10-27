@@ -376,3 +376,15 @@ export function scaledStats(
 export function enemyById(id: string): EnemyDef | undefined {
   return [...ENEMIES, ...ELITES, ...BOSSES].find((e) => e.id === id);
 }
+
+/** The phase list for one fight: Heat 3+ appends the boss's extra final phase. */
+export function bossPhases(boss: BossDef, heat: number): BossPhase[] {
+  const base = boss.phases ?? [];
+  return heat >= 3 && boss.heatPhase ? [...base, boss.heatPhase] : base;
+}
+
+/** The mechanic multiplier for the phase the boss has already entered (0 = phase 1). */
+export function mechanicMultiplier(boss: BossDef, phaseIndex: number, heat: number): number {
+  const phase = phaseIndex > 0 ? bossPhases(boss, heat)[phaseIndex - 1] : undefined;
+  return phase?.mechanicMultiplier ?? boss.mechanicMultiplier;
+}

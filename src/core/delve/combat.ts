@@ -23,12 +23,20 @@ import {
   type SkillDef,
 } from './data/builds';
 import {
+  ENRAGE_ATK_MULTIPLIER,
+  ENRAGE_HP_PERCENT,
+  FRENZY_FOLLOWUP_MULTIPLIER,
+  SPLIT_HP_DIVISOR,
+  THORN_DAMAGE,
+  VAMPIRIC_DRAIN_DIVISOR,
+} from './data/affixes';
+import {
   BOSSES,
   ELITES,
+  bossPhases,
   enemyById,
+  mechanicMultiplier,
   scaledStats,
-  type BossDef,
-  type BossPhase,
 } from './data/enemies';
 import { elementMultiplier, type Element } from './data/elements';
 import {
@@ -407,17 +415,11 @@ export function runCombat(
   const markMultOf = (target: EnemyState): number =>
     hasStatus(target.statuses, 'mark') ? (statusById('mark')!.perRound!.dmgTakenMult ?? 1) : 1;
 
-  /** Boss phases for this fight: Heat 3+ appends the boss's extra final phase. */
-  const bossPhasesOf = (boss: BossDef): BossPhase[] => {
-    const base = boss.phases ?? [];
-    return run.heat >= 3 && boss.heatPhase ? [...base, boss.heatPhase] : base;
-  };
-
   /** Advance boss phases as HP crosses thresholds; studied bosses are named, others hidden. */
   function applyPhases(e: EnemyState): void {
     const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
     if (!boss) return;
-    const phases = bossPhasesOf(boss);
+    const phases = bossPhases(boss, run.heat);
     if (e.phaseIndex >= phases.length) return;
     while (e.phaseIndex < phases.length) {
       const p = phases[e.phaseIndex]!;
@@ -433,7 +435,7 @@ export function runCombat(
   function maybeSplit(e: EnemyState): void {
     if (!e.affixes.includes('splitting') || e.split) return;
     e.split = true;
-    const half = Math.max(1, Math.round(e.maxHp / 2));
+    const half = Math.max(1, Math.round(e.maxHp / SPLIT_HP_DIVISOR));
     enemies.push({
       ...e,
       id: `${e.id}#${enemies.length}`,
@@ -519,8 +521,8 @@ export function runCombat(
       logLine(`${skill.name} interrupts the telegraph!`);
     }
     if (target.affixes.includes('thorned') && dmg > 0 && target.hp > 0) {
-      hp -= 2;
-      logLine(`${target.name}'s thorns cut you for 2.`);
+      hp -= THORN_DAMAGE;
+      logLine(`${target.name}'s thorns cut you for ${THORN_DAMAGE}.`);
     }
     applyPhases(target);
     if (target.hp <= 0) {
@@ -659,9 +661,7 @@ export function runCombat(
       const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
       if (boss && e.turn % boss.mechanicEvery === 0) {
         if (bossTelegraph) {
-          const phases = bossPhasesOf(boss);
-          const phase = e.phaseIndex > 0 ? phases[e.phaseIndex - 1] : undefined;
-          const mult = phase?.mechanicMultiplier ?? boss.mechanicMultiplier;
+          const mult = mechanicMultiplier(boss, e.phaseIndex, run.heat);
           const guard = guardActive;
           if (guard) logLine('Your guard softens the blow.');
           guardActive = false;
@@ -692,8 +692,8 @@ export function runCombat(
         }
         continue;
       }
-      const enraged = e.affixes.includes('enraged') && e.hp * 100 < e.maxHp * 30;
-      const atkNow = enraged ? Math.round(e.atk * 1.5) : e.atk;
+      const enraged = e.affixes.includes('enraged') && e.hp * 100 < e.maxHp * ENRAGE_HP_PERCENT;
+      const atkNow = enraged ? Math.round(e.atk * ENRAGE_ATK_MULTIPLIER) : e.atk;
       const roll = damageRoll(rng, 0, 0);
       const input: IncomingInput = {
         atk: atkNow,
@@ -712,14 +712,14 @@ export function runCombat(
         hitRecord('enemy', e.name, 'You', input, sum),
       );
       if (e.affixes.includes('vampiric') && sum.dealt > 0) {
-        const drain = Math.max(1, Math.round(sum.dealt / 2));
+        const drain = Math.max(1, Math.round(sum.dealt / VAMPIRIC_DRAIN_DIVISOR));
         e.hp = Math.min(e.maxHp, e.hp + drain);
         logLine(`${e.name} drains ${drain} HP.`);
       }
       if (e.affixes.includes('frenzied') && e.hp > 0 && hp > 0) {
         const roll2 = damageRoll(rng, 0, 0);
         const input2: IncomingInput = {
-          atk: Math.max(1, Math.round(atkNow * 0.6)),
+          atk: Math.max(1, Math.round(atkNow * FRENZY_FOLLOWUP_MULTIPLIER)),
           def,
           variance: roll2.variance,
           damageReduction: modifiers.damageReduction,

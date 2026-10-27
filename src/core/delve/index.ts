@@ -3,6 +3,7 @@
 export * from './types';
 export * from './map';
 export * from './damage';
+export * from './intent';
 export * from './combat';
 export * from './forge';
 export * from './signals';
@@ -20,7 +21,18 @@ export { BOONS, RELICS, boonById, relicById, RARITY_WEIGHT, MAX_BOON_LEVEL } fro
 export type { BoonLike } from './data/boons';
 export { FUSIONS, fusionById, anyBoonById, fusionRecipesFor } from './data/fusions';
 export type { FusionDef } from './data/fusions';
-export { ENEMIES, ELITES, BOSSES, enemyById, scaledStats, type EnemyDef } from './data/enemies';
+export {
+  ENEMIES,
+  ELITES,
+  BOSSES,
+  enemyById,
+  scaledStats,
+  bossPhases,
+  mechanicMultiplier,
+  type EnemyDef,
+  type BossDef,
+  type BossPhase,
+} from './data/enemies';
 export { AFFIXES, affixById } from './data/affixes';
 export { EVENTS, eventsForHollow } from './data/events';
 export {
