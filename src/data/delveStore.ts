@@ -183,7 +183,9 @@ export async function commitChoice(db: PocketDb, batch: DelveBatch): Promise<Com
         granted: 0,
       };
     }
-    const waiting = previous.state.pendingChoice !== null;
+    // A run waits on a choice between rooms, or on an order inside one. Both are same-step writes:
+    // the room was entered (and paid for) by the batch that paused it.
+    const waiting = previous.state.pendingChoice !== null || previous.state.pendingTurn === true;
     const ended = previous.state.result === 'active' && run.result !== 'active';
     const openedChoice = run.pendingChoice !== null;
     if (!waiting && !ended && !openedChoice) {

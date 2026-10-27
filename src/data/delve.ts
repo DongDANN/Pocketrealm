@@ -47,6 +47,7 @@ import {
   type BuildId,
   type CatchUpJobRequest,
   type CatchUpJobResponse,
+  type CombatPause,
   type DelveMeta,
   type HollowId,
   type MilestoneInput,
@@ -55,6 +56,7 @@ import {
   type RunState,
   type StepContext,
   type StepOutcome,
+  type TurnOrder,
 } from '../core/delve';
 import { hashCombine } from '../core/rng';
 import { levelForXp } from '../core/rewards';
@@ -359,6 +361,8 @@ export interface DelveRunResult {
   daily?: DailyFinish;
   /** Reward rows the ledger actually accepted in this write. */
   granted: number;
+  /** The room a hand-played run is standing in, waiting for its next order. */
+  pause?: CombatPause;
 }
 
 function wallet(result: DelveSync, meta = result.meta, oil = result.oil): DelveWallet {
@@ -371,15 +375,16 @@ function wallet(result: DelveSync, meta = result.meta, oil = result.oil): DelveW
 }
 
 function refusedReason(walletState: DelveWallet, run: RunState): string {
-  if (walletState.oil < 1 && !run.daily) return 'The lantern is dry. Log an entry to refill it.';
+  if (run.pendingTurn) return 'The room is waiting for your order.';
   if (run.pendingChoice !== null) return 'A choice is waiting.';
+  if (walletState.oil < 1 && !run.daily) return 'The lantern is dry. Log an entry to refill it.';
   return 'The run cannot move right now.';
 }
 
 function context(
   sync: DelveSync,
   policy: AutopilotPolicy,
-  options: { today: LocalDate; now: number },
+  options: { today: LocalDate; now: number; play?: boolean; order?: TurnOrder },
   oil = sync.oil,
 ): StepContext {
   return {
@@ -390,6 +395,8 @@ function context(
     meta: sync.meta,
     policy,
     today: options.today,
+    ...(options.play ? { play: true } : {}),
+    ...(options.order !== undefined ? { order: options.order } : {}),
   };
 }
 
@@ -602,6 +609,13 @@ export async function startDailyDelve(
 
 export interface StepDelveOptions extends DelveActionOptions {
   policy: AutopilotPolicy;
+  /**
+   * Human play: a fight room opens and waits for orders instead of resolving itself. Absent on the
+   * auto-played path, where the policy still answers for the companion.
+   */
+  play?: boolean;
+  /** The order for the round a hand-played run is waiting on. Refused unless the room is open. */
+  order?: TurnOrder;
 }
 
 /** Advance one room. The write is rejected if the same step is already stored. */
@@ -620,6 +634,20 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
     };
   }
   const run = active.state;
+  const waiting = run.pendingTurn === true;
+  // An order only answers a room the run already waits in. Entering a room is its own call, so a
+  // first order can never leave a half-entered room behind when it turns out to be unusable.
+  if (options.order !== undefined && !waiting) {
+    return {
+      ok: false,
+      reason: 'No room is waiting for an order.',
+      wallet: sync,
+      run,
+      oilSpent: 0,
+      ended: false,
+      granted: 0,
+    };
+  }
   const out = stepRun(run, context(sync, options.policy, options));
   const moved = out.run.stepIndex > run.stepIndex;
   // Camp mode opens a fork before stepping into the room. That state must be stored, but it is
@@ -629,7 +657,36 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
     out.run.pendingChoice !== null &&
     run.pendingChoice === null &&
     out.run.result === run.result;
-  if (!moved && !openedChoice) {
+  // Answering a room: the step index stands still and either the trail grows or the room finishes.
+  // A refused order changes nothing and must report why instead of being written.
+  const tookOrder = out.pause !== undefined && out.pause.orders.length > run.orders.length;
+  const finishedRoom = waiting && !moved && out.pause === undefined && out.run !== run;
+  if (options.order !== undefined && waiting && !tookOrder && !finishedRoom) {
+    return {
+      ok: false,
+      reason: 'That order cannot be used this round.',
+      wallet: sync,
+      run,
+      oilSpent: 0,
+      ended: false,
+      granted: 0,
+      pause: out.pause,
+    };
+  }
+  // Asking for a room a run already waits in only rebuilds the menu the pause left behind: the
+  // fight is replayed from the stored orders, nothing moves and nothing is written.
+  if (waiting && !moved && options.order === undefined && out.pause !== undefined) {
+    return {
+      ok: true,
+      wallet: sync,
+      run: out.run,
+      oilSpent: 0,
+      ended: false,
+      granted: 0,
+      pause: out.pause,
+    };
+  }
+  if (!moved && !openedChoice && !tookOrder && !finishedRoom) {
     return {
       ok: false,
       reason: refusedReason(sync, run),
@@ -684,6 +741,7 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
     ended: out.run.result !== 'active',
     daily,
     granted: commit.granted,
+    ...(out.pause ? { pause: out.pause } : {}),
   };
 }
 

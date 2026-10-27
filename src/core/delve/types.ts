@@ -5,6 +5,7 @@
  */
 
 import type { LocalDate } from '../types';
+import type { CombatPause } from './combat';
 import type { SkillDef } from './data/builds';
 import type { Element } from './data/elements';
 
@@ -213,6 +214,12 @@ export interface RunState {
    */
   orders: TurnOrder[];
   /**
+   * True while the room the run stands in is waiting for the player's next order. Absent on a run
+   * between rooms, and never written by the auto-played path — so a stored shape that cannot pause
+   * does not grow a key it has no use for.
+   */
+  pendingTurn?: boolean;
+  /**
    * The id of the floor rule in force (`no-ward-boons`, `guard-reflects`, …), or null on a floor
    * with no rule. Announced the moment the floor begins, with the next floor's rule already
    * printed (§8 E.1). Declared with the v3 shape so a stored run always answers for it.
@@ -324,6 +331,13 @@ export interface StepContext {
   policy: AutopilotPolicy;
   /** Local date of the step, for ledger events. */
   today: LocalDate;
+  /**
+   * True when a human is playing this step: the room waits for `order` instead of resolving itself.
+   * Absent on the auto-played path, so a batch or catch-up step behaves exactly as before.
+   */
+  play?: boolean;
+  /** The order for the round the run is waiting on. Ignored unless `play` is set. */
+  order?: TurnOrder;
 }
 
 export interface StepOutcome {
@@ -335,6 +349,11 @@ export interface StepOutcome {
   oilSpent: number;
   /** True when the run ended on this step. */
   ended: boolean;
+  /**
+   * Set when the room is still standing and wants the next order. The persistence layer stores it
+   * instead of a log entry: the partial room is rebuilt by replaying `run.orders`, not appended to.
+   */
+  pause?: CombatPause;
 }
 
 export interface BuffSummary {

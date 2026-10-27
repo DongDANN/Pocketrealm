@@ -35,6 +35,8 @@ import type {
   RunState,
   StepContext,
   StepOutcome,
+  TurnDecider,
+  TurnOrder,
 } from './types';
 
 const CLEAR_BONUS: Record<HollowId, number> = { 1: 25, 2: 30, 3: 45 };
@@ -500,7 +502,9 @@ function endRun(
   result: 'retreated' | 'fainted',
   today: string,
 ): { run: RunState; meta: DelveMeta } {
-  const next = { ...run, result, pendingChoice: null };
+  const next = { ...run, result, pendingChoice: null, orders: [] };
+  // A finished run has no room to wait in, whether it ended between rooms or mid-fight.
+  delete next.pendingTurn;
   // A Daily run is isolated from permanent progress: no Embers bank, no counters, no materials.
   if (next.daily) {
     const label = result === 'retreated' ? 'Retreat' : 'Faint';
@@ -616,9 +620,195 @@ function autopilotRest(
   return { choice: 'rest', reason: `Autopilot: HP at ${hpRatio}%, resting.` };
 }
 
+function isFightRoom(room: RoomDef): boolean {
+  return room.kind === 'skirmish' || room.kind === 'elite' || room.kind === 'boss';
+}
+
+/**
+ * Who answers for the companion on a hand-played step: the orders the run already carries are
+ * replayed in the order they were given, then the player's new order is taken once, and after that
+ * the room stops and asks again. `order` is absent when the caller only wants the room rebuilt, in
+ * which case the fight pauses at the same round it was left in.
+ */
+function turnDecider(stored: readonly TurnOrder[], order: TurnOrder | undefined): TurnDecider {
+  let taken = 0;
+  return () => {
+    if (taken < stored.length) return stored[taken++]!;
+    const answer = taken === stored.length ? (order ?? null) : null;
+    taken += 1;
+    return answer;
+  };
+}
+
+/**
+ * One fight room, from the moment it is entered to the room after it. The run has already been
+ * stepped into the room (step index, visited trail and room line are in place), so the same call
+ * serves both a fresh entry and a replay of a room a stored run is waiting in — only `spent`
+ * differs, because a resumed room was paid for when it was first entered.
+ */
+function fightRoom(
+  run: RunState,
+  room: RoomDef,
+  ctx: StepContext,
+  spent: number,
+  ledger: StepOutcome['ledger'],
+): StepOutcome {
+  const buffs = computeBuffs(ctx.signals);
+  const mods = computeModifiers(run, forgeTotals(ctx.meta.forge), buffs);
+  // Sightings open codex entries before the fight resolves (win, lose, or escape).
+  let stepMeta: DelveMeta = {
+    ...ctx.meta,
+    codex: [...new Set([...(ctx.meta.codex ?? []), ...room.enemies])],
+  };
+  const result = runCombat(
+    run,
+    room,
+    mods,
+    run.floor,
+    stepMeta.knownWeaknesses ?? [],
+    stepMeta.bossKnowledge ?? [],
+    stepMeta.mastery ?? {},
+    ctx.play ? turnDecider(run.orders, ctx.order) : undefined,
+  );
+  if (result.pause) {
+    // The room stores its decisions, not their outcome: no fight line, no kill and no consumable
+    // spend is merged, so the replay that finishes the room reports each of them exactly once. The
+    // companion's HP is left at the value the fight started from — storing the partial number would
+    // have the replay take every hit twice. The pause snapshot carries it for the readout.
+    return {
+      run: { ...run, orders: [...result.pause.orders], pendingTurn: true },
+      meta: ctx.meta,
+      ledger,
+      oilSpent: spent,
+      ended: false,
+      pause: result.pause,
+    };
+  }
+  let next: RunState = {
+    ...run,
+    orders: [],
+    log: [...run.log, ...result.log],
+    consumablesUsed: { ...run.consumablesUsed, ...result.consumablesUsed },
+  };
+  delete next.pendingTurn;
+  if (result.fled) {
+    next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
+    next = pushLog(next, 'info', 'Smoke Scroll: you slip past the room at 1 HP.');
+    const adv = advanceAfterRoom(next, { ...ctx, meta: stepMeta });
+    return {
+      run: adv.run,
+      meta: adv.meta,
+      ledger: [...ledger, ...adv.ledger],
+      oilSpent: spent,
+      ended: adv.ended,
+    };
+  }
+  if (result.drawn) {
+    stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
+    const ended = endRun(
+      { ...next, unit: { ...next.unit, hp: result.hpAfter } },
+      stepMeta,
+      'retreated',
+      ctx.today,
+    );
+    return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
+  }
+  if (!result.won) {
+    // Boss Study: fainting to a boss permanently reveals its weakness and tells.
+    let faintMeta = stepMeta;
+    let faintRun = { ...next, unit: { ...next.unit, hp: 0 } };
+    if (room.kind === 'boss' && room.enemies.length > 0) {
+      const boss = BOSSES.find((b) => b.id === room.enemies[0]);
+      if (boss) {
+        faintMeta = {
+          ...faintMeta,
+          bossKnowledge: [...new Set([...faintMeta.bossKnowledge, boss.id])],
+          knownWeaknesses: [...new Set([...faintMeta.knownWeaknesses, boss.weakness])],
+        };
+        faintRun = pushLog(
+          faintRun,
+          'info',
+          `Boss Study: ${boss.name}'s weakness and tells revealed.`,
+        );
+      }
+    }
+    const ended = endRun(faintRun, faintMeta, 'fainted', ctx.today);
+    return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
+  }
+  next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
+  stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
+  // Won fights drop materials, deterministic per run and room.
+  const drops = dropMaterials(next, room);
+  if (drops.ore + drops.herb + drops.echo > 0) {
+    next = { ...next, materials: addMaterials(next.materials, drops) };
+    const parts = [
+      drops.ore > 0 ? `${drops.ore} Ore` : '',
+      drops.herb > 0 ? `${drops.herb} Herb` : '',
+      drops.echo > 0 ? `${drops.echo} Echo` : '',
+    ].filter(Boolean);
+    next = pushLog(next, 'reward', `Materials: +${parts.join(', ')}.`);
+  }
+  // Rainy Day Fund: once per run, heal to 50% when HP is at or below 30%.
+  if (
+    next.relics.includes('relic-rainyday') &&
+    !next.relicFlags['relic-rainyday'] &&
+    result.hpAfter > 0 &&
+    result.hpAfter <= Math.round(result.maxHp * 0.3)
+  ) {
+    const target = Math.round(result.maxHp * 0.5);
+    next = pushLog(
+      {
+        ...next,
+        unit: { ...next.unit, hp: target },
+        relicFlags: { ...next.relicFlags, 'relic-rainyday': true },
+      },
+      'info',
+      'Rainy Day Fund: healed to 50% HP.',
+    );
+  }
+  if (room.kind === 'skirmish' || room.kind === 'elite') {
+    // Boons after every elite/treasure, but only ~half of skirmishes (Ember economy guard).
+    const offerChance = room.kind === 'skirmish' ? 35 : 80;
+    if (offerRng(next, 'offer-chance').int(100) >= offerChance) {
+      const adv = advanceAfterRoom(next, { ...ctx, meta: stepMeta });
+      return {
+        run: adv.run,
+        meta: adv.meta,
+        ledger: [...ledger, ...adv.ledger],
+        oilSpent: spent,
+        ended: adv.ended,
+      };
+    }
+    const offer = grantBoonOffer(next, ctx.policy);
+    if (offer.pending) {
+      return { run: offer.run, meta: stepMeta, ledger, oilSpent: spent, ended: false };
+    }
+    next = offer.run;
+  }
+  // The tail deliberately keeps the caller's meta, exactly as the room used to: whether a win
+  // banks its mastery is what the golden hashes pin, and 7b-3 is not the gate that changes it.
+  const adv = advanceAfterRoom(next, ctx);
+  return {
+    run: adv.run,
+    meta: adv.meta,
+    ledger: [...ledger, ...adv.ledger],
+    oilSpent: spent,
+    ended: adv.ended,
+  };
+}
+
 export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   const empty: StepOutcome = { run, meta: ctx.meta, ledger: [], oilSpent: 0, ended: false };
   if (run.result !== 'active' || run.pendingChoice !== null) return empty;
+  // A room that is waiting for an order is already entered and paid for: the step replays the orders
+  // the run carries, takes the new one, and leaves the room line and the step index exactly where
+  // the pause put them. Without an order it only rebuilds the menu, which is how a reload resumes.
+  if (run.pendingTurn) {
+    if (!ctx.play) return empty;
+    const room = currentRoom(run);
+    if (!isFightRoom(room)) return empty;
+    return fightRoom(run, room, ctx, 0, []);
+  }
   if (ctx.oil < 1 && !run.daily) return empty;
 
   const forge = forgeTotals(ctx.meta.forge);
@@ -662,122 +852,8 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   };
   next = pushLog(next, 'room', `${roomLabel(room)} room: ${room.id}.`);
 
-  if (room.kind === 'skirmish' || room.kind === 'elite' || room.kind === 'boss') {
-    const buffs = computeBuffs(ctx.signals);
-    const mods = computeModifiers(next, forge, buffs);
-    // Sightings open codex entries before the fight resolves (win, lose, or escape).
-    let stepMeta: DelveMeta = {
-      ...ctx.meta,
-      codex: [...new Set([...(ctx.meta.codex ?? []), ...room.enemies])],
-    };
-    const result = runCombat(
-      next,
-      room,
-      mods,
-      next.floor,
-      stepMeta.knownWeaknesses ?? [],
-      stepMeta.bossKnowledge ?? [],
-      stepMeta.mastery ?? {},
-    );
-    next = {
-      ...next,
-      log: [...next.log, ...result.log],
-      consumablesUsed: { ...next.consumablesUsed, ...result.consumablesUsed },
-    };
-    if (result.fled) {
-      next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
-      next = pushLog(next, 'info', 'Smoke Scroll: you slip past the room at 1 HP.');
-      const adv = advanceAfterRoom(next, { ...ctx, meta: stepMeta });
-      return {
-        run: adv.run,
-        meta: adv.meta,
-        ledger: [...ledger, ...adv.ledger],
-        oilSpent: spent,
-        ended: adv.ended,
-      };
-    }
-    if (result.drawn) {
-      stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
-      const ended = endRun(
-        { ...next, unit: { ...next.unit, hp: result.hpAfter } },
-        stepMeta,
-        'retreated',
-        ctx.today,
-      );
-      return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
-    }
-    if (!result.won) {
-      // Boss Study: fainting to a boss permanently reveals its weakness and tells.
-      let faintMeta = stepMeta;
-      let faintRun = { ...next, unit: { ...next.unit, hp: 0 } };
-      if (room.kind === 'boss' && room.enemies.length > 0) {
-        const boss = BOSSES.find((b) => b.id === room.enemies[0]);
-        if (boss) {
-          faintMeta = {
-            ...faintMeta,
-            bossKnowledge: [...new Set([...faintMeta.bossKnowledge, boss.id])],
-            knownWeaknesses: [...new Set([...faintMeta.knownWeaknesses, boss.weakness])],
-          };
-          faintRun = pushLog(
-            faintRun,
-            'info',
-            `Boss Study: ${boss.name}'s weakness and tells revealed.`,
-          );
-        }
-      }
-      const ended = endRun(faintRun, faintMeta, 'fainted', ctx.today);
-      return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
-    }
-    next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
-    stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
-    // Won fights drop materials, deterministic per run and room.
-    const drops = dropMaterials(next, room);
-    if (drops.ore + drops.herb + drops.echo > 0) {
-      next = { ...next, materials: addMaterials(next.materials, drops) };
-      const parts = [
-        drops.ore > 0 ? `${drops.ore} Ore` : '',
-        drops.herb > 0 ? `${drops.herb} Herb` : '',
-        drops.echo > 0 ? `${drops.echo} Echo` : '',
-      ].filter(Boolean);
-      next = pushLog(next, 'reward', `Materials: +${parts.join(', ')}.`);
-    }
-    // Rainy Day Fund: once per run, heal to 50% when HP is at or below 30%.
-    if (
-      next.relics.includes('relic-rainyday') &&
-      !next.relicFlags['relic-rainyday'] &&
-      result.hpAfter > 0 &&
-      result.hpAfter <= Math.round(result.maxHp * 0.3)
-    ) {
-      const target = Math.round(result.maxHp * 0.5);
-      next = pushLog(
-        {
-          ...next,
-          unit: { ...next.unit, hp: target },
-          relicFlags: { ...next.relicFlags, 'relic-rainyday': true },
-        },
-        'info',
-        'Rainy Day Fund: healed to 50% HP.',
-      );
-    }
-    if (room.kind === 'skirmish' || room.kind === 'elite') {
-      // Boons after every elite/treasure, but only ~half of skirmishes (Ember economy guard).
-      const offerChance = room.kind === 'skirmish' ? 35 : 80;
-      if (offerRng(next, 'offer-chance').int(100) >= offerChance) {
-        const adv = advanceAfterRoom(next, { ...ctx, meta: stepMeta });
-        return {
-          run: adv.run,
-          meta: adv.meta,
-          ledger: [...ledger, ...adv.ledger],
-          oilSpent: spent,
-          ended: adv.ended,
-        };
-      }
-      const offer = grantBoonOffer(next, ctx.policy);
-      if (offer.pending) {
-        return { run: offer.run, meta: stepMeta, ledger, oilSpent: spent, ended: false };
-      }
-      next = offer.run;
-    }
+  if (isFightRoom(room)) {
+    return fightRoom(next, room, ctx, spent, ledger);
   } else if (room.kind === 'treasure') {
     const gain = 25 * (next.relics.includes('relic-firstcoin') && next.row === 0 ? 2 : 1);
     next = { ...next, glint: next.glint + gain };

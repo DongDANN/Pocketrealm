@@ -258,6 +258,11 @@ export interface CombatPause {
   shield: number;
   /** The orders already acted on in this room, in order. */
   orders: TurnOrder[];
+  /**
+   * The room's fight lines so far. Rebuilt by the same replay that rebuilds everything else, so a run
+   * resumed from storage can show the round it left off in without the log ever being persisted.
+   */
+  log: RunLogEntry[];
 }
 
 /** One order the rules could honour, resolved into what the round actually does. */
@@ -695,6 +700,7 @@ export function runCombat(
       enemies: enemies.map((e) => ({ ...e, statuses: [...e.statuses] })),
       shield,
       orders: [...ordersTaken],
+      log: [...log],
     },
   });
 

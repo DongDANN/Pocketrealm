@@ -1323,3 +1323,53 @@ UI, no persistence, no deletions — those are 7b-3 through 7b-6.
   a reload mid-room still abandons it until 7b-3; item orders stay refused until the Item action has
   rules. `resolveCardAction` still answers for the fallback path, and Autopilot, catch-up and the
   worker remain alive and scheduled for deletion in 7b-6. New file: `tests/delve-turns.test.ts`.
+
+### Gate 7b-3 — A run carries the room it is standing in (2026-10-28)
+
+§4 A.2 said a run stores decisions, not results. This gate makes that true: a fight room opens and
+waits, the orders live on the run, and a reload rebuilds the same menu from them. Still no UI (7b-5),
+no oil change (7b-4), no deletions (7b-6).
+
+- **Entering a room and fighting it are two different steps.** `RunState.pendingTurn`
+  (`src/core/delve/types.ts:221`) is optional and only true while a stored run waits inside a room;
+  `stepRun` (`src/core/delve/engine.ts:800`) checks it before the dry-lamp guard and resumes through
+  the same code that entered (`:806`). The fight itself moved into `fightRoom`
+  (`src/core/delve/engine.ts:649`), called by entry and resume alike — the only difference is `spent`,
+  because the entry bought the room and a replay must not buy it twice.
+- **Only orders are stored, and the two numbers that would have corrupted the replay are left out.**
+  On a pause, `fightRoom` merges no fight line, no kill and no consumable spend, so the replay that
+  finishes the room reports each exactly once. It also does not write the partial HP:
+  `openingDefence` starts every fight from `run.unit.hp`, so storing the mid-fight number would have
+  the replay take every hit twice. The snapshot carries the room's HP and its rebuilt log lines
+  (`CombatPause.log`, `src/core/delve/combat.ts:265`) instead, which is what lets a reloaded screen
+  show the round it left off in without the log ever being persisted.
+  `tests/delve-room.test.ts` pins both — the paused run's HP never moves, and the resumed fight's
+  combat log equals a straight-through reference line for line.
+- **The decider is a replayer.** `turnDecider` (`src/core/delve/engine.ts:633`) returns the stored
+  orders in order, then the player's new order once, then `null`. A refused order therefore pauses at
+  the same round without growing the trail, and all the validating stays in 7b-2's `honour`.
+- **Same-step writes have a third reason.** `commitChoice` accepts a same-index write when the stored
+  run was waiting on a choice **or a turn** (`src/data/delveStore.ts:188`). The controller
+  (`src/data/delve.ts`) keeps the three cases apart: entering a room is a batch (step moves, oil is
+  paid), an order is a guarded same-step write, and asking for a menu the run already waits in is not
+  a write at all. `StepDelveOptions` grew `play` / `order` (`src/data/delve.ts:616`, `:618`); answering
+  with no open room is refused before the engine runs (`:643`), an unusable order is refused with the
+  pause handed back (`:667`), and reopening a waiting room writes nothing (`:676`).
+- **The auto-played path is untouched.** Without `play`, `stepRun` passes no decider, so Autopilot,
+  the worker, catch-up, the fuzz suite and the five golden digests are byte-identical.
+- **A finished room forgets its trail.** Resolution and `endRun` (`src/core/delve/engine.ts:499`) clear
+  `orders` and _delete_ `pendingTurn` — deleted rather than set to `undefined`, so a settled run does
+  not carry a key the state hash would see. Retreating out of a waiting room goes through the same
+  door (`src/core/delve/engine.ts:536`).
+- **Verification:** `npm run typecheck` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 797/797 across 72 files** (11
+  new in `tests/delve-room.test.ts`, 7 new in `tests/data-delve-turn.test.ts`); `npm run sim:golden`
+  still prints the five 7b-1 pins; `npx playwright test` **verified 65/65** in Chromium against the
+  production build.
+- **Not verified / still open:** no screen reaches the turn loop yet, so the reload path is proven in
+  the data layer, not in a browser, until 7b-5. The resume step re-reads `computeBuffs(ctx.signals)`
+  and the Forge totals, so a room paused across a habit log would replay under the new buffs; nothing
+  visible contradicts (the old numbers were never stored), but if 7b-5 shows a player noticing, the
+  fix is to freeze the room's modifiers at entry. Item orders stay refused until the Item action has
+  rules, and the order trail is not displayed anywhere yet. New files: `tests/delve-room.test.ts`,
+  `tests/data-delve-turn.test.ts`.
