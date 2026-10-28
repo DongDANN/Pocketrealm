@@ -16,6 +16,7 @@ import { eventsForHollow, type EventOutcome } from './data/events';
 import { anyBoonById, fusionById, fusionRecipesFor, type FusionDef } from './data/fusions';
 import { forgeTotals } from './forge';
 import { generateFloor, HOLLOW_FLOORS } from './map';
+import { settleSkillUses, skillLevels, usesFromLog } from './levels';
 import { computeBuffs } from './signals';
 import { lookaheadRows, masteryMult } from './buildings';
 import { gainMastery } from './mastery';
@@ -438,7 +439,8 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
       return { run: next, meta, ledger, ended: true };
     }
     const bankedAll = bankEmbers(meta, next.embersEarned, ctx.today);
-    meta = settleRunEnd(bankedAll.meta, next);
+    const settled = settleRunEnd(bankedAll.meta, next);
+    meta = settled.meta;
     meta.clearedHollows = [...new Set([...meta.clearedHollows, next.hollowId])];
     meta.runsCleared += 1;
     meta.lastClearDate = { ...meta.lastClearDate, [next.hollowId]: ctx.today };
@@ -453,6 +455,7 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
       'end',
       `Hollow ${next.hollowId} cleared! +${clearBonus} bonus Embers (${bankedAll.banked} banked today).`,
     );
+    next = dustLine(next, settled.dustGained);
     return { run: next, meta, ledger, ended: true };
   }
 
@@ -471,13 +474,21 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
 }
 
 /** Bank gathered materials and consume spent consumables when a run ends. */
-function settleRunEnd(meta: DelveMeta, run: RunState): DelveMeta {
+function settleRunEnd(meta: DelveMeta, run: RunState): { meta: DelveMeta; dustGained: number } {
   // Provenance is kept at the only moment it is knowable: the Hollow this run actually walked.
   let m = bankMaterials(meta, run.hollowId, run.materials);
   const used = run.consumablesUsed ?? {};
   const kept = (m.equippedConsumables ?? []).filter((id) => !used[id]);
   if (kept.length !== m.equippedConsumables.length) m = { ...m, equippedConsumables: kept };
-  return m;
+  // §7 D.6: the second dust source. Swings are read from the hit records the fight already wrote, so
+  // a room that never resolved pays nothing and a faint still pays for every blow that landed.
+  const uses = settleSkillUses(m, usesFromLog(run));
+  return { meta: uses.meta, dustGained: uses.dustGained };
+}
+
+/** Dust from use is announced rather than quietly added to a number the player has to notice. */
+function dustLine(run: RunState, dustGained: number): RunState {
+  return dustGained > 0 ? pushLog(run, 'end', `Skill Dust from use: +${dustGained}.`) : run;
 }
 
 function endRun(
@@ -489,7 +500,8 @@ function endRun(
   const next = { ...run, result, pendingChoice: null, orders: [] };
   // A finished run has no room to wait in, whether it ended between rooms or mid-fight.
   delete next.pendingTurn;
-  // A Daily run is isolated from permanent progress: no Embers bank, no counters, no materials.
+  // A Daily run is isolated from permanent progress: no Embers bank, no counters, no materials and
+  // no Skill Dust.
   if (next.daily) {
     const label = result === 'retreated' ? 'Retreat' : 'Faint';
     return {
@@ -499,19 +511,25 @@ function endRun(
   }
   const settled = settleRunEnd(meta, next);
   if (result === 'retreated') {
-    const { meta: m, banked } = bankEmbers(settled, next.embersEarned, today);
+    const { meta: m, banked } = bankEmbers(settled.meta, next.embersEarned, today);
     m.runsRetreated += 1;
     return {
-      run: pushLog(next, 'end', `Retreat: ${banked} of ${next.embersEarned} Embers banked.`),
+      run: dustLine(
+        pushLog(next, 'end', `Retreat: ${banked} of ${next.embersEarned} Embers banked.`),
+        settled.dustGained,
+      ),
       meta: m,
     };
   }
   const pct = run.relics.includes('relic-safebox') ? 70 : 60;
   const kept = Math.floor((next.embersEarned * pct) / 100);
-  const { meta: m, banked } = bankEmbers(settled, kept, today);
+  const { meta: m, banked } = bankEmbers(settled.meta, kept, today);
   m.runsFainted += 1;
   return {
-    run: pushLog(next, 'end', `Faint: ${banked} of ${kept} Embers banked (${pct}%).`),
+    run: dustLine(
+      pushLog(next, 'end', `Faint: ${banked} of ${kept} Embers banked (${pct}%).`),
+      settled.dustGained,
+    ),
     meta: m,
   };
 }
@@ -605,6 +623,7 @@ function fightRoom(
     stepMeta.bossKnowledge ?? [],
     stepMeta.mastery ?? {},
     turnDecider(run.orders, ctx.order),
+    skillLevels(stepMeta),
   );
   if (result.pause) {
     // The room stores its decisions, not their outcome: no fight line, no kill and no consumable

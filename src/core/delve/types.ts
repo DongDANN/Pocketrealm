@@ -274,9 +274,11 @@ export interface DelveMeta {
   /** When the last step was applied (ms). */
   lastStepAt: number;
   /**
-   * Collected skills, keyed by id: the level bought with Skill Dust, the uses that earned it, and
-   * the lifetime total the Codex reports. Arrives with the collection in Gate 7c; declared here so
-   * the v3 shape is settled once (DELVE_REDESIGN §10.1).
+   * Collected skills, keyed by id. `level` is the rung bought with Skill Dust (1-5, and the only thing
+   * a level buys today is §7 D.6's flat +8% potency); `lifetime` is every swing that landed, which is
+   * what pays dust and what capsule relevance reads; `uses` is the remainder of that total toward the
+   * next dust, so a run that ends early keeps its unfinished ten. Written by `settleSkillUses` when a
+   * run ends and by a capsule when it is opened (DELVE_REDESIGN §7 D.6, §10.1).
    */
   skills: Record<string, { level: number; uses: number; lifetime: number }>;
   /** Species-and-skill ids the companion knows, i.e. can be equipped at all. */

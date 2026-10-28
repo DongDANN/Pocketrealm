@@ -29,6 +29,7 @@ import {
   heatUnlocked,
   hollowUnlocked,
   isCapsuleCeiling,
+  levelUpSkill,
   newDailyRun,
   newRun,
   oilCapacity,
@@ -1056,6 +1057,25 @@ export function dismissCapsuleRevealAction(
     ok: true,
     meta: dismissCapsuleReveal(meta),
   }));
+}
+
+export interface SkillLevelOptions extends DelveActionOptions {
+  skillId: string;
+}
+
+/**
+ * Buy the next rung of one skill's Dust ladder (§7 D.6). The book decides whether the skill is held at
+ * all, so an id this player has never been granted or never swung is refused instead of invented, and
+ * the run that swings the skill is the same run that writes the entry the button then reads.
+ */
+export function levelUpRealmSkill(
+  db: PocketDb,
+  options: SkillLevelOptions,
+): Promise<MetaActionResult> {
+  return mutateMeta(db, options, (meta) => {
+    const out = levelUpSkill(meta, options.skillId);
+    return { ok: out.ok, meta: out.meta, reason: out.reason };
+  });
 }
 
 export interface EquipOptions extends DelveActionOptions {

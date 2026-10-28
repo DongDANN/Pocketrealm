@@ -21,6 +21,7 @@ import {
 } from './damage';
 import { forgeTotals } from './forge';
 import { enemyIntent, type IntentDefence, type IntentLine } from './intent';
+import { isLeveled, potencyPercent, skillLevels } from './levels';
 import { computeBuffs } from './signals';
 import type { SkillDef } from './data/builds';
 import type { BudgetSignals, DelveMeta, RunState } from './types';
@@ -134,6 +135,8 @@ function priceTarget(
   if (input.markMult !== 1) notes.push(`Marked ×${input.markMult}`);
   if (input.burningBonus > 0 && input.targetBurning) notes.push('Burning bonus');
   if (input.masteryLvl > 0) notes.push(`Mastery +${input.masteryLvl}%`);
+  const level = skill ? ctx.skillLevels[skill.id] : undefined;
+  if (isLeveled(level)) notes.push(`LV${level} +${potencyPercent(level)}% potency`);
   if (input.shield > 0) notes.push(`${input.shield} Shield first`);
   return {
     targetIndex,
@@ -165,6 +168,7 @@ function attackContext(
       eliteBonus: mods.eliteDamageBonus,
       knownWeaknesses: meta.knownWeaknesses ?? [],
       mastery: meta.mastery ?? {},
+      skillLevels: skillLevels(meta),
     },
     def: opening.def,
     damageReduction: opening.damageReduction,

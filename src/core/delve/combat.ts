@@ -22,6 +22,7 @@ import {
   type PassiveFx,
   type SkillDef,
 } from './data/builds';
+import { potencyMult } from './levels';
 import {
   ENRAGE_ATK_MULTIPLIER,
   ENRAGE_HP_PERCENT,
@@ -458,6 +459,8 @@ export interface AttackContext {
   eliteBonus: number;
   knownWeaknesses: readonly Element[];
   mastery: Record<string, number>;
+  /** Dust levels by skill id (§7 D.6). A skill that is not in here is LV1 and prices unchanged. */
+  skillLevels: Record<string, number>;
 }
 
 /** The exact inputs one companion attack resolves with; `roll` is the only part a preview guesses. */
@@ -468,9 +471,11 @@ export function attackInputFor(
   roll: { variance: number; crit: boolean },
 ): AttackInput {
   const fx = skill?.fx;
+  const potency = skill ? potencyMult(ctx.skillLevels[skill.id] ?? 1) : 1;
   return {
     atk: ctx.atk,
     power: skill?.power ?? 1,
+    ...(potency > 1 ? { potency } : {}),
     def: target.def,
     variance: roll.variance,
     crit: roll.crit,
@@ -494,6 +499,9 @@ export function attackInputFor(
  * that the order did not name (§4 A.1) — energy, cooldowns, rolls, statuses, phases, enemy turns,
  * the `ROUND_CAP` and the log are untouched. A `null` order pauses the room and hands it back; the
  * caller asks the player and replays the stored orders to get here again.
+ *
+ * `skillLevels` is the Dust ladder's contribution (§7 D.6): an id that is not in the map, or is
+ * LV1, prices exactly as it did before the ladder existed.
  */
 export function runCombat(
   run: RunState,
@@ -504,6 +512,7 @@ export function runCombat(
   studiedBosses: readonly string[] = [],
   mastery: Record<string, number> = {},
   decide: TurnDecider,
+  skillLevels: Record<string, number> = {},
 ): CombatResult {
   const rng = combatRng(run.runId, run.stepIndex);
   const log: RunLogEntry[] = [];
@@ -819,6 +828,7 @@ export function runCombat(
             eliteBonus: modifiers.eliteDamageBonus,
             knownWeaknesses,
             mastery,
+            skillLevels,
           },
           roll,
         );

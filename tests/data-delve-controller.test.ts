@@ -27,6 +27,7 @@ import {
   chooseDelve,
   craftCapsuleAction,
   dismissCapsuleRevealAction,
+  levelUpRealmSkill,
   listDelveHistory,
   loadBuildingMilestones,
   loadDelveSnapshot,
@@ -655,6 +656,53 @@ describe('capsules', () => {
     expect(noMaterials.reason).toContain('2 Ore');
     expect((await loadMeta(db))?.meta.capsules).toEqual({});
     expect((await loadMeta(db))?.meta.embers).toBe(400);
+  });
+});
+
+describe('Skill Dust and the level ladder', () => {
+  const BASTION = 'warden-bastion';
+
+  function book(level: number, dust: number): DelveMeta {
+    return {
+      ...emptyMeta(),
+      dust,
+      skills: { [BASTION]: { level, uses: 0, lifetime: 0 } },
+    };
+  }
+
+  it('buys LV2 for 5 Dust and writes the rung to the book', async () => {
+    await addCompanion();
+    await putMeta(book(1, 20), 50, 0);
+    const out = await levelUpRealmSkill(db, { ...OPTIONS, skillId: BASTION });
+    expect(out.ok, out.reason).toBe(true);
+    expect(out.wallet.meta.skills[BASTION]!.level).toBe(2);
+    expect(out.wallet.meta.dust).toBe(15);
+
+    const stored = await loadMeta(db);
+    expect(stored?.meta.skills[BASTION]!.level).toBe(2);
+    expect(stored?.meta.dust).toBe(15);
+  });
+
+  it('refuses a rung the book cannot pay for and writes nothing', async () => {
+    await addCompanion();
+    await putMeta(book(1, 4), 50, 0);
+    const out = await levelUpRealmSkill(db, { ...OPTIONS, skillId: BASTION });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toContain('LV2 costs 5 Skill Dust');
+    expect(out.reason).toContain('has 4');
+
+    const stored = await loadMeta(db);
+    expect(stored?.meta.skills[BASTION]!.level).toBe(1);
+    expect(stored?.meta.dust).toBe(4);
+  });
+
+  it('refuses to level a skill this player has never held', async () => {
+    await addCompanion();
+    await putMeta({ ...emptyMeta(), dust: 90 }, 50, 0);
+    const out = await levelUpRealmSkill(db, { ...OPTIONS, skillId: BASTION });
+    expect(out.ok).toBe(false);
+    expect(out.reason).toContain('does not hold');
+    expect((await loadMeta(db))?.meta.dust).toBe(90);
   });
 });
 

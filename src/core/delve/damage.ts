@@ -39,6 +39,11 @@ export interface AttackInput {
   atk: number;
   /** Skill power multiplier; 1 for a basic attack. */
   power: number;
+  /**
+   * The Dust ladder's multiplier on this skill's own potency (§7 D.6): 1 at LV1, +8% per rung. Absent
+   * reads as 1, because a hit record written before the ladder exists is still a valid input.
+   */
+  potency?: number;
   /** The target's DEF. */
   def: number;
   /** The seeded −1 / 0 / +1 roll. */
@@ -91,9 +96,10 @@ function fmt(n: number): string {
 }
 
 /**
- * Resolve one player attack. The order of operations — power, then variance and DEF, then the crit,
- * then burning, then mark and element on one rounding, then mastery, then the elite bonus, then shield
- * — is copied line for line from the combat engine.
+ * Resolve one player attack. The order of operations — power, then the skill's own potency from the
+ * Dust ladder, then variance and DEF, then the crit, then burning, then mark and element on one
+ * rounding, then mastery, then the elite bonus, then shield — is copied line for line from the combat
+ * engine.
  */
 export function attackBreakdown(input: AttackInput): DamageBreakdown {
   const terms: DamageTerm[] = [{ label: 'ATK', op: 'start', value: input.atk }];
@@ -101,6 +107,11 @@ export function attackBreakdown(input: AttackInput): DamageBreakdown {
   if (input.power !== 1) terms.push({ label: 'Power', op: 'mult', value: input.power });
 
   let beforeDef = power;
+  const potency = input.potency ?? 1;
+  if (potency !== 1) {
+    beforeDef = Math.round(beforeDef * potency);
+    terms.push({ label: 'Potency', op: 'mult', value: mult(potency) });
+  }
   if (input.variance !== 0) {
     beforeDef += input.variance;
     terms.push({ label: 'Variance', op: 'add', value: input.variance });

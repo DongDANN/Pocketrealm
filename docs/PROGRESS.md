@@ -1738,3 +1738,78 @@ nothing else could play the run; this gate proves a player can.
   shape of no core-side unlock gate (the milestone check lives in the screen), so 7c-5 decides whether
   crafting needs one. Whether 2 Ore + 1 Herb is the right price for a shot at an Epic is a 7f question
   with the persona pacing in it.
+
+### Gate 7c-3 — Skill Dust buys one thing: potency (2026-10-28)
+
+- **What this gate is.** §7 D.6: the sink for the currency 7c-2 started paying out. A skill has a level,
+  levels cost Dust, and a level makes that skill hit harder. `src/core/delve/levels.ts` is new and holds
+  the whole ladder — costs, the curve, the use counter, the purchase — and like 7c-2 this is the mechanism
+  only: `levelUpRealmSkill` exists in the data layer with no button behind it until 7c-5.
+- **A level buys a flat +8% on the skill's own potency, and nothing else.** LV1 is exactly the number the
+  Codex prints, LV5 is +32%, and the rungs are 5 / 15 / 40 / 90 Dust (§15 Risk 2 is 60 skills × 5 levels;
+  a flat multiplier is the part of that surface a person can still reason about). The multiplier is
+  applied inside `attackBreakdown`, right after the Power term and before variance and DEF, rounding once
+  per term — so the itemized sum the player reads _is_ the arithmetic that ran rather than a caption
+  beside it. `AttackInput.potency` is optional and reads 1 when absent, which keeps every hit record
+  written before the ladder a valid input that still re-derives to the same number.
+- **The use counter is read from the log, not stored on the run.** A swing counts when the engine writes
+  the structured hit record the recap already reconciles against (§7 A.3): player side, carrying a
+  `skillId`. That choice is what makes the three edge cases fall out of the model instead of needing
+  rules — a room still waiting for an order has committed no hit line, so a pause-and-replay cannot
+  double-pay; a basic attack carries no `skillId`, so free damage earns nothing; and a faint still pays
+  for every blow that landed. It also means no new `RunState` field, so no schema bump and no migration.
+- **The remainder carries across the run boundary, deliberately.** §7 D.6 reads "every 10 uses of a skill
+  in a run". Taken strictly, that throws away the nine swings that did not finish a ten — which taxes
+  precisely the retreat §2 invariant 5 says never to tax. So Dust pays when a skill's _lifetime_ uses
+  cross a multiple of ten, wherever those uses happened, and `uses` keeps the unfinished remainder so a
+  screen can show 3/10 instead of nothing.
+- **A rung cannot be bought for a skill the book does not hold,** which is what keeps the ladder a
+  collection progression rather than a shop. There are two ways to hold one: a capsule draws it (7c-2),
+  or the first run that swings it writes the entry at LV1. That second path is how the builds' own two
+  skills become progression targets — `warden-bastion` and `warden-shieldbash` are the only skills combat
+  can actually swing today, and the tests level them rather than a catalogue entry that no moveset offers
+  yet, so 7c-3 ships live rather than as dead code.
+- **One computation, two readers.** `fightRoom` and `turnMenu` both price from `skillLevels(meta)`, and
+  `runCombat` takes the map as an optional last argument defaulting to `{}`: an id that is absent, or
+  LV1, resolves exactly as it did before the ladder existed. The turn panel adds an `LV5 +32% potency`
+  note to each target it prices, on the same `notes` line it already renders for Mastery and Mark, so
+  the bonus is visible before the order rather than in the aftermath — reachable the moment a screen can
+  buy a rung.
+  Daily runs pay no Dust — the isolation 7b-4 established, extended to this third source.
+- **LV5's attached modifier is shipped _absent_, not half-present.** All sixty catalogue `level5` lines
+  are prose the resolver has no field for (energy refunds, spread to another enemy, carry into the next
+  room, Glint conversion), and a grep confirms nothing renders them today. A top rung that prints a
+  promise combat cannot keep is the UI lie this project already agreed not to ship, so task **7c-3b**
+  owns making those lines honourable — a structured field the resolver honours, or a rewrite into the
+  `SkillHitFx` vocabulary the engine already reads — and nothing may surface one before it closes.
+- **Two test defects were caught before shipping, both about proving the wrong thing.** The integration
+  test first swung Bastion on round 1, where the companion holds 1 Energy and the skill costs 4: the
+  engine refused the order, so the record it asserted on was a basic attack — the helper now waits for
+  the cost and the cooldown, and the room holds five Tollbugs so one blow cannot resolve it, which is
+  also what makes "a room that never resolved pays nothing" a testable claim instead of a hope. And the
+  refusal path returns the untouched `meta` by reference, a first assertion against a freshly built
+  equivalent object proved only that the test was wrong.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 869/869 across 75 files** (835/74
+  before, plus the 29-test ladder suite, three controller tests and two golden tests).
+  `npm run sim:golden` **re-recorded all five digests** — `c39220a1d5e4b7f8` → `94a4734277595fe7`,
+  `54436a238366b9d7` → `3576928019daf46e`, `e81b2310ed671b71` → `ead747a9c3dee2e7`,
+  `9850885dc742970e` → `9b13691c4c130d6e`, `1b2f147fca52d3ac` → `bcc6e6e8a66ebb11` — with two independent
+  proofs pinned in `tests/delve-golden.test.ts` that only the meta _shape_ moved: hash the run alone and
+  all five return the values captured before the ladder existed (`0cb18781…`, `dd27f7c3…`, `635549ae…`,
+  `5a0d2a0f…`, `93fbd3a3…`), and zero the Dust and the book back out with the provenance ledger still
+  deleted and all five return the Gate 7b-6 digests verbatim. Every golden skill sits at LV1, because a
+  golden run never spends what it earns, so the multiplier is never applied and the damage sums are the
+  same numbers they were.
+  `npm run test:e2e` **verified 67/67** in Chromium against the production build (5.9m) — unchanged,
+  including the hand-played run and the turn-panel golden, which is the point: this gate ships no screen
+  and no arithmetic a player can reach. `e2e/offline.spec.ts` stays parked and uncommitted.
+- **Not verified / still open:** the ladder has no door. Nothing in the UI prints `meta.dust` or calls
+  `levelUpRealmSkill`, so today a player earns Dust they cannot see and cannot spend — the one surface
+  that would show a rung is the turn panel's priced-target note, which no book can reach yet. 7c-5 owns
+  the Workshop and Codex screens, and until then the purchase is proven through the data API only.
+  Of the 60 catalogue skills, only the two a build starts with can be swung at all, so
+  the other 58 have a level that nothing can read until the 7c-4 moveset offers them; and the top rung's
+  modifier is owed by 7c-3b before any screen quotes it. Whether 5/15/40/90 and one Dust per ten swings
+  is the right curve — and whether +32% at the end of a skill's whole life is worth the run count it
+  takes to get there — is a 7f question with the persona pacing in it.

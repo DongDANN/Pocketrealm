@@ -19,9 +19,18 @@
  *
  * Gate 7c-2 re-recorded all five for the same reason 7b-1 did: the hashed shape grew. `DelveMeta`
  * gained `materialsFrom`, the per-Hollow provenance ledger a capsule's tier ceiling reads (§7 D.3).
- * Delete that one key and the same five replays return the Gate 7b-6 digests (83710653…, 7fbf913c…,
+ * Delete that one key and the same five replays returned the Gate 7b-6 digests (83710653…, 7fbf913c…,
  * 317ae9b8…, 5491625f…, fd1fa460…) exactly, and every material pile lands on the same Hollow it was
  * gathered in — which is the proof that no generation, combat or reward number moved.
+ *
+ * Gate 7c-3 re-recorded them a third time, again only because the shape grew: run end now writes the
+ * Dust ladder's bookkeeping into `DelveMeta.skills` (the swing count each skill pays one dust per ten
+ * of, plus its remainder) and increments `DelveMeta.dust`. Two independent proofs that nothing else
+ * moved: hash the run alone and all five return the values captured *before* the ladder existed
+ * (0cb18781…, dd27f7c3…, 635549aee…, 5a0d2a0f…, 93fbd3a3…), and zero the dust and the book back out
+ * with `materialsFrom` still deleted and all five return the Gate 7b-6 digests verbatim. Every golden
+ * skill sits at LV1, because a golden run never spends the dust it earns, so the +8%-per-rung potency
+ * multiplier is never applied and the damage sums are the same numbers they were before the ladder.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -35,8 +44,10 @@ interface GoldenCase {
   level: number;
   /** Recorded from the engine; re-record deliberately when balance intentionally moves. */
   hash: string;
-  /** The same replay with `materialsFrom` stripped out of the meta (Gate 7b-6's shape). */
-  hashWithoutLedger: string;
+  /** The same replay with `materialsFrom` and the whole Dust ladder taken back out of the meta. */
+  hashBeforeLadder: string;
+  /** The replay with the meta excluded entirely — Gate 7c-3's proof that combat math is untouched. */
+  runHash: string;
 }
 
 const CASES: GoldenCase[] = [
@@ -45,40 +56,45 @@ const CASES: GoldenCase[] = [
     seed: 12345,
     hollow: 1,
     level: 5,
-    hash: 'c39220a1d5e4b7f8',
-    hashWithoutLedger: '837106532b87b6aa',
+    hash: '94a4734277595fe7',
+    hashBeforeLadder: '837106532b87b6aa',
+    runHash: '0cb18781235f7864',
   },
   {
     label: 'H2 golden-ratio seed',
     seed: 0x9e3779b1,
     hollow: 2,
     level: 6,
-    hash: '54436a238366b9d7',
-    hashWithoutLedger: '7fbf913c7da7c523',
+    hash: '3576928019daf46e',
+    hashBeforeLadder: '7fbf913c7da7c523',
+    runHash: 'dd27f7c33c69fd70',
   },
   {
     label: 'H3 seed 777',
     seed: 777,
     hollow: 3,
     level: 8,
-    hash: 'e81b2310ed671b71',
-    hashWithoutLedger: '317ae9b8898d8b8b',
+    hash: 'ead747a9c3dee2e7',
+    hashBeforeLadder: '317ae9b8898d8b8b',
+    runHash: '635549aee6dbf24c',
   },
   {
     label: 'H2 seed 4242',
     seed: 4242,
     hollow: 2,
     level: 9,
-    hash: '9850885dc742970e',
-    hashWithoutLedger: '5491625f617eb6e9',
+    hash: '9b13691c4c130d6e',
+    hashBeforeLadder: '5491625f617eb6e9',
+    runHash: '5a0d2a0fe8fcda6e',
   },
   {
     label: 'H3 seed 20261025',
     seed: 20261025,
     hollow: 3,
     level: 12,
-    hash: '1b2f147fca52d3ac',
-    hashWithoutLedger: 'fd1fa46095a964c5',
+    hash: 'bcc6e6e8a66ebb11',
+    hashBeforeLadder: 'fd1fa46095a964c5',
+    runHash: '93fbd3a3d5d3052c',
   },
 ];
 
@@ -122,14 +138,30 @@ describe('golden runs', () => {
     for (const c of CASES) expect(hashOf(c), c.label).toBe(c.hash);
   });
 
-  it('moved only because the provenance ledger joined the shape', () => {
+  it('left the descent itself exactly as it was before the ladder', () => {
+    for (const c of CASES) {
+      const { run } = stateOf(c);
+      expect(stateHash({ run: { ...run, log: [] } }), c.label).toBe(c.runHash);
+    }
+  });
+
+  it('moved only because the Dust ladder joined the shape', () => {
     for (const c of CASES) {
       const { run, meta } = stateOf(c);
-      const beforeLedger = { ...meta };
-      delete beforeLedger.materialsFrom;
-      expect(stateHash({ run: { ...run, log: [] }, meta: beforeLedger }), c.label).toBe(
-        c.hashWithoutLedger,
+      const beforeLadder = { ...meta, dust: 0, skills: {} };
+      delete beforeLadder.materialsFrom;
+      expect(stateHash({ run: { ...run, log: [] }, meta: beforeLadder }), c.label).toBe(
+        c.hashBeforeLadder,
       );
+    }
+  });
+
+  it('earns dust from swings but never spends it, so no golden hit is potentied', () => {
+    for (const c of CASES) {
+      const { meta } = stateOf(c);
+      for (const [id, skill] of Object.entries(meta.skills)) {
+        expect(skill.level, `${c.label} ${id}`).toBe(1);
+      }
     }
   });
 
