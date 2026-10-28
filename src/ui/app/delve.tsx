@@ -12,8 +12,10 @@ import {
   type AutopilotPolicy,
   type BuildId,
   type CatchUpResult,
+  type CombatPause,
   type HollowId,
   type RunState,
+  type TurnOrder,
 } from '../../core/delve';
 import {
   applyCatchUp,
@@ -63,6 +65,11 @@ export interface DelveSession {
   catchUpProgress: CatchUpProgressState | null;
   catchUp: CatchUpReport | null;
   lastEnded: RunState | null;
+  /**
+   * The room a hand-played run is waiting in, rebuilt from its stored orders. Null when no room is
+   * waiting; a reload rebuilds it from the same seed without writing anything.
+   */
+  turn: CombatPause | null;
   policy: AutopilotPolicy;
   setPolicy(next: AutopilotPolicy): void;
   dismissCatchUp(): void;
@@ -71,6 +78,7 @@ export interface DelveSession {
   start(hollow: HollowId, buildId: BuildId, heat?: number): Promise<DelveRunResult | null>;
   startDaily(): Promise<DelveRunResult | null>;
   step(): Promise<DelveRunResult | null>;
+  play(order: TurnOrder): Promise<DelveRunResult | null>;
   choose(optionId: string): Promise<DelveRunResult | null>;
   retreat(): Promise<DelveRunResult | null>;
   buyForge(nodeId: string): Promise<MetaActionResult | null>;
@@ -111,6 +119,7 @@ export function DelveProvider({ children }: { children: ReactNode }) {
   const [policy, setPolicyState] = useState<AutopilotPolicy>(() => loadDelvePolicy());
   const [catchUp, setCatchUp] = useState<CatchUpReport | null>(null);
   const [lastEnded, setLastEnded] = useState<RunState | null>(null);
+  const [turn, setTurn] = useState<CombatPause | null>(null);
   const [catchingUp, setCatchingUp] = useState(false);
   const [catchUpProgress, setCatchUpProgress] = useState<CatchUpProgressState | null>(null);
   const { busy, begin, end } = useActionLock();
@@ -139,6 +148,9 @@ export function DelveProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const acceptRun = useCallback((result: DelveRunResult): DelveRunResult => {
+    // A refused order still carries the room it refused to move, so the menu stays on screen.
+    if (result.pause) setTurn(result.pause);
+    else if (result.ok) setTurn(null);
     if (!result.ok) {
       if (result.reason) say(result.reason, 'warn');
       return result;
@@ -198,6 +210,19 @@ export function DelveProvider({ children }: { children: ReactNode }) {
       const next = await loadDelveSnapshot(db, { today: todayRef.current, now: Date.now() });
       setSnapshot(next);
       setProblem('');
+      // A waiting room is not stored: the snapshot only says one is waiting. Rebuild the menu from
+      // the orders and the seed — the same read the data layer proves writes nothing.
+      if (next.active?.pendingTurn) {
+        const rebuilt = await stepDelve(db, {
+          today: todayRef.current,
+          now: Date.now(),
+          policy: policyRef.current,
+          play: true,
+        });
+        setTurn(rebuilt.ok ? (rebuilt.pause ?? null) : null);
+      } else {
+        setTurn(null);
+      }
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error));
     }
@@ -211,7 +236,7 @@ export function DelveProvider({ children }: { children: ReactNode }) {
     try {
       const before = await loadDelveSnapshot(db, { today: todayRef.current, now: Date.now() });
       setSnapshot(before);
-      if (before.active && before.active.pendingChoice === null) {
+      if (before.active && before.active.pendingChoice === null && !before.active.pendingTurn) {
         const report = await applyCatchUp(db, {
           today: todayRef.current,
           now: Date.now(),
@@ -297,7 +322,10 @@ export function DelveProvider({ children }: { children: ReactNode }) {
   const step = useCallback(async () => {
     if (!begin()) return null;
     try {
-      return acceptRun(await stepDelve(db, { ...options(), policy: policyRef.current }));
+      // A fight room opens and waits for an order; only the player resolves it now.
+      return acceptRun(
+        await stepDelve(db, { ...options(), policy: policyRef.current, play: true }),
+      );
     } catch (error) {
       say(error instanceof Error ? error.message : String(error), 'warn');
       return null;
@@ -305,6 +333,23 @@ export function DelveProvider({ children }: { children: ReactNode }) {
       end();
     }
   }, [acceptRun, begin, db, end, options]);
+
+  const play = useCallback(
+    async (order: TurnOrder) => {
+      if (!begin()) return null;
+      try {
+        return acceptRun(
+          await stepDelve(db, { ...options(), policy: policyRef.current, play: true, order }),
+        );
+      } catch (error) {
+        say(error instanceof Error ? error.message : String(error), 'warn');
+        return null;
+      } finally {
+        end();
+      }
+    },
+    [acceptRun, begin, db, end, options],
+  );
 
   const choose = useCallback(
     async (optionId: string) => {
@@ -479,6 +524,7 @@ export function DelveProvider({ children }: { children: ReactNode }) {
     catchUpProgress,
     catchUp,
     lastEnded,
+    turn,
     policy,
     setPolicy,
     dismissCatchUp: () => setCatchUp(null),
@@ -487,6 +533,7 @@ export function DelveProvider({ children }: { children: ReactNode }) {
     start,
     startDaily,
     step,
+    play,
     choose,
     retreat,
     buyForge,

@@ -2713,9 +2713,18 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* The scene is 320 art pixels wide and cannot shrink without breaking the pixel grid, so a phone
+   narrower than that pans it: same contract as .stage-frame, where auto margins centre a canvas
+   that fits and scrolling still reaches every pixel when it does not. */
 .delve-stage {
   display: flex;
-  justify-content: center;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.delve-stage > * {
+  margin-inline: auto;
+  flex: 0 0 auto;
 }
 
 /* Holds the run panel open at the scene's own size while the Canvas chunk is fetched. */
@@ -2785,6 +2794,64 @@ a {
 .threat-line.big {
   background: var(--ink-600);
   border-left-color: var(--rose);
+}
+
+/* The waiting room's menu (§4 A.3): every option carries its own arithmetic, so each target is a
+   button instead of a row the player has to remember before committing. */
+.turn-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--ink-800);
+  border: 2px solid var(--amber-deep);
+}
+
+.turn-heading {
+  margin: 4px 0 0;
+  padding-top: 6px;
+  border-top: 2px solid var(--ink-600);
+}
+
+.turn-action {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.turn-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.turn-target {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px;
+  text-align: left;
+  background: var(--ink-700);
+  border: 2px solid var(--ink-400);
+  color: var(--paper);
+  cursor: pointer;
+}
+
+.turn-target:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.turn-guard-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--ink-700);
+  border-left: 3px solid var(--ink-500);
 }
 
 .shop-grid {

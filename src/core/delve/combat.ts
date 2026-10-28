@@ -49,6 +49,7 @@ import {
   type IncomingInput,
 } from './damage';
 import { cardById, evaluateCards, resolveCardAction, type CardDef } from './data/habitCards';
+import { masteryLevel } from './mastery';
 import {
   STUN_BOSS_RESIST,
   STUN_RECENT_RESIST,
@@ -239,6 +240,11 @@ function hasStatus(statuses: readonly StatusInstance[], id: string): boolean {
   return statuses.some((s) => s.id === id && s.duration > 0);
 }
 
+/** Mark's damage-taken multiplier (1 when the target is unmarked). */
+function markDamageMult(target: EnemyState): number {
+  return hasStatus(target.statuses, 'mark') ? (statusById('mark')!.perRound!.dmgTakenMult ?? 1) : 1;
+}
+
 function isPassiveFx(fx: SkillDef['fx']): fx is PassiveFx {
   return !!fx && 'kind' in fx;
 }
@@ -256,6 +262,8 @@ export interface CombatPause {
   /** The roster at this instant, living and dead, so the readout prices the enemies the fight has. */
   enemies: EnemyState[];
   shield: number;
+  /** True when a boss mechanic is armed for this round, so intent pricing agrees with the engine. */
+  telegraphArmed: boolean;
   /** The orders already acted on in this room, in order. */
   orders: TurnOrder[];
   /**
@@ -441,6 +449,46 @@ function skillMultiplier(
 }
 
 /**
+ * Everything a companion attack is priced from except the roll itself. A preview fills the same
+ * shape from the run and the room's live roster, so an option the player was shown and the hit it
+ * resolves are one computation rather than two descriptions of it (§4 A.3).
+ */
+export interface AttackContext {
+  atk: number;
+  critMult: number;
+  eliteBonus: number;
+  knownWeaknesses: readonly Element[];
+  mastery: Record<string, number>;
+}
+
+/** The exact inputs one companion attack resolves with; `roll` is the only part a preview guesses. */
+export function attackInputFor(
+  target: EnemyState,
+  skill: SkillDef | null,
+  ctx: AttackContext,
+  roll: { variance: number; crit: boolean },
+): AttackInput {
+  const fx = skill?.fx;
+  return {
+    atk: ctx.atk,
+    power: skill?.power ?? 1,
+    def: target.def,
+    variance: roll.variance,
+    crit: roll.crit,
+    critMult: ctx.critMult,
+    burningBonus: fx && !isPassiveFx(fx) ? (fx.bonusIfBurning ?? 0) : 0,
+    targetBurning: hasStatus(target.statuses, 'burn'),
+    markMult: markDamageMult(target),
+    elementMult: skill ? skillMultiplier(target, skill, ctx.knownWeaknesses) : 1,
+    masteryLvl: masteryLevel(ctx.mastery[target.species] ?? 0),
+    eliteBonus: ctx.eliteBonus,
+    targetElite: target.elite,
+    shield: statusShield(target.statuses),
+    hp: target.hp,
+  };
+}
+
+/**
  * Run one deterministic battle.
  *
  * Without `decide` the companion acts as it always has — ready skills most expensive first, else a
@@ -508,9 +556,6 @@ export function runCombat(
   const def = defence.def;
   const spd = base.spd + modifiers.spd;
   const luck = base.luck + modifiers.luck;
-
-  const markMultOf = (target: EnemyState): number =>
-    hasStatus(target.statuses, 'mark') ? (statusById('mark')!.perRound!.dmgTakenMult ?? 1) : 1;
 
   /** Advance boss phases as HP crosses thresholds; studied bosses are named, others hidden. */
   function applyPhases(e: EnemyState): void {
@@ -699,6 +744,7 @@ export function runCombat(
       state: menuState(),
       enemies: enemies.map((e) => ({ ...e, statuses: [...e.statuses] })),
       shield,
+      telegraphArmed: bossTelegraph,
       orders: [...ordersTaken],
       log: [...log],
     },
@@ -802,23 +848,18 @@ export function runCombat(
           }
         }
         const roll = damageRoll(rng, luck, modifiers.critChance + bonusCrit);
-        const input: AttackInput = {
-          atk,
-          power: chosen?.power ?? 1,
-          def: target.def,
-          variance: roll.variance,
-          crit: roll.crit,
-          critMult: modifiers.critDamageMult,
-          burningBonus: fx && !isPassiveFx(fx) ? (fx.bonusIfBurning ?? 0) : 0,
-          targetBurning: hasStatus(target.statuses, 'burn'),
-          markMult: markMultOf(target),
-          elementMult: chosen ? skillMultiplier(target, chosen, knownWeaknesses) : 1,
-          masteryLvl: Math.min(10, Math.floor((mastery[target.species] ?? 0) / 10)),
-          eliteBonus: modifiers.eliteDamageBonus,
-          targetElite: target.elite,
-          shield: statusShield(target.statuses),
-          hp: target.hp,
-        };
+        const input = attackInputFor(
+          target,
+          chosen ?? null,
+          {
+            atk,
+            critMult: modifiers.critDamageMult,
+            eliteBonus: modifiers.eliteDamageBonus,
+            knownWeaknesses,
+            mastery,
+          },
+          roll,
+        );
         hitEnemy(target, input, chosen);
         continue;
       }

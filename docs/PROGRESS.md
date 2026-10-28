@@ -4,7 +4,7 @@ Read this first. Updated at every gate. Status labels: **verified** (a command/t
 and passed), **partially verified** (some checks run), **not run** (no evidence), **not possible
 here** (needs a real device / deployment).
 
-Last updated: 2026-10-27
+Last updated: 2026-10-28
 
 ## Environment reality check (Gate 0)
 
@@ -1423,3 +1423,71 @@ makes the engine and the wallet agree. No UI turn panel (7b-5) and no deletions 
   turn loop. `StepContext` still carries `oil`, `oilCapacity` and `policy` — dead for stepping now,
   removed with Autopilot in 7b-6. The interim pacing bands above are the largest known gap to the
   redesign and belong to 7f.
+
+### Gate 7b-5 — Every option prints the sum that will be dealt (2026-10-28)
+
+The turn loop from 7b-2/7b-3 had no face. This gate gives it the four-action panel of §4 A.3, wires
+the order through the controller, and reopens the same menu after a reload.
+
+- **The menu is built from the pause, not from the room as it opened.** `turnMenu`
+  (`src/core/delve/turn.ts:204`) reads the pause's live roster, HP, shield and energy. A dead enemy
+  is already off the target list, and a marked, burning or studied enemy is priced for what it is
+  now, not for how the room started.
+- **The price is the hit's own arithmetic.** Every target option is priced by `priceTarget`
+  (`:119`) through `attackInputFor` (`src/core/delve/combat.ts:465`) — the same function the engine
+  resolves with — on a neutral roll, plus `attackRange` for the seeded spread. Guard is priced by
+  asking the engine's own halving: `incomingBreakdown({ ...hit.input, guard: true })`
+  (`src/core/delve/turn.ts:174`). §4 A.3 calls this the single most important line, and it is one
+  computation rather than two descriptions of it.
+- **The tests prove the identity, not the appearance.** `tests/delve-turn-menu.test.ts` scans seeds
+  until the engine rolls a neutral variance, then deep-equals the menu's breakdown with the engine's
+  logged `HitRecord`: for a basic attack, for the Warden's Bastion skill (and proves skill and basic
+  prices differ), and for a braced enemy blow (`input.guard === true`, the Guard term present,
+  `line.braced === hit.sum.dealt`). Readiness refusals, the living-roster mapping after a kill, live
+  HP pricing and a JSON round-trip through a reload are in the same file.
+- **The panel** (`src/ui/screens/Delve.tsx:1123`): Skill, Attack, Guard and Item, each option
+  printing the likely number, the seeded min–max, the target's HP after the blow, and the itemized
+  sum underneath both. The panel root carries `data-round` and each group `data-kind`, so the browser
+  test reads the same surface a player does. Item is listed and disabled with its reason, because the
+  Item action has no mid-round rules yet.
+- **HP during a room is the pause's.** The Gauge and the stat grid read `turn.hp` rather than
+  `run.unit` (`src/ui/screens/Delve.tsx:116`); the run's HP only moves when the room finishes, and
+  the pre-room readout hides while an order is owed.
+- **The order travels the path the data tests already prove.** `play(order)`
+  (`src/ui/app/delve.tsx:337`) is `step` plus an order. A refused order still carries the room, so
+  the menu stays up instead of vanishing (`:152`). On boot, `refresh` finds `pendingTurn` and
+  rebuilds the menu through the same write-free step path 7b-3 proved (`:215`), so a reload reopens
+  the room and its round rather than dropping the fight.
+- **The e2e plays rooms by hand.** `turnRound`, `resolveTurn` and `advance` (`e2e/delve.spec.ts:42`,
+  `:53`, `:76`) answer each round with the basic attack and wait on the step counter — not the log,
+  which folds to eight lines. A new test reloads mid-fight, finds the same round waiting and plays
+  the room out (`:286`); the price test now asserts every printed option carries an itemized sum
+  before the player commits (`:260`).
+- **The first browser run found a race in the helper, not in the app.** `locator.getAttribute` waits
+  for its element to attach, so on the round that ends the room the read was still pending when React
+  unmounted the panel, and `expect.poll` timed out with the room already won. `turnRound` reads the
+  round in one `page.evaluate` and treats a missing panel as the room being over.
+- **A second, older race surfaced in the layout sweep.** The integer-scaling test waits for bitmap
+  copy before it measures, but the loading gate draws copy of its own, so "canvases exist and are
+  sized" could belong to the gate rather than the route: on a loaded machine the sweep once measured
+  `/art` a frame after the mount and read six canvases at the browser's default 300×150.
+  `waitForScreen` (`e2e/layout.spec.ts:51`) now waits for the screen's own heading — the gate has
+  none — and re-checks the canvas set after a paint, so a set from the gate cannot be measured. A
+  first version of the wait also demanded a visible `main canvas`, which the header's hidden
+  wordmark can never satisfy at phone widths; the poll already proves the canvas set, so that line
+  is gone.
+- **The later measurement exposed a real overflow the old, eager wait had skipped past.** The
+  320px battle scene sat in a 292px stage at 360px and was clipped on both sides. `.delve-stage`
+  (`src/ui/styles/global.css:2716`) now pans like `.stage-frame`: auto margins centre a scene that
+  fits, and scrolling still reaches every pixel when it does not.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 807/807 across 73 files**
+  (9 new in `tests/delve-turn-menu.test.ts`); `npm run sim:golden` still prints the five 7b-1 pins
+  (`103db8fe052548c8`, `bc14e7152d65da7f`, `8250a6f2fd0458da`, `ee51ae8cd4496032`,
+  `2909fc47d48f231a`); `npx playwright test` **verified 64/64** in Chromium against the production
+  build, with `e2e/offline.spec.ts` at its committed state (the parked offline-strip diagnosis is
+  not part of this gate).
+- **Not verified / still open:** the browser answers every round with the basic attack, so skills
+  and Guard are proven by the unit tests and the price identity rather than by a hand that clicks
+  them. The panel has no "Break off" (§4 A.4) and no Item rules; item buttons say so instead of
+  pretending. The engine keeps its hard 40-round cap, which still counts as a safe retreat.

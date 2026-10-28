@@ -11,11 +11,15 @@ import {
   hollowUnlocked,
   HOLLOW_FLOORS,
   RUN_COST,
+  turnMenu,
   anyBoonById,
   relicById,
   type BuildId,
   type HollowId,
   type RunState,
+  type TurnAction,
+  type TurnMenu,
+  type TurnOrder,
 } from '../../core/delve';
 import type { DelveRunResult } from '../../data/delve';
 import { AppHeader } from '../components/AppHeader';
@@ -30,7 +34,6 @@ import {
   HOLLOWS,
   currentRoomKind,
   hollowName,
-  hpPercent,
   resultLabel,
   roomKindChip,
   roomKindLabel,
@@ -109,6 +112,12 @@ export function Delve() {
   const threats = run ? roomThreats(run, meta, snapshot.signals) : [];
   const swings = run ? roomSwings(run, meta, snapshot.signals) : [];
   const recap = run ? recapOf(run.log) : { rows: [], omitted: 0 };
+  /** The waiting room's live menu; the run's own HP only moves when the room finishes. */
+  const turn =
+    run?.pendingTurn && delve.turn ? turnMenu(run, meta, snapshot.signals, delve.turn) : null;
+  const shownHp = turn ? turn.hp : (run?.unit.hp ?? 0);
+  const shownMaxHp = turn ? turn.maxHp : (run?.unit.maxHp ?? 0);
+  const shownPct = shownMaxHp > 0 ? Math.round((shownHp * 100) / shownMaxHp) : 0;
 
   /** The engine already decided what happened in this action; the sounds only say it out loud. */
   const voice = (result: DelveRunResult | null) => {
@@ -146,6 +155,10 @@ export function Delve() {
 
   const stepRun = async () => {
     voice(await delve.step());
+  };
+
+  const playTurn = async (order: TurnOrder) => {
+    voice(await delve.play(order));
   };
 
   const chooseOption = async (optionId: string) => {
@@ -421,17 +434,13 @@ export function Delve() {
               </ul>
             )}
             <Gauge
-              value={hpPercent(run) / 100}
-              label={`Companion HP, ${run.unit.hp} of ${run.unit.maxHp}`}
-              tone={hpPercent(run) <= 30 ? 'rose' : hpPercent(run) <= 60 ? 'amber' : 'moss'}
+              value={shownPct / 100}
+              label={`Companion HP, ${shownHp} of ${shownMaxHp}`}
+              tone={shownPct <= 30 ? 'rose' : shownPct <= 60 ? 'amber' : 'moss'}
             />
             <div className="stat-grid">
               <span>
-                <PixelText
-                  text={`${run.unit.hp}/${run.unit.maxHp} HP`}
-                  color={C.paper1}
-                  pixelScale={2}
-                />
+                <PixelText text={`${shownHp}/${shownMaxHp} HP`} color={C.paper1} pixelScale={2} />
               </span>
               <span>
                 <PixelText text={`${run.glint} Glint`} color={C.cyan2} pixelScale={2} />
@@ -504,7 +513,7 @@ export function Delve() {
               />
             </p>
 
-            {threats.length > 0 && (
+            {!turn && threats.length > 0 && (
               <div className="delve-readout">
                 <h3 className="delve-subtitle" id="threat-title">
                   <PixelText
@@ -631,18 +640,35 @@ export function Delve() {
               </div>
             )}
 
+            {turn && (
+              <TurnPanel menu={turn} busy={delve.busy} onOrder={(order) => void playTurn(order)} />
+            )}
+
             <div className="screen-actions">
-              <PixelButton
-                className="wide"
-                disabled={delve.busy || run.pendingChoice !== null || run.result !== 'active'}
-                onClick={() => void stepRun()}
-              >
-                <PixelText
-                  text={run.pendingChoice ? 'Answer the choice first' : 'Open the next room'}
-                  color={C.ink900}
-                  pixelScale={2}
-                />
-              </PixelButton>
+              {!turn && (
+                <PixelButton
+                  className="wide"
+                  disabled={
+                    delve.busy ||
+                    run.pendingChoice !== null ||
+                    run.pendingTurn ||
+                    run.result !== 'active'
+                  }
+                  onClick={() => void stepRun()}
+                >
+                  <PixelText
+                    text={
+                      run.pendingTurn
+                        ? 'Rebuilding the room…'
+                        : run.pendingChoice
+                          ? 'Answer the choice first'
+                          : 'Open the next room'
+                    }
+                    color={C.ink900}
+                    pixelScale={2}
+                  />
+                </PixelButton>
+              )}
               {!confirmRetreat ? (
                 <PixelButton
                   variant="secondary"
@@ -1086,6 +1112,215 @@ export function Delve() {
         </div>
       </PixelPanel>
     </main>
+  );
+}
+
+/**
+ * The four-action turn panel (DELVE_REDESIGN §4 A.3). Every option renders the arithmetic the engine
+ * resolved from: the bar shows the likely number and its seeded spread, and the sum underneath is
+ * `damageSumText` of the same breakdown the hit will carry, never a re-description of it.
+ */
+function TurnPanel({
+  menu,
+  busy,
+  onOrder,
+}: {
+  menu: TurnMenu;
+  busy: boolean;
+  onOrder(order: TurnOrder): void;
+}) {
+  return (
+    <div className="turn-panel" role="group" aria-labelledby="turn-title" data-round={menu.round}>
+      <h3 id="turn-title" className="delve-subtitle">
+        <PixelText text={`Your turn · Round ${menu.round}`} color={C.amber2} pixelScale={2} />
+      </h3>
+      <div className="stat-grid">
+        <span>
+          <PixelText text={`${menu.energy} energy`} color={C.cyan2} pixelScale={2} />
+        </span>
+        <span>
+          <PixelText text={`${menu.hp}/${menu.maxHp} HP`} color={C.paper1} pixelScale={2} />
+        </span>
+        <span>
+          <PixelText text={`${menu.shield} Shield`} color={C.cyan2} pixelScale={2} />
+        </span>
+      </div>
+      <ul className="threat-list" aria-label="Enemies and what they intend">
+        {menu.targets.map((target, position) => {
+          const intent = menu.intents[position]!;
+          return (
+            <li key={target.index} className="threat-line">
+              <PixelText
+                text={`${target.name} · ${target.hp}/${target.maxHp} HP · DEF ${target.def}`}
+                color={C.paper1}
+                pixelScale={2}
+                wrap={34}
+              />
+              <PixelText
+                text={intent.span.length > 0 ? `${intent.label} for ${intent.span}` : intent.label}
+                color={C.rose1}
+                pixelScale={2}
+                wrap={34}
+              />
+              {intent.sum.length > 0 && (
+                <PixelText text={intent.sum} color={C.paper3} pixelScale={2} wrap={38} />
+              )}
+              {intent.traits.map((trait) => (
+                <PixelText key={trait} text={trait} color={C.ember1} pixelScale={2} wrap={34} />
+              ))}
+            </li>
+          );
+        })}
+      </ul>
+
+      <h4 className="turn-heading">
+        <PixelText text="Skill" color={C.amber2} pixelScale={2} />
+      </h4>
+      {menu.skills.map((action) => (
+        <div className="turn-action" key={action.id} data-kind="skill" data-id={action.id}>
+          <PixelText
+            text={`${action.name} · ${action.cost}${action.ready ? '' : ` · ${action.reason}`}`}
+            color={action.ready ? C.amber1 : C.paper3}
+            pixelScale={2}
+            wrap={38}
+          />
+          <TargetOptions action={action} busy={busy} onOrder={onOrder} />
+        </div>
+      ))}
+
+      <h4 className="turn-heading">
+        <PixelText text="Attack" color={C.amber2} pixelScale={2} />
+      </h4>
+      <div className="turn-action" data-kind="attack">
+        <PixelText
+          text={`${menu.attack.name} · ${menu.attack.cost}`}
+          color={C.amber1}
+          pixelScale={2}
+        />
+        <TargetOptions action={menu.attack} busy={busy} onOrder={onOrder} />
+      </div>
+
+      <h4 className="turn-heading">
+        <PixelText text="Guard" color={C.amber2} pixelScale={2} />
+      </h4>
+      <div className="turn-action" data-kind="guard">
+        <PixelText
+          text={`Brace this round: ${menu.guard.unbraced} → ${menu.guard.braced} incoming`}
+          color={C.amber1}
+          pixelScale={2}
+          wrap={38}
+        />
+        {menu.guard.lines.map((line, index) => (
+          <div className="turn-guard-line" key={`${line.name}-${index}`}>
+            <PixelText
+              text={`${line.name} · ${line.detail} · ${line.unbraced} → ${line.braced} braced`}
+              color={C.paper1}
+              pixelScale={2}
+              wrap={38}
+            />
+            {line.sums.map((sum, hit) => (
+              <PixelText
+                key={`${line.name}-${hit}`}
+                text={sum}
+                color={C.paper3}
+                pixelScale={2}
+                wrap={38}
+              />
+            ))}
+          </div>
+        ))}
+        <PixelButton
+          className="wide"
+          disabled={busy}
+          aria-label={`Brace: ${menu.guard.unbraced} damage becomes ${menu.guard.braced}`}
+          onClick={() => onOrder({ skillId: null, targetIndex: 0, guard: true })}
+        >
+          <PixelText text="Brace" color={C.ink900} pixelScale={2} />
+        </PixelButton>
+      </div>
+
+      <h4 className="turn-heading">
+        <PixelText text="Item" color={C.amber2} pixelScale={2} />
+      </h4>
+      <div className="turn-action" data-kind="item">
+        {menu.items.length === 0 ? (
+          <PixelText
+            text="No items equipped. Craft them in the Workshop."
+            color={C.paper3}
+            pixelScale={2}
+            wrap={38}
+          />
+        ) : (
+          menu.items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="turn-target"
+              disabled
+              aria-label={`${item.name}: ${item.reason}`}
+            >
+              <PixelText
+                text={`${item.name} — ${item.reason}`}
+                color={C.paper3}
+                pixelScale={2}
+                wrap={38}
+              />
+            </button>
+          ))
+        )}
+      </div>
+
+      <p className="panel-note">
+        <PixelText
+          text="Each sum is computed by the function that resolves the hit. The bar is the likely number with the seeded spread around it."
+          color={C.paper3}
+          pixelScale={2}
+          wrap={38}
+        />
+      </p>
+    </div>
+  );
+}
+
+function TargetOptions({
+  action,
+  busy,
+  onOrder,
+}: {
+  action: TurnAction;
+  busy: boolean;
+  onOrder(order: TurnOrder): void;
+}) {
+  return (
+    <div className="turn-targets">
+      {action.targets.map((target) => (
+        <button
+          key={target.targetIndex}
+          type="button"
+          className="turn-target"
+          aria-label={`${action.name} ${target.name}: likely ${target.likely}, ${target.sumText}`}
+          disabled={busy || !action.ready}
+          onClick={() =>
+            onOrder({
+              skillId: action.kind === 'skill' ? action.id : null,
+              targetIndex: target.targetIndex,
+              guard: false,
+            })
+          }
+        >
+          <PixelText
+            text={`${target.name} · ${target.likely} (${target.min}–${target.max}) · ${target.afterHp} HP after`}
+            color={C.paper1}
+            pixelScale={2}
+            wrap={34}
+          />
+          <PixelText text={target.sumText} color={C.paper3} pixelScale={2} wrap={40} />
+          {target.notes.length > 0 && (
+            <PixelText text={target.notes.join(' · ')} color={C.paper2} pixelScale={2} wrap={34} />
+          )}
+        </button>
+      ))}
+    </div>
   );
 }
 

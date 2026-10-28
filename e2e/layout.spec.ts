@@ -43,34 +43,51 @@ const PALETTE = new Set(MASTER_PALETTE.slice(1).map((hex) => hex.toLowerCase()))
  * Waits until the screen has substituted its loading gate for real bitmap copy. Live queries can
  * finish after the heading, so also waits for the canvas count to settle and every art canvas to
  * run its sizing effect; measuring earlier reads the browser's default 300x150 canvas.
+ *
+ * The loading gate draws bitmap copy of its own, so a settled set of sized canvases can belong to
+ * the gate rather than to the route. The check is repeated after a paint: a canvas that mounted in
+ * the meantime is sized by an effect, and only a set that is still whole on the next screen passes.
  */
 async function waitForScreen(page: Page) {
-  await page.locator('main canvas').first().waitFor({ state: 'visible' });
-  let previousCount = -1;
-  await expect
-    .poll(
-      async () => {
-        const state = await page.evaluate(() => {
-          const canvases = Array.from(document.querySelectorAll('canvas[data-art-width]'));
-          return {
-            count: canvases.length,
-            unset: canvases.filter((canvas) => (canvas as HTMLCanvasElement).style.width === '')
-              .length,
-          };
-        });
-        const steady = state.count === previousCount;
-        previousCount = state.count;
-        return state.count > 0 && state.unset === 0 && steady;
-      },
-      { timeout: 5_000, intervals: [50, 50, 50, 100, 100] },
-    )
-    .toBe(true);
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      }),
-  );
+  // The loading gate has no heading; every real screen has one, so this is the line between them.
+  await page.locator('main h1').first().waitFor({ state: 'attached' });
+  const whole = () =>
+    page.evaluate(() => {
+      const canvases = Array.from(document.querySelectorAll('canvas[data-art-width]'));
+      return (
+        canvases.length > 0 &&
+        canvases.every((canvas) => (canvas as HTMLCanvasElement).style.width !== '')
+      );
+    });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let previousCount = -1;
+    await expect
+      .poll(
+        async () => {
+          const state = await page.evaluate(() => {
+            const canvases = Array.from(document.querySelectorAll('canvas[data-art-width]'));
+            return {
+              count: canvases.length,
+              unset: canvases.filter((canvas) => (canvas as HTMLCanvasElement).style.width === '')
+                .length,
+            };
+          });
+          const steady = state.count === previousCount;
+          previousCount = state.count;
+          return state.count > 0 && state.unset === 0 && steady;
+        },
+        { timeout: 5_000, intervals: [50, 50, 50, 100, 100] },
+      )
+      .toBe(true);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    if (await whole()) return;
+  }
+  throw new Error('the screen kept remounting its canvases; nothing stable to measure');
 }
 
 /** Bitmap-only copy and master-palette pixels, same contract as the original style lock. */

@@ -29,6 +29,81 @@ async function answerIfWaiting(page: Page): Promise<void> {
   if (await choice.isVisible().catch(() => false)) await choice.click();
 }
 
+async function stepsTaken(page: Page): Promise<number> {
+  const text = await visibleText(page, '.stat-grid');
+  return Number(text.match(/(\d+) steps/)?.[1] ?? Number.NaN);
+}
+
+/**
+ * The open room's round, or 0 when no room waits. One DOM read rather than a locator call: a
+ * locator waits for its element to attach, and the panel unmounting as the room ends would leave
+ * the read pending for the rest of the test.
+ */
+async function turnRound(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const panel = document.querySelector('.turn-panel');
+    return panel ? Number(panel.getAttribute('data-round')) || 0 : 0;
+  });
+}
+
+/**
+ * Answer the open room round by round with the basic attack until it finishes. A menu that stops
+ * advancing without closing is a failure, not a slow room.
+ */
+async function resolveTurn(page: Page): Promise<void> {
+  for (let round = 0; round < 40; round += 1) {
+    const shown = await turnRound(page);
+    if (shown === 0) return;
+    const attack = page.locator('[data-kind="attack"] .turn-target:not([disabled])').first();
+    await attack.click();
+    await expect
+      .poll(async () => {
+        const now = await turnRound(page);
+        return now === 0 || now > shown ? 'moved' : 'held';
+      }, `round ${shown} to resolve`)
+      .not.toBe('held');
+  }
+  await expect(page.locator('.turn-panel'), 'the room finished inside its round cap').toHaveCount(
+    0,
+  );
+}
+
+/**
+ * Open one room, wait for its write to land, and clear whatever it put on screen: a choice, a room
+ * waiting for orders, or nothing. The step counter only moves on a committed step, so it is the
+ * signal that the button's work is done rather than the button's fleeting disabled state.
+ */
+async function advance(page: Page): Promise<void> {
+  const step = page.getByRole('button', { name: /Open the next room|Answer the choice first/ });
+  await expect(step).toBeEnabled();
+  const before = await stepsTaken(page);
+  await step.click();
+  await expect
+    .poll(async () => {
+      if (
+        await page
+          .locator('.turn-panel')
+          .isVisible()
+          .catch(() => false)
+      )
+        return 'turn';
+      if (
+        await page
+          .locator('.pending-choice .delve-choice')
+          .first()
+          .isVisible()
+          .catch(() => false)
+      ) {
+        return 'choice';
+      }
+      const now = await stepsTaken(page);
+      return Number.isFinite(now) && now > before ? 'moved' : 'waiting';
+    }, 'the step to land')
+    .not.toBe('waiting');
+  await answerIfWaiting(page);
+  await resolveTurn(page);
+}
+
 async function oil(page: Page): Promise<number> {
   let drops = Number.NaN;
   await expect
@@ -102,13 +177,7 @@ test('a run descends on one payment, and retreat banks the Embers', async ({ pag
   expect(await oil(page)).toBe(before - 20);
 
   for (let room = 0; room < 3; room += 1) {
-    const step = page.getByRole('button', {
-      name: /Open the next room|Answer the choice first/,
-    });
-    await expect(step).toBeEnabled();
-    await step.click();
-    await expect(page.locator('.log-line').first()).toBeVisible();
-    await answerIfWaiting(page);
+    await advance(page);
   }
 
   expect(await oil(page)).toBe(before - 20);
@@ -134,21 +203,21 @@ test('a run descends on one payment, and retreat banks the Embers', async ({ pag
 });
 
 /**
- * Steps until the run is standing in front of a fight. The strip only has a threat to price once there
- * is a room with enemies in it, and which room comes first is the floor plan's business, not the test's.
+ * Walk until the room *ahead* is a fight, where the readout prices it before the player commits.
+ * Which room comes first is the floor plan's business, not the test's; each room behind us is
+ * played out by hand before the next one is priced.
  */
 async function walkToFight(page: Page): Promise<void> {
-  const step = page.getByRole('button', {
-    name: /Open the next room|Answer the choice first/,
-  });
-  for (
-    let room = 0;
-    room < 6 && !(await page.locator('.delve-readout').first().isVisible());
-    room++
-  ) {
-    await expect(step).toBeEnabled();
-    await step.click();
-    await answerIfWaiting(page);
+  for (let room = 0; room < 6; room += 1) {
+    if (
+      await page
+        .locator('.delve-readout')
+        .first()
+        .isVisible()
+        .catch(() => false)
+    )
+      return;
+    await advance(page);
   }
   await expect(
     page.locator('.delve-readout').first(),
@@ -185,9 +254,17 @@ test('the room prices itself before the player commits to it', async ({ page }) 
   expect(buttonBox?.y).toBeTruthy();
   expect(stripBox!.y).toBeLessThan(buttonBox!.y);
 
-  // What the step then dealt is recapped under the canvas, with the arithmetic the log already carries.
+  // Committing opens the room for hand play, and every option is priced by the resolving arithmetic.
   await page.getByRole('button', { name: /Open the next room/ }).click();
-  await answerIfWaiting(page);
+  await expect(page.locator('.turn-panel')).toBeVisible();
+  const options = await allText(page, '.turn-panel [data-kind="attack"] .turn-target');
+  expect(options.length).toBeGreaterThan(0);
+  for (const line of options) {
+    expect(line, `an attack option with no itemized sum: ${line}`).toMatch(/−\d+ DEF .*= \d+/);
+  }
+
+  // Finishing the room merges its fight into the run, so the recap is the log's own arithmetic.
+  await resolveTurn(page);
   await expect(page.locator('.delve-recap').first()).toBeVisible();
   // The log panel folds to its last eight lines; open it so the recap can be checked against all of them.
   const showAll = page.getByRole('button', { name: /^All \d+$/ });
@@ -203,6 +280,40 @@ test('the room prices itself before the player commits to it', async ({ page }) 
   const body = await visibleText(page, 'main');
   expect(body).not.toContain('undefined');
   expect(body).not.toContain('NaN');
+  expect(errors).toEqual([]);
+});
+
+test('a reload reopens the room the run is waiting in, at the same round', async ({ page }) => {
+  const errors = watchErrors(page);
+  await pinClockAndIds(page);
+  await completeOnboarding(page, { income: '25000' });
+
+  await page.getByRole('link', { name: 'Open the Delve' }).click();
+  await page.getByRole('button', { name: /^Descend into Rootfall Warren/ }).click();
+  await expect(page.getByRole('heading', { name: /Rootfall Warren · F1/ })).toBeVisible();
+  await walkToFight(page);
+
+  // Two orders in, so the rebuilt menu has to replay the trail rather than start at round one.
+  await page.getByRole('button', { name: /Open the next room/ }).click();
+  await expect(page.locator('.turn-panel')).toBeVisible();
+  for (let round = 0; round < 2; round += 1) {
+    const shown = await turnRound(page);
+    await page.locator('[data-kind="attack"] .turn-target:not([disabled])').first().click();
+    await expect.poll(() => turnRound(page), `round ${shown} to resolve`).not.toBe(shown);
+  }
+  const round = await turnRound(page);
+  expect(round).toBeGreaterThan(1);
+
+  // The pause is not stored: the menu is rebuilt from the seed and the orders, without a write.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: /Rootfall Warren · F1/ })).toBeVisible();
+  await expect(page.locator('.turn-panel')).toBeVisible();
+  expect(await turnRound(page)).toBe(round);
+
+  // And the reopened room is still playable to its end.
+  await resolveTurn(page);
+  await expect(page.locator('.turn-panel')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open the next room' })).toBeEnabled();
   expect(errors).toEqual([]);
 });
 
@@ -370,12 +481,7 @@ test('the battle scene arrives as its own chunk and paints the room', async ({ p
   expect(first.lit, 'the stage is not an empty rectangle').toBeGreaterThan(0.5);
 
   for (let room = 0; room < 2; room += 1) {
-    const step = page.getByRole('button', {
-      name: /Open the next room|Answer the choice first/,
-    });
-    await step.click();
-    await expect(page.locator('.log-line').first()).toBeVisible();
-    await answerIfWaiting(page);
+    await advance(page);
     await expect
       .poll(async () => (await scenePaint(stage)).lit, 'the stage keeps painting after a step')
       .toBeGreaterThan(0.5);
