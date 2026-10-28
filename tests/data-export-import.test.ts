@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { applySteps, emptyMeta, newRun, spendOil, type RunState } from '../src/core/delve';
+import { applySteps, emptyMeta, newRun, type RunState } from '../src/core/delve';
 import type { Clock, Envelope } from '../src/core/types';
 import { DB_TABLES, SCHEMA_VERSION, type PocketDb } from '../src/data/db';
 import { commitBatch } from '../src/data/delveStore';
@@ -67,7 +67,7 @@ async function seed(db: PocketDb, options: { txnId?: string; amount?: number } =
   await commitBatch(db, {
     run: stepped.run,
     meta: stepped.meta,
-    oil: spendOil(100, stepped.oilSpent),
+    oil: 100,
     ledger: stepped.ledger,
     today: '2026-10-04',
     now: NOW,

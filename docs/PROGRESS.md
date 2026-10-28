@@ -1373,3 +1373,53 @@ no oil change (7b-4), no deletions (7b-6).
   fix is to freeze the room's modifiers at entry. Item orders stay refused until the Item action has
   rules, and the order trail is not displayed anywhere yet. New files: `tests/delve-room.test.ts`,
   `tests/data-delve-turn.test.ts`.
+
+### Gate 7b-4 — Oil buys the run, not the rooms (2026-10-28)
+
+§6 moved the price: a descent is bought when it starts, and every room inside it is free. This gate
+makes the engine and the wallet agree. No UI turn panel (7b-5) and no deletions (7b-6) yet.
+
+- **The price is the Hollow's, paid once.** `RUN_COST` (`src/core/delve/map.ts:19`) is 20 / 24 / 28
+  for Hollows 1–3. `startDelve` (`src/data/delve.ts:431`) refuses a short lamp before any write
+  (`:514`); otherwise the cost is charged inside the same `createRun` batch that stores the run, so
+  a failed write can never leave the oil spent without the descent. The wallet returned to the
+  screen is the reduced one. The Daily Challenge stays free.
+- **Rooms cost nothing.** `stepRun` no longer checks or spends oil, and the dry-lamp guard that
+  used to end a run mid-descent is gone: a run that starts with 0 oil after the charge keeps
+  stepping (`tests/data-delve-controller.test.ts`). `oilSpent` is deleted from `StepOutcome`,
+  `CatchUpResult` and `DelveRunResult`, and `spendOil` is deleted from the engine — nothing in
+  production called it any more.
+- **Catch-up is time-bound now.** `catchUpStepCount(lastStepAt, now)`
+  (`src/core/delve/catchup.ts:21`) is pure elapsed steps; the worker and the away sheet no longer
+  report oil. The reason is recorded at `src/core/delve/engine.ts:647`.
+- **The screen says what a run costs, before it is bought.** The dry-lamp disabled state is gone.
+  The hollow blurb appends the price (`src/ui/screens/Delve.tsx:851`), the start note spells out the
+  charge and that rooms are free (`:818`), and a short lamp gets its own refusal copy (`:972`). The
+  step button now waits only on a pending choice or a finished run.
+- **The Breaker had to be reframed, and this is the important finding.** The old invariant — no
+  build clears Hollow 3 at Heat 5 in one run — was not held by build balance; it was held by the oil
+  the old room prices withheld. With rooms free, all nine build/route combinations clear in 112
+  steps, which is the correct outcome for a fully kitted level-20 account. The sweep now asks two
+  sharper questions (`scripts/sim-delve.ts`, SPEC 6.11 N restated by §6): the **max sweep** (level
+  ceiling, every build clears — no dead build) and the **rush probe** (empty account at level 5, the
+  Hollow 3 gate — no build clears; measured deepest floor 5–8 of 10). DELVE_REDESIGN §11's
+  rounds-per-floor objective supersedes the rush probe once the four-skill sets arrive in 7c.
+- **The personas pay at the start.** Each persona runs only when the lamp covers `RUN_COST[hollow]`
+  and deducts it at the start. Measured over 60 days: Trickle 1.00 runs/day, first Hollow 1 clear on
+  day 27; Optimizer 5.12 runs/day and 3.24× Trickle's Embers per day. Both sit outside §6's
+  destination bands (2–3 weeks, ≤2.5×) because that economy assumes the 7c skill collection, so the
+  pacing test carries named interim bounds (`TRICKLE_H1` 18–32 days, `OPTIMIZER_EMBER_RATIO` 3.5,
+  `tests/delve-economy.test.ts:172`) for 7f to re-tune against the finished economy.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 798/798 across 72 files**
+  (one new start-price test, plus rewritten start/step/catch-up tests); `npm run sim:golden` still
+  prints the five 7b-1 pins (`103db8fe052548c8`, `bc14e7152d65da7f`, `8250a6f2fd0458da`,
+  `ee51ae8cd4496032`, `2909fc47d48f231a`) because the auto-played path still pays nothing per room;
+  `npx playwright test` **verified 65/65** in Chromium against the production build. The `delve-run`
+  visual golden moved by 1113 pixels (0.01%): the diff was inspected, only the wallet line changed
+  (20 → 0 oil after the start charge), and the snapshot was regenerated.
+- **Not verified / still open:** no browser test can play the new economy by hand until 7b-5, so the
+  start price is proven at the data layer and through the e2e wallet assertions, not through the
+  turn loop. `StepContext` still carries `oil`, `oilCapacity` and `policy` — dead for stepping now,
+  removed with Autopilot in 7b-6. The interim pacing bands above are the largest known gap to the
+  redesign and belong to 7f.

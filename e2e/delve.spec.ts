@@ -78,9 +78,7 @@ async function logTinyEntry(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { level: 1, name: 'Today', exact: true })).toBeVisible();
 }
 
-test('a run descends, each room burns a drop of oil, and retreat banks the Embers', async ({
-  page,
-}) => {
+test('a run descends on one payment, and retreat banks the Embers', async ({ page }) => {
   const errors = watchErrors(page);
   // A run's floor plan is hashed from freshly minted ids, so without pinning the rooms are a lottery:
   // one seed ends the run early on a 40-round draw and the step loop is suddenly clicking nothing.
@@ -100,10 +98,12 @@ test('a run descends, each room burns a drop of oil, and retreat banks the Ember
   await page.getByRole('button', { name: /^Descend into Rootfall Warren/ }).click();
   await expect(page.getByRole('heading', { name: 'Kit' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Rootfall Warren · F1/ })).toBeVisible();
+  // The start pays for the whole descent; rooms cost nothing.
+  expect(await oil(page)).toBe(before - 20);
 
   for (let room = 0; room < 3; room += 1) {
     const step = page.getByRole('button', {
-      name: /Open the next room|Answer the choice first|The lantern is dry/,
+      name: /Open the next room|Answer the choice first/,
     });
     await expect(step).toBeEnabled();
     await step.click();
@@ -111,7 +111,7 @@ test('a run descends, each room burns a drop of oil, and retreat banks the Ember
     await answerIfWaiting(page);
   }
 
-  expect(await oil(page)).toBeLessThan(before);
+  expect(await oil(page)).toBe(before - 20);
   await expect
     .poll(() => visibleText(page, '.stat-grid'), 'the step counter to move')
     .toContain('steps');
@@ -139,7 +139,7 @@ test('a run descends, each room burns a drop of oil, and retreat banks the Ember
  */
 async function walkToFight(page: Page): Promise<void> {
   const step = page.getByRole('button', {
-    name: /Open the next room|Answer the choice first|The lantern is dry/,
+    name: /Open the next room|Answer the choice first/,
   });
   for (
     let room = 0;
@@ -178,7 +178,7 @@ test('the room prices itself before the player commits to it', async ({ page }) 
   // The numbers arrive with the decision, not after it: the strip sits above the commit button.
   const stripBox = await strip.boundingBox();
   const buttonBox = await page
-    .getByRole('button', { name: /Open the next room|The lantern is dry|Answer the choice first/ })
+    .getByRole('button', { name: /Open the next room|Answer the choice first/ })
     .first()
     .boundingBox();
   expect(stripBox?.y).toBeTruthy();
@@ -371,7 +371,7 @@ test('the battle scene arrives as its own chunk and paints the room', async ({ p
 
   for (let room = 0; room < 2; room += 1) {
     const step = page.getByRole('button', {
-      name: /Open the next room|Answer the choice first|The lantern is dry/,
+      name: /Open the next room|Answer the choice first/,
     });
     await step.click();
     await expect(page.locator('.log-line').first()).toBeVisible();

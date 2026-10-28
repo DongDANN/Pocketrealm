@@ -14,7 +14,6 @@ import {
   newRun,
   oilCapacity,
   resolveChoice,
-  spendOil,
   stepRun,
   type DelveMeta,
   type HollowId,
@@ -36,29 +35,26 @@ import {
 const STEP_MS = 30_000;
 const CAP_MS = 12 * 60 * 60 * 1000;
 
-function stepwise(seed: number, hollow: HollowId, level: number, oil: number) {
+function stepwise(seed: number, hollow: HollowId, level: number) {
   let meta = emptyMeta();
   let run = newRun(seed, hollow, level, meta);
-  let o = oil;
   const keys: string[] = [];
   let guard = 0;
   while (guard < 2000) {
     guard += 1;
-    const out = stepRun(run, mkCtx(meta, { oil: o }));
-    if (out.oilSpent === 0 && !out.ended) break;
+    const out = stepRun(run, mkCtx(meta));
     run = out.run;
     meta = out.meta;
-    o = spendOil(o, out.oilSpent);
     for (const e of out.ledger) keys.push(e.key);
     if (run.result !== 'active') break;
   }
   return { run, meta, keys };
 }
 
-function chunked(seed: number, hollow: HollowId, level: number, oil: number, chunk: number) {
+function chunked(seed: number, hollow: HollowId, level: number, chunk: number) {
   const meta0 = emptyMeta();
   const run0 = newRun(seed, hollow, level, meta0);
-  const it = catchUpChunks(run0, mkCtx(meta0, { oil }), 2000, chunk);
+  const it = catchUpChunks(run0, mkCtx(meta0), 2000, chunk);
   let cur = it.next();
   let last = cur.value;
   while (!cur.done) {
@@ -109,24 +105,15 @@ describe('determinism and step equivalence', () => {
   it('matches stepwise play, batch apply, and chunked catch-up across seeds', () => {
     const seeds = [0, 1, 2, 3, 4, 5, 7, 11, 99, 12345];
     const hollows: HollowId[] = [1, 2, 3];
-    const oils = [999, 24, 8];
     const chunks = [1, 2, 7, 32, 500];
     for (const seed of seeds) {
       for (const hollow of hollows) {
-        for (const oil of oils) {
-          const sw = stepwise(seed, hollow, 6, oil);
-          for (const chunk of chunks) {
-            const ch = chunked(seed, hollow, 6, oil, chunk);
-            expect(ch.run, `seed ${seed} hollow ${hollow} oil ${oil} chunk ${chunk}`).toEqual(
-              sw.run,
-            );
-            expect(ch.meta, `seed ${seed} hollow ${hollow} oil ${oil} chunk ${chunk}`).toEqual(
-              sw.meta,
-            );
-            expect(ch.keys, `seed ${seed} hollow ${hollow} oil ${oil} chunk ${chunk}`).toEqual(
-              sw.keys,
-            );
-          }
+        const sw = stepwise(seed, hollow, 6);
+        for (const chunk of chunks) {
+          const ch = chunked(seed, hollow, 6, chunk);
+          expect(ch.run, `seed ${seed} hollow ${hollow} chunk ${chunk}`).toEqual(sw.run);
+          expect(ch.meta, `seed ${seed} hollow ${hollow} chunk ${chunk}`).toEqual(sw.meta);
+          expect(ch.keys, `seed ${seed} hollow ${hollow} chunk ${chunk}`).toEqual(sw.keys);
         }
       }
     }
@@ -143,30 +130,19 @@ describe('determinism and step equivalence', () => {
     expect(result.applied).toBe(3);
     expect(seen).toEqual([0, 1, 2]);
     expect(result.run.result).toBe('active');
-    expect(result.oilSpent).toBe(3);
   });
 });
 
 describe('Lantern Oil', () => {
-  it('never steps without a full unit of oil and spends one per step', () => {
+  it('steps on an empty lamp once the run has started', () => {
     const meta = emptyMeta();
     const run = newRun(1, 1, 4, meta);
-    for (const oil of [0, 0.9]) {
+    for (const oil of [0, 0.9, 1.5]) {
       const out = stepRun(run, mkCtx(meta, { oil }));
-      expect(out.oilSpent).toBe(0);
-      expect(out.run).toEqual(run);
-      expect(out.meta).toEqual(meta);
+      expect(out.run.stepIndex).toBe(1);
+      expect(out.run.result).toBe('active');
+      expect(out.run.roomsVisited).toHaveLength(1);
     }
-    const out = stepRun(run, mkCtx(meta, { oil: 1.5 }));
-    expect(out.oilSpent).toBe(1);
-    expect(out.run.stepIndex).toBe(1);
-  });
-
-  it('spends oil safely (truncated, never negative)', () => {
-    expect(spendOil(3, 2)).toBe(1);
-    expect(spendOil(3, 0.4)).toBe(3);
-    expect(spendOil(1, 2)).toBe(0);
-    expect(spendOil(2.5, 2)).toBe(0.5);
   });
 
   it('computes capacity from the storage cap, Forge, and review buff', () => {
@@ -192,13 +168,12 @@ describe('clock defense and catch-up', () => {
     expect(elapsedSteps(last, last + CAP_MS + 5 * STEP_MS)).toBe(CAP_MS / STEP_MS);
   });
 
-  it('bounds catch-up by both elapsed steps and oil', () => {
+  it('bounds catch-up by elapsed time alone, since rooms are free', () => {
     const last = 1_000_000;
     const now = last + 100 * STEP_MS;
-    expect(catchUpStepCount(last, now, 5.9)).toBe(5);
-    expect(catchUpStepCount(last, now, 0)).toBe(0);
-    expect(catchUpStepCount(last, now, 500)).toBe(100);
-    expect(catchUpStepCount(last, now - 200 * STEP_MS, 500)).toBe(0);
+    expect(catchUpStepCount(last, now)).toBe(100);
+    expect(catchUpStepCount(last, last)).toBe(0);
+    expect(catchUpStepCount(last, now - 200 * STEP_MS)).toBe(0);
   });
 });
 
@@ -327,7 +302,6 @@ describe('camp mode choice flow', () => {
     const meta = emptyMeta();
     const ctx = mkCtx(meta, { policy: CAMP_POLICY });
     let out = stepRun(newRun(11, 1, 3, meta), ctx);
-    expect(out.oilSpent).toBe(1);
     const row1 = out.run.floorPlan.rows[1]!;
     expect(row1.length).toBeGreaterThan(1);
     // The first skirmish may raise a boon offer; resolve it before the row-1 fork.
@@ -347,17 +321,14 @@ describe('camp mode choice flow', () => {
     expect(resolved.run.pendingChoice).toBeNull();
     const walked = stepRun(resolved.run, ctx);
     expect(walked.run.roomsVisited.at(-1)).toBe(pickId);
-    expect(walked.oilSpent).toBe(1);
   });
 
   it('never steps while a choice is pending', () => {
     const meta = emptyMeta();
     const ctx = mkCtx(meta, { policy: CAMP_POLICY });
     const first = stepRun(singleRowRun('rest'), ctx);
-    expect(first.oilSpent).toBe(1);
     expect(first.run.pendingChoice?.kind).toBe('rest');
     const second = stepRun(first.run, ctx);
-    expect(second.oilSpent).toBe(0);
     expect(second.run).toEqual(first.run);
   });
 
@@ -365,7 +336,6 @@ describe('camp mode choice flow', () => {
     const meta = emptyMeta();
     const ctx = mkCtx(meta, { policy: CAMP_POLICY });
     const entered = stepRun(singleRowRun('shop'), ctx);
-    expect(entered.oilSpent).toBe(1);
     expect(entered.run.pendingChoice?.kind).toBe('shop');
     expect(entered.run.pendingChoice!.options).toHaveLength(5);
     const hurt = { ...entered.run, unit: { ...entered.run.unit, hp: 40 }, glint: 500 };

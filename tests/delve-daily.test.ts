@@ -93,7 +93,6 @@ describe('daily steps and rewards', () => {
     const start = newDailyRun('2026-10-25', metaWith({}));
     if ('error' in start) throw new Error('expected run');
     const out = stepRun(start.run, ctx(start.meta, 0));
-    expect(out.oilSpent).toBe(0);
     expect(out.run.result).toBe('active');
     expect(out.run.roomsVisited.length).toBe(1);
   });

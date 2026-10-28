@@ -130,15 +130,14 @@ describe('Boss Study', () => {
     for (let seed = 1; seed <= 200 && !studied; seed++) {
       let meta = emptyMeta();
       let run = newRun(seed, 1, 4, meta);
-      let oil = 999;
       let guard = 0;
       while (run.result === 'active' && guard < 1000) {
         guard += 1;
-        const out = stepRun(run, mkCtx(meta, { oil, policy }));
-        if (out.oilSpent === 0 && !out.ended) break;
+        const before = run.stepIndex;
+        const out = stepRun(run, mkCtx(meta, { policy }));
         run = out.run;
         meta = out.meta;
-        oil -= out.oilSpent;
+        if (run.stepIndex === before && !out.ended) break;
         if (
           run.result === 'fainted' &&
           run.roomsVisited.some((id) => id.startsWith('f6')) &&

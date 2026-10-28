@@ -10,7 +10,6 @@ import {
   applySteps,
   emptyMeta,
   newRun,
-  spendOil,
   stateHash,
   type DelveMeta,
   type RunState,
@@ -38,14 +37,13 @@ function walk(
 ): { batch: ReturnType<typeof batch>; index: number }[] {
   let r = run;
   let m = meta;
-  let o = oil;
+  const o = oil;
   const out: { batch: ReturnType<typeof batch>; index: number }[] = [];
   for (let i = 0; i < steps; i++) {
     const res = applySteps(r, mkCtx(m, { oil: o }), 1);
     if (res.applied === 0) break;
     r = res.run;
     m = res.meta;
-    o = spendOil(o, res.oilSpent);
     out.push({ batch: batch(r, m, o, res.ledger), index: r.stepIndex });
   }
   return out;
@@ -97,7 +95,7 @@ describe('delve batch store', () => {
     const merged = applySteps(run, mkCtx(meta, { oil: 200 }), stepwise.length);
     const db2 = dbOn(new IDBFactory(), `${NAME}-merged`);
     const mergedResult = await commitBatch(db2, {
-      ...batch(merged.run, merged.meta, spendOil(200, merged.oilSpent), merged.ledger),
+      ...batch(merged.run, merged.meta, 200, merged.ledger),
     });
 
     expect(await loadRun(db, run.runId)).toEqual(await loadRun(db2, run.runId));

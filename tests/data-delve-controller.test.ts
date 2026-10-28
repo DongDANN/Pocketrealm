@@ -1,8 +1,8 @@
 /**
  * Gate 4a — the Delve controller. These tests drive the public data API, not the engine helpers:
- * they prove that a screen action becomes exactly one guarded write, that Lantern Oil is paid from
- * the ledger once, that a Daily Challenge never contaminates permanent progress, and that catch-up
- * survives a camp fork, a dry lamp, a pending choice and a backwards clock.
+ * they prove that a screen action becomes exactly one guarded write, that Lantern Oil buys a run
+ * start and nothing inside it, that a Daily Challenge never contaminates permanent progress, and
+ * that catch-up survives a camp fork, a pending choice and a backwards clock.
  */
 
 import { IDBFactory } from 'fake-indexeddb';
@@ -262,30 +262,53 @@ describe('starting and stepping', () => {
     expect(opened.run?.hollowId).toBe(2);
   });
 
-  it('spends one oil per room and persists the advance', async () => {
+  it('charges the Hollow price once, at the start, and refuses a lamp that cannot pay', async () => {
+    await addCompanion();
+    await addReward({ xp: 4000, type: 'milestone' });
+    await putMeta({ ...emptyMeta(), clearedHollows: [1, 2] as HollowId[] }, 99, 0);
+    let oil = 99;
+    for (const [hollow, cost] of [
+      [1, 20],
+      [2, 24],
+      [3, 28],
+    ] as const) {
+      const started = await startDelve(db, { ...OPTIONS, hollow });
+      expect(started.ok).toBe(true);
+      expect(started.wallet.oil).toBe(oil - cost);
+      expect((await loadMeta(db))?.oil).toBe(oil - cost);
+      oil -= cost;
+      await retreatDelve(db, OPTIONS);
+    }
+    // 99 - 20 - 24 - 28 leaves 27, one short of another deepest-Hollow run.
+    const short = await startDelve(db, { ...OPTIONS, hollow: 3 });
+    expect(short.ok).toBe(false);
+    expect(short.reason).toContain('costs 28 oil');
+    expect(await loadActiveRun(db)).toBeUndefined();
+  });
+
+  it('steps a paid run for free and persists the advance', async () => {
     const started = await startReadyRun();
+    expect(started.wallet.oil).toBe(40);
     const before = started.wallet.oil;
     const tick = await stepDelve(db, { ...OPTIONS, policy: POLICY });
     expect(tick.ok).toBe(true);
     expect(tick.run?.stepIndex).toBe(1);
-    expect(tick.oilSpent).toBe(1);
-    expect(tick.wallet.oil).toBe(before - 1);
+    expect(tick.wallet.oil).toBe(before);
 
     const stored = await loadRun(db, started.run!.runId);
     expect(stored?.stepIndex).toBe(1);
     expect(stored?.state.log.some((entry) => entry.type === 'room')).toBe(true);
     const wallet = await loadMeta(db);
-    expect(wallet?.oil).toBe(before - 1);
+    expect(wallet?.oil).toBe(before);
     expect(wallet?.meta.lastStepAt).toBe(NOW);
   });
 
-  it('camps instead of stepping when the lantern is dry', async () => {
-    const started = await startReadyRun(0);
-    expect(started.ok).toBe(true);
+  it('keeps stepping a run whose lamp ran dry after the start', async () => {
+    const started = await startReadyRun(20);
+    expect(started.wallet.oil).toBe(0);
     const tick = await stepDelve(db, { ...OPTIONS, policy: POLICY });
-    expect(tick.ok).toBe(false);
-    expect(tick.reason).toContain('lantern');
-    expect((await loadActiveRun(db))?.stepIndex).toBe(0);
+    expect(tick.ok).toBe(true);
+    expect(tick.run?.stepIndex).toBe(1);
     expect((await loadMeta(db))?.oil).toBe(0);
   });
 
@@ -327,7 +350,7 @@ describe('starting and stepping', () => {
 });
 
 describe('choices and camp forks', () => {
-  it('stores a camp fork at step zero without spending oil or the step clock', async () => {
+  it('stores a camp fork at step zero without spending or the step clock', async () => {
     const meta = { ...emptyMeta(), lastStepAt: NOW - 10 * STEP_MS, maxSeenAt: NOW };
     const run = forkRun();
     await putRun(run, meta, 10);
@@ -335,7 +358,6 @@ describe('choices and camp forks', () => {
     expect(tick.ok).toBe(true);
     expect(tick.run?.stepIndex).toBe(0);
     expect(tick.run?.pendingChoice?.kind).toBe('fork');
-    expect(tick.oilSpent).toBe(0);
 
     const stored = await loadActiveRun(db);
     expect(stored?.state.pendingChoice?.kind).toBe('fork');
@@ -364,7 +386,6 @@ describe('choices and camp forks', () => {
     expect(stepped.ok).toBe(true);
     expect(stepped.run?.stepIndex).toBe(1);
     expect(stepped.run?.pendingChoice?.kind).toBe('rest');
-    expect(stepped.oilSpent).toBe(1);
     expect((await loadActiveRun(db))?.state.pendingChoice?.kind).toBe('rest');
   });
 
@@ -418,7 +439,6 @@ describe('Daily Challenge', () => {
 
     const first = await stepDelve(db, { ...OPTIONS, policy: POLICY });
     expect(first.ok).toBe(true);
-    expect(first.oilSpent).toBe(0);
 
     const report = await applyCatchUp(
       db,
@@ -454,7 +474,7 @@ describe('Daily Challenge', () => {
 });
 
 describe('catch-up', () => {
-  it('applies elapsed steps, spends oil, and persists the clock', async () => {
+  it('applies elapsed steps and persists the clock without charging the wallet', async () => {
     const meta = { ...emptyMeta(), lastStepAt: NOW - 5 * STEP_MS, maxSeenAt: NOW };
     const run = newRun(21, 1, 20, meta);
     await putRun(run, meta, 50);
@@ -462,15 +482,14 @@ describe('catch-up', () => {
     const report = await applyCatchUp(db, { ...OPTIONS, policy: POLICY }, inProcess);
     expect(report.ran).toBe(true);
     expect(report.steps).toBe(5);
-    expect(report.oilSpent).toBe(5);
-    expect(report.oil).toBe(45);
+    expect(report.oil).toBe(50);
     expect(report.pending).toBe(false);
     expect(report.log.length).toBeGreaterThan(0);
 
     const stored = await loadRun(db, run.runId);
     expect(stored?.stepIndex).toBe(5);
     const wallet = await loadMeta(db);
-    expect(wallet?.oil).toBe(45);
+    expect(wallet?.oil).toBe(50);
     expect(wallet?.meta.lastStepAt).toBe(NOW);
 
     // Nothing new has elapsed, so a second pass is a no-op.
@@ -479,15 +498,15 @@ describe('catch-up', () => {
     expect(idle.steps).toBe(0);
   });
 
-  it('consumes elapsed time while dry, so it cannot bank forever', async () => {
+  it('applies elapsed time even to an empty wallet, because the run was already paid for', async () => {
     const meta = { ...emptyMeta(), lastStepAt: NOW - 10 * STEP_MS, maxSeenAt: NOW };
     const run = newRun(22, 1, 20, meta);
     await putRun(run, meta, 0);
 
     const report = await applyCatchUp(db, { ...OPTIONS, policy: POLICY }, inProcess);
-    expect(report.steps).toBe(0);
+    expect(report.steps).toBe(10);
     expect(report.oil).toBe(0);
-    expect((await loadRun(db, run.runId))?.stepIndex).toBe(0);
+    expect((await loadRun(db, run.runId))?.stepIndex).toBe(10);
     expect((await loadMeta(db))?.meta.lastStepAt).toBe(NOW);
   });
 

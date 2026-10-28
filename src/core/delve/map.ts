@@ -12,6 +12,12 @@ import type { FloorPlan, HollowId, RoomDef, RoomKind } from './types';
 
 export const HOLLOW_FLOORS: Record<HollowId, number> = { 1: 6, 2: 8, 3: 10 };
 
+/**
+ * Oil to start a run in each Hollow (DELVE_REDESIGN §6). Rooms inside a run are free: the price
+ * buys the whole descent. The daily trickle of 20 still buys exactly one Rootfall run a day.
+ */
+export const RUN_COST: Record<HollowId, number> = { 1: 20, 2: 24, 3: 28 };
+
 export function floorSeed(userSeed: number, hollowId: HollowId, floor: number): number {
   return hashCombine(hashString(`hollow:${hollowId}:floor:${floor}`), userSeed >>> 0);
 }

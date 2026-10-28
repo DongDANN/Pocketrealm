@@ -643,14 +643,13 @@ function turnDecider(stored: readonly TurnOrder[], order: TurnOrder | undefined)
 /**
  * One fight room, from the moment it is entered to the room after it. The run has already been
  * stepped into the room (step index, visited trail and room line are in place), so the same call
- * serves both a fresh entry and a replay of a room a stored run is waiting in — only `spent`
- * differs, because a resumed room was paid for when it was first entered.
+ * serves both a fresh entry and a replay of a room a stored run is waiting in. A room costs
+ * nothing: the oil was paid when the run started.
  */
 function fightRoom(
   run: RunState,
   room: RoomDef,
   ctx: StepContext,
-  spent: number,
   ledger: StepOutcome['ledger'],
 ): StepOutcome {
   const buffs = computeBuffs(ctx.signals);
@@ -679,7 +678,6 @@ function fightRoom(
       run: { ...run, orders: [...result.pause.orders], pendingTurn: true },
       meta: ctx.meta,
       ledger,
-      oilSpent: spent,
       ended: false,
       pause: result.pause,
     };
@@ -699,7 +697,6 @@ function fightRoom(
       run: adv.run,
       meta: adv.meta,
       ledger: [...ledger, ...adv.ledger],
-      oilSpent: spent,
       ended: adv.ended,
     };
   }
@@ -711,7 +708,7 @@ function fightRoom(
       'retreated',
       ctx.today,
     );
-    return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
+    return { run: ended.run, meta: ended.meta, ledger, ended: true };
   }
   if (!result.won) {
     // Boss Study: fainting to a boss permanently reveals its weakness and tells.
@@ -733,7 +730,7 @@ function fightRoom(
       }
     }
     const ended = endRun(faintRun, faintMeta, 'fainted', ctx.today);
-    return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
+    return { run: ended.run, meta: ended.meta, ledger, ended: true };
   }
   next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
   stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
@@ -775,13 +772,12 @@ function fightRoom(
         run: adv.run,
         meta: adv.meta,
         ledger: [...ledger, ...adv.ledger],
-        oilSpent: spent,
         ended: adv.ended,
       };
     }
     const offer = grantBoonOffer(next, ctx.policy);
     if (offer.pending) {
-      return { run: offer.run, meta: stepMeta, ledger, oilSpent: spent, ended: false };
+      return { run: offer.run, meta: stepMeta, ledger, ended: false };
     }
     next = offer.run;
   }
@@ -792,13 +788,12 @@ function fightRoom(
     run: adv.run,
     meta: adv.meta,
     ledger: [...ledger, ...adv.ledger],
-    oilSpent: spent,
     ended: adv.ended,
   };
 }
 
 export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
-  const empty: StepOutcome = { run, meta: ctx.meta, ledger: [], oilSpent: 0, ended: false };
+  const empty: StepOutcome = { run, meta: ctx.meta, ledger: [], ended: false };
   if (run.result !== 'active' || run.pendingChoice !== null) return empty;
   // A room that is waiting for an order is already entered and paid for: the step replays the orders
   // the run carries, takes the new one, and leaves the room line and the step index exactly where
@@ -807,12 +802,10 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
     if (!ctx.play) return empty;
     const room = currentRoom(run);
     if (!isFightRoom(room)) return empty;
-    return fightRoom(run, room, ctx, 0, []);
+    return fightRoom(run, room, ctx, []);
   }
-  if (ctx.oil < 1 && !run.daily) return empty;
 
   const forge = forgeTotals(ctx.meta.forge);
-  const spent = run.daily ? 0 : 1;
   let next = run;
   const ledger: StepOutcome['ledger'] = [];
 
@@ -837,7 +830,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           stepIndex: next.stepIndex,
         },
       };
-      return { run: next, meta: ctx.meta, ledger, oilSpent: 0, ended: false };
+      return { run: next, meta: ctx.meta, ledger, ended: false };
     }
     const pick = autopilotFork(next, ctx.policy, row);
     const col = row.findIndex((r) => r.id === pick.room.id);
@@ -853,7 +846,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   next = pushLog(next, 'room', `${roomLabel(room)} room: ${room.id}.`);
 
   if (isFightRoom(room)) {
-    return fightRoom(next, room, ctx, spent, ledger);
+    return fightRoom(next, room, ctx, ledger);
   } else if (room.kind === 'treasure') {
     const gain = 25 * (next.relics.includes('relic-firstcoin') && next.row === 0 ? 2 : 1);
     next = { ...next, glint: next.glint + gain };
@@ -864,13 +857,12 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
         run: adv.run,
         meta: adv.meta,
         ledger: [...ledger, ...adv.ledger],
-        oilSpent: spent,
         ended: adv.ended,
       };
     }
     const offer = grantBoonOffer(next, ctx.policy);
     if (offer.pending) {
-      return { run: offer.run, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
+      return { run: offer.run, meta: ctx.meta, ledger, ended: false };
     }
     next = offer.run;
   } else if (room.kind === 'shop') {
@@ -888,7 +880,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           stepIndex: next.stepIndex,
         },
       };
-      return { run: next, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
+      return { run: next, meta: ctx.meta, ledger, ended: false };
     }
     const buy = autopilotShop(next, forge);
     const applied = applyShopPurchase(next, buy.itemId, forge);
@@ -916,7 +908,7 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           stepIndex: next.stepIndex,
         },
       };
-      return { run: next, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
+      return { run: next, meta: ctx.meta, ledger, ended: false };
     }
     const pick = autopilotEvent(next, ctx.policy, {
       options: affordable.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
@@ -939,12 +931,12 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
           stepIndex: next.stepIndex,
         },
       };
-      return { run: next, meta: ctx.meta, ledger, oilSpent: spent, ended: false };
+      return { run: next, meta: ctx.meta, ledger, ended: false };
     }
     const rest = autopilotRest(next, ctx.policy);
     if (rest.choice === 'retreat') {
       const ended = endRun(pushLog(next, 'choice', rest.reason), ctx.meta, 'retreated', ctx.today);
-      return { run: ended.run, meta: ended.meta, ledger, oilSpent: spent, ended: true };
+      return { run: ended.run, meta: ended.meta, ledger, ended: true };
     }
     if (rest.choice === 'fuse') {
       const fused = applyFusion(next, rest.recipeId!);
@@ -960,7 +952,6 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
     run: adv.run,
     meta: adv.meta,
     ledger: [...ledger, ...adv.ledger],
-    oilSpent: spent,
     ended: adv.ended,
   };
 }
@@ -1019,7 +1010,7 @@ function applyEventOutcome(
 }
 
 export function resolveChoice(run: RunState, ctx: StepContext, optionId: string): StepOutcome {
-  const empty: StepOutcome = { run, meta: ctx.meta, ledger: [], oilSpent: 0, ended: false };
+  const empty: StepOutcome = { run, meta: ctx.meta, ledger: [], ended: false };
   const choice = run.pendingChoice;
   if (run.result !== 'active' || choice === null) return empty;
   const forge = forgeTotals(ctx.meta.forge);
@@ -1036,7 +1027,7 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
         'choice',
         `Chose the ${roomLabel(row[col]!)} room.`,
       );
-      return { run: next, meta: ctx.meta, ledger, oilSpent: 0, ended: false };
+      return { run: next, meta: ctx.meta, ledger, ended: false };
     }
     case 'boon': {
       if (optionId === 'reroll') {
@@ -1073,7 +1064,7 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
             stepIndex: next.stepIndex,
           },
         };
-        return { run: next, meta: ctx.meta, ledger, oilSpent: 0, ended: false };
+        return { run: next, meta: ctx.meta, ledger, ended: false };
       }
       const boon = anyBoonById(optionId);
       if (!boon) return empty;
@@ -1117,7 +1108,7 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
       if (optionId === 'retreat') {
         const ended = endRun(next, ctx.meta, 'retreated', ctx.today);
         next = ended.run;
-        return { run: next, meta: ended.meta, ledger, oilSpent: 0, ended: true };
+        return { run: next, meta: ended.meta, ledger, ended: true };
       }
       if (optionId.startsWith('fuse:')) {
         const fused = applyFusion(next, optionId.slice(5));
@@ -1137,29 +1128,24 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
   }
 
   if (next.pendingChoice !== null) {
-    return { run: next, meta: ctx.meta, ledger, oilSpent: 0, ended: false };
+    return { run: next, meta: ctx.meta, ledger, ended: false };
   }
   const adv = advanceAfterRoom({ ...next, pendingChoice: null }, ctx);
   return {
     run: adv.run,
     meta: adv.meta,
     ledger: [...ledger, ...adv.ledger],
-    oilSpent: 0,
     ended: adv.ended,
   };
 }
 
 /**
  * Oil bookkeeping. Grants come from the reward ledger (free trickle + habits); the Delve only
- * spends. Capacity is the storage cap plus Forge plus the Reviewer's Lantern buff.
+ * spends, and only at a run's start. Capacity is the storage cap plus Forge plus buffs.
  */
 export function oilCapacity(meta: DelveMeta, reviewedLast7d: boolean): number {
   const forge = forgeTotals(meta.forge);
   return OIL_STORAGE_CAP + (forge.oilCapacity ?? 0) + (reviewedLast7d ? 25 : 0);
-}
-
-export function spendOil(oil: number, amount: number): number {
-  return Math.max(0, oil - Math.max(0, Math.trunc(amount)));
 }
 
 export { BASE_MODIFIERS, computeModifiers, companionBase, runCombat };

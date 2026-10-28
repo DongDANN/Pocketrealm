@@ -66,7 +66,7 @@ function referenceLog(entry: RunState, orders: readonly TurnOrder[]): string[] {
 }
 
 describe('a fight room opens instead of resolving', () => {
-  it('enters, pays its oil and waits at round one with the trail empty', () => {
+  it('enters for free and waits at round one with the trail empty', () => {
     const { meta, entry } = openRoom();
     const pause = entry.pause!;
 
@@ -74,7 +74,6 @@ describe('a fight room opens instead of resolving', () => {
     expect(entry.run.pendingTurn).toBe(true);
     expect(entry.run.orders).toEqual([]);
     expect(entry.ended).toBe(false);
-    expect(entry.oilSpent).toBe(1);
     // The entry line is the only thing in the run: the fight has not happened yet.
     expect(entry.run.log).toHaveLength(1);
     expect(entry.run.log[0]!.type).toBe('room');
@@ -92,11 +91,10 @@ describe('a fight room opens instead of resolving', () => {
     expect(pause.log.map((line) => line.text)).toContain('Steadfast grants 1 Shield.');
   });
 
-  it('takes one order per round, costs nothing more, and never rewrites the HP the fight started from', () => {
+  it('takes one order per round and never rewrites the HP the fight started from', () => {
     const { meta, entry } = openRoom();
 
     const first = stepRun(entry.run, mkCtx(meta, { play: true, order: BASIC }));
-    expect(first.oilSpent).toBe(0);
     expect(first.pause).toBeDefined();
     expect(first.pause!.state.round).toBe(2);
     expect(first.run.orders).toEqual([BASIC]);
@@ -107,12 +105,11 @@ describe('a fight room opens instead of resolving', () => {
     expect(first.pause!.log.some((line) => line.text.startsWith('You hit'))).toBe(true);
   });
 
-  it('a dry lamp does not stop a room that was already paid for', () => {
+  it('a dry lamp does not stop a run that was already paid for', () => {
     const { meta, entry } = openRoom();
 
     const out = stepRun(entry.run, mkCtx(meta, { play: true, order: BASIC, oil: 0 }));
     expect(out.pause).toBeDefined();
-    expect(out.oilSpent).toBe(0);
     expect(out.run.orders).toEqual([BASIC]);
 
     // Auto-played steps still cannot move a run that is waiting for a person.
@@ -134,7 +131,6 @@ describe('a fight room opens instead of resolving', () => {
     expect(JSON.parse(JSON.stringify(rebuilt.run))).toEqual(
       JSON.parse(JSON.stringify(answered.run)),
     );
-    expect(rebuilt.oilSpent).toBe(0);
   });
 
   it('refuses an order the round cannot deliver and leaves the trail where it was', () => {

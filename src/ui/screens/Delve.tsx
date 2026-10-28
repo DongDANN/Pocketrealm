@@ -10,6 +10,7 @@ import {
   heatUnlocked,
   hollowUnlocked,
   HOLLOW_FLOORS,
+  RUN_COST,
   anyBoonById,
   relicById,
   type BuildId,
@@ -94,7 +95,8 @@ export function Delve() {
   const daily = meta.daily ?? { date: '', played: false };
   const dailyDone = daily.date === snapshot.today && daily.played;
   const dailyHollowId = dailyHollow(snapshot.today);
-  const oilReady = snapshot.oil > 0;
+  const runCost = RUN_COST[hollow];
+  const oilReady = snapshot.oil >= runCost;
   const selectedHollowOpen = hollowUnlocked(hollow, meta, companionLevel);
   const selectedBuildOpen = buildUnlocked(buildId, meta, companionLevel);
   const heatOpen = heatUnlocked(meta, hollow);
@@ -168,7 +170,7 @@ export function Delve() {
       {delve.catchUp.ran ? (
         <p>
           <PixelText
-            text={`${delve.catchUp.steps} steps · ${delve.catchUp.rooms} rooms · ${delve.catchUp.choices} choices answered · ${delve.catchUp.oilSpent} oil spent.`}
+            text={`${delve.catchUp.steps} steps · ${delve.catchUp.rooms} rooms · ${delve.catchUp.choices} choices answered.`}
             color={C.paper2}
             pixelScale={2}
             wrap={36}
@@ -632,22 +634,11 @@ export function Delve() {
             <div className="screen-actions">
               <PixelButton
                 className="wide"
-                disabled={
-                  delve.busy ||
-                  run.pendingChoice !== null ||
-                  (!run.daily && snapshot.oil < 1) ||
-                  run.result !== 'active'
-                }
+                disabled={delve.busy || run.pendingChoice !== null || run.result !== 'active'}
                 onClick={() => void stepRun()}
               >
                 <PixelText
-                  text={
-                    run.pendingChoice
-                      ? 'Answer the choice first'
-                      : !run.daily && snapshot.oil < 1
-                        ? 'The lantern is dry'
-                        : 'Open the next room'
-                  }
+                  text={run.pendingChoice ? 'Answer the choice first' : 'Open the next room'}
                   color={C.ink900}
                   pixelScale={2}
                 />
@@ -824,7 +815,7 @@ export function Delve() {
             </h2>
             <p className="panel-note">
               <PixelText
-                text={`${snapshot.oil} oil ready. Each room costs one oil; the Daily Challenge costs none.`}
+                text={`${snapshot.oil} oil ready. A run costs ${runCost} oil in ${hollowName(hollow)}; rooms inside it are free. The Daily Challenge costs none.`}
                 color={C.paper3}
                 pixelScale={2}
                 wrap={36}
@@ -857,7 +848,7 @@ export function Delve() {
                     <PixelText
                       text={
                         open
-                          ? `${info.blurb} ${HOLLOW_FLOORS[info.id]} floors.`
+                          ? `${info.blurb} ${HOLLOW_FLOORS[info.id]} floors · ${RUN_COST[info.id]} oil.`
                           : info.id === 2
                             ? 'Sealed. Clear Rootfall Warren and reach level 3.'
                             : 'Sealed. Clear Cinder Vault and reach level 5.'
@@ -978,7 +969,7 @@ export function Delve() {
               <PixelText
                 text={
                   !oilReady
-                    ? 'No oil yet. Log an entry or wait for the trickle.'
+                    ? `Not enough oil. A run here costs ${runCost}.`
                     : !selectedHollowOpen
                       ? 'That Hollow is sealed'
                       : !selectedBuildOpen

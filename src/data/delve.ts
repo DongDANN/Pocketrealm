@@ -24,7 +24,6 @@ import {
   cardUnlocked,
   catchUpStepCount,
   craftConsumable,
-  elapsedSteps,
   emptyMeta,
   equipConsumable,
   finishDailyRun,
@@ -37,7 +36,7 @@ import {
   resolveChoice,
   retreatRun,
   runCatchUpJob,
-  spendOil,
+  RUN_COST,
   stepRun,
   unequipConsumable,
   unlockBuilding,
@@ -356,7 +355,6 @@ export interface DelveRunResult {
   reason?: string;
   wallet: DelveWallet;
   run: RunState | null;
-  oilSpent: number;
   ended: boolean;
   daily?: DailyFinish;
   /** Reward rows the ledger actually accepted in this write. */
@@ -374,10 +372,9 @@ function wallet(result: DelveSync, meta = result.meta, oil = result.oil): DelveW
   };
 }
 
-function refusedReason(walletState: DelveWallet, run: RunState): string {
+function refusedReason(run: RunState): string {
   if (run.pendingTurn) return 'The room is waiting for your order.';
   if (run.pendingChoice !== null) return 'A choice is waiting.';
-  if (walletState.oil < 1 && !run.daily) return 'The lantern is dry. Log an entry to refill it.';
   return 'The run cannot move right now.';
 }
 
@@ -443,7 +440,6 @@ export async function startDelve(
       reason: 'Unknown Hollow.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -455,7 +451,6 @@ export async function startDelve(
       reason: 'Finish or retreat your current run first.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -469,7 +464,6 @@ export async function startDelve(
       reason: `Hollow ${hollow} is still sealed. ${need}`,
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -481,7 +475,6 @@ export async function startDelve(
       reason: 'Heat runs from 0 to 5.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -492,7 +485,6 @@ export async function startDelve(
       reason: 'Clear this Hollow before raising its Heat.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -504,7 +496,6 @@ export async function startDelve(
       reason: 'Unknown build.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -515,7 +506,18 @@ export async function startDelve(
       reason: `${build.name} is not unlocked yet.`,
       wallet: sync,
       run: null,
-      oilSpent: 0,
+      ended: false,
+      granted: 0,
+    };
+  }
+  // Oil buys the run start, not the rooms (§6): the price is the Hollow's, paid once here.
+  const cost = RUN_COST[hollow];
+  if (sync.oil < cost) {
+    return {
+      ok: false,
+      reason: `A run costs ${cost} oil. You have ${sync.oil}.`,
+      wallet: sync,
+      run: null,
       ended: false,
       granted: 0,
     };
@@ -527,7 +529,7 @@ export async function startDelve(
   const commit = await createRun(db, {
     run,
     meta,
-    oil: sync.oil,
+    oil: sync.oil - cost,
     oilCapacity: sync.capacity,
     oilGranted: sync.oilGranted,
     ledger: [],
@@ -540,12 +542,17 @@ export async function startDelve(
       reason: 'A run is already stored.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
   }
-  return { ok: true, wallet: wallet(sync, meta), run, oilSpent: 0, ended: false, granted: 0 };
+  return {
+    ok: true,
+    wallet: wallet(sync, meta, sync.oil - cost),
+    run,
+    ended: false,
+    granted: 0,
+  };
 }
 
 /** The Daily Challenge costs no oil, uses a fixed loadout, and has one attempt per local day. */
@@ -561,7 +568,6 @@ export async function startDailyDelve(
       reason: 'Finish or retreat your current run first.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -573,7 +579,6 @@ export async function startDailyDelve(
       reason: daily.error,
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -599,12 +604,11 @@ export async function startDailyDelve(
       reason: 'The daily challenge is already stored.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
   }
-  return { ok: true, wallet: wallet(sync, meta), run, oilSpent: 0, ended: false, granted: 0 };
+  return { ok: true, wallet: wallet(sync, meta), run, ended: false, granted: 0 };
 }
 
 export interface StepDelveOptions extends DelveActionOptions {
@@ -628,7 +632,6 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
       reason: 'No run is active.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -643,7 +646,6 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
       reason: 'No room is waiting for an order.',
       wallet: sync,
       run,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -667,7 +669,6 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
       reason: 'That order cannot be used this round.',
       wallet: sync,
       run,
-      oilSpent: 0,
       ended: false,
       granted: 0,
       pause: out.pause,
@@ -680,7 +681,6 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
       ok: true,
       wallet: sync,
       run: out.run,
-      oilSpent: 0,
       ended: false,
       granted: 0,
       pause: out.pause,
@@ -689,10 +689,9 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
   if (!moved && !openedChoice && !tookOrder && !finishedRoom) {
     return {
       ok: false,
-      reason: refusedReason(sync, run),
+      reason: refusedReason(run),
       wallet: sync,
       run,
-      oilSpent: 0,
       ended: run.result !== 'active',
       granted: 0,
     };
@@ -709,11 +708,10 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
     ledger = [...ledger, ...settled.ledger];
     daily = settled.daily;
   }
-  const oil = Math.min(sync.capacity, spendOil(sync.oil, out.oilSpent));
   const batch: DelveBatch = {
     run: out.run,
     meta,
-    oil,
+    oil: sync.oil,
     oilCapacity: sync.capacity,
     oilGranted: sync.oilGranted,
     ledger,
@@ -728,16 +726,14 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
       reason: moved ? 'That step was already stored.' : 'That choice is already open.',
       wallet: fresh,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
   }
   return {
     ok: true,
-    wallet: wallet(sync, meta, oil),
+    wallet: wallet(sync, meta),
     run: out.run,
-    oilSpent: out.oilSpent,
     ended: out.run.result !== 'active',
     daily,
     granted: commit.granted,
@@ -762,7 +758,6 @@ export async function chooseDelve(
       reason: 'No run is active.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -774,7 +769,6 @@ export async function chooseDelve(
       reason: 'No choice is waiting.',
       wallet: sync,
       run,
-      oilSpent: 0,
       ended: run.result !== 'active',
       granted: 0,
     };
@@ -787,7 +781,6 @@ export async function chooseDelve(
       reason: 'That option is no longer available.',
       wallet: sync,
       run,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -825,7 +818,6 @@ export async function chooseDelve(
       reason: 'That choice was already resolved.',
       wallet: fresh,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -834,7 +826,6 @@ export async function chooseDelve(
     ok: true,
     wallet: wallet(sync, meta),
     run: out.run,
-    oilSpent: 0,
     ended: out.run.result !== 'active',
     daily,
     granted: commit.granted,
@@ -854,7 +845,6 @@ export async function retreatDelve(
       reason: 'No run is active.',
       wallet: sync,
       run: null,
-      oilSpent: 0,
       ended: false,
       granted: 0,
     };
@@ -867,7 +857,6 @@ export async function retreatDelve(
       reason: 'The run has already ended.',
       wallet: sync,
       run,
-      oilSpent: 0,
       ended: run.result !== 'active',
       granted: 0,
     };
@@ -898,7 +887,6 @@ export async function retreatDelve(
       reason: 'The run has already ended.',
       wallet: fresh,
       run: null,
-      oilSpent: 0,
       ended: true,
       granted: 0,
     };
@@ -907,7 +895,6 @@ export async function retreatDelve(
     ok: true,
     wallet: wallet(sync, meta),
     run: out.run,
-    oilSpent: 0,
     ended: true,
     daily,
     granted: commit.granted,
@@ -924,7 +911,6 @@ export interface CatchUpReport extends DelveWallet {
   steps: number;
   rooms: number;
   choices: number;
-  oilSpent: number;
   fromFloor: number;
   toFloor: number;
   ended: boolean;
@@ -954,7 +940,6 @@ function idleReport(walletState: DelveWallet): CatchUpReport {
     steps: 0,
     rooms: 0,
     choices: 0,
-    oilSpent: 0,
     fromFloor: 0,
     toFloor: 0,
     ended: false,
@@ -1012,14 +997,8 @@ export async function applyCatchUp(
     return idleReport(await consumeElapsed(db, sync, options));
   }
 
-  const maxSteps = catchUpStepCount(sync.meta.lastStepAt, options.now, sync.oil, run.daily);
-  if (maxSteps <= 0) {
-    // With oil gone, time still passes: consume whole elapsed steps so they cannot bank forever.
-    if (elapsedSteps(sync.meta.lastStepAt, options.now) > 0) {
-      return idleReport(await consumeElapsed(db, sync, options));
-    }
-    return idleReport(sync);
-  }
+  const maxSteps = catchUpStepCount(sync.meta.lastStepAt, options.now);
+  if (maxSteps <= 0) return idleReport(sync);
 
   const request: CatchUpJobRequest = {
     run,
@@ -1044,7 +1023,7 @@ export async function applyCatchUp(
     ledger = [...ledger, ...settled.ledger];
     daily = settled.daily;
   }
-  const oil = Math.min(sync.capacity, spendOil(sync.oil, result.oilSpent));
+  const oil = sync.oil;
   const batch: DelveBatch = {
     run: result.run,
     meta,
@@ -1092,7 +1071,6 @@ export async function applyCatchUp(
     steps: result.applied,
     rooms: Math.max(0, result.run.roomsVisited.length - run.roomsVisited.length),
     choices: newLog.filter((entry) => entry.type === 'choice').length,
-    oilSpent: result.oilSpent,
     fromFloor: run.floor,
     toFloor: result.run.floor,
     ended: result.run.result !== 'active',

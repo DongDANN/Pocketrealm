@@ -43,7 +43,6 @@ export function runCatchUpJob(
     meta: req.ctx.meta,
     applied: 0,
     ledger: [],
-    oilSpent: 0,
   };
   if (req.maxSteps <= 0) {
     logs.push('no steps available (clock rewound or not enough time elapsed).');
@@ -56,9 +55,7 @@ export function runCatchUpJob(
       progress.push(chunk);
       onProgress?.(chunk);
     }
-    logs.push(
-      `applied ${result.applied} steps, spent ${result.oilSpent} oil, result ${result.run.result}.`,
-    );
+    logs.push(`applied ${result.applied} steps, result ${result.run.result}.`);
     return { result, progress, logs };
   } catch (error) {
     logs.push(error instanceof Error ? error.message : String(error));

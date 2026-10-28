@@ -2,7 +2,7 @@
  * Gate 7b-3 — a room played by hand survives the trip through storage.
  *
  * The engine tests prove the pause is rebuilt from the orders and the seed. This suite proves the
- * data layer stores exactly that and nothing else: entering a room is one batch that pays its oil,
+ * data layer stores exactly that and nothing else: entering a room is one batch that spends no oil,
  * every answer is a same-step guarded write, a reload rebuilds the menu without writing, and a
  * refused order never reaches the database.
  */
@@ -54,13 +54,12 @@ async function seedRoom(): Promise<void> {
 }
 
 describe('entering a room by hand', () => {
-  it('opens the room, pays one oil and stores the emptiest possible run', async () => {
+  it('opens the room for free and stores the emptiest possible run', async () => {
     await seedRoom();
     const entered = await stepDelve(db, PLAY);
 
     expect(entered.ok).toBe(true);
-    expect(entered.oilSpent).toBe(1);
-    expect(entered.wallet.oil).toBe(49);
+    expect(entered.wallet.oil).toBe(50);
     expect(entered.pause).toBeDefined();
     expect(entered.pause!.state.round).toBe(1);
     expect(entered.run!.pendingTurn).toBe(true);
@@ -85,8 +84,7 @@ describe('entering a room by hand', () => {
 
     const reopened = await stepDelve(db, PLAY);
     expect(reopened.ok).toBe(true);
-    expect(reopened.oilSpent).toBe(0);
-    expect(reopened.wallet.oil).toBe(49);
+    expect(reopened.wallet.oil).toBe(50);
     expect(reopened.pause!.state).toEqual(entered.pause!.state);
     expect(reopened.pause!.enemies).toEqual(entered.pause!.enemies);
     expect(reopened.run!.stepIndex).toBe(1);
@@ -104,7 +102,6 @@ describe('answering a round', () => {
 
     const answered = await stepDelve(db, { ...PLAY, order: BASIC });
     expect(answered.ok).toBe(true);
-    expect(answered.oilSpent).toBe(0);
     expect(answered.pause).toBeDefined();
     expect(answered.pause!.state.round).toBe(2);
     expect(answered.run!.orders).toEqual([BASIC]);

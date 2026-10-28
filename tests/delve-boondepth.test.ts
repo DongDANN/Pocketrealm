@@ -242,7 +242,6 @@ describe('Forge rerolls', () => {
       },
     };
     const out = resolveChoice(run, mkCtx(meta, { policy: CAMP_POLICY }), 'reroll');
-    expect(out.oilSpent).toBe(0);
     expect(out.ended).toBe(false);
     expect(out.run.rerollsLeft).toBe(1);
     expect(out.run.pendingChoice?.kind).toBe('boon');
@@ -264,7 +263,6 @@ describe('Forge rerolls', () => {
       },
     };
     const out = resolveChoice(run, mkCtx(meta, { policy: CAMP_POLICY }), 'reroll');
-    expect(out.oilSpent).toBe(0);
     expect(out.run).toEqual(run);
   });
 });

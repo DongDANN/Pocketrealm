@@ -345,8 +345,6 @@ export interface StepOutcome {
   meta: DelveMeta;
   /** Ledger hooks for the persistence layer (idempotent keys). */
   ledger: { key: string; type: string; xp: number; sparks: number }[];
-  /** Oil consumed by this step. */
-  oilSpent: number;
   /** True when the run ended on this step. */
   ended: boolean;
   /**

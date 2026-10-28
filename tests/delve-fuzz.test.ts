@@ -17,7 +17,6 @@ import {
   newRun,
   resolveChoice,
   runCombat,
-  spendOil,
   stateHash,
   stepRun,
   type AutopilotPolicy,
@@ -117,7 +116,7 @@ function fuzzRun(seed: number): { run: RunState; meta: DelveMeta; steps: number 
   const policy = fuzzPolicy(rng);
   let meta: DelveMeta = { ...emptyMeta(), clearedHollows: [1, 2], embers: 400 };
   let run = newRun(rng.next() >>> 0, hollow, level, meta, build.id, heat);
-  let oil = 900;
+  const oil = 900;
   let steps = 0;
   let noOps = 0;
   for (let guard = 0; guard < 1500; guard++) {
@@ -132,7 +131,6 @@ function fuzzRun(seed: number): { run: RunState; meta: DelveMeta; steps: number 
       const out = resolveChoice(run, ctxOf(meta, oil, policy, steps), pick.id);
       run = out.run;
       meta = out.meta;
-      oil = spendOil(oil, out.oilSpent);
       steps += 1;
       checkInvariants(run, meta, seed, steps);
       // A rejected pick (an unaffordable shop item) is a legal no-op; a permanent loop is not.
@@ -145,12 +143,10 @@ function fuzzRun(seed: number): { run: RunState; meta: DelveMeta; steps: number 
     const out = stepRun(run, ctxOf(meta, oil, policy, steps));
     run = out.run;
     meta = out.meta;
-    oil = spendOil(oil, out.oilSpent);
     steps += 1;
     checkInvariants(run, meta, seed, steps);
-    // A step that spent no oil and only queued a choice is still progress; a genuine no-op is not.
-    if (out.oilSpent === 0 && !out.ended && !run.pendingChoice && run.stepIndex === beforeIndex)
-      break;
+    // A step that only queued a choice is still progress; a genuine no-op is not.
+    if (!out.ended && !run.pendingChoice && run.stepIndex === beforeIndex) break;
     if (out.ended) break;
   }
   return { run, meta, steps };

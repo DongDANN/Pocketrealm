@@ -1,7 +1,6 @@
 import {
   emptyMeta,
   newRun,
-  spendOil,
   stepRun,
   type AutopilotPolicy,
   type BudgetSignals,
@@ -46,19 +45,17 @@ export function mkCtx(meta: DelveMeta, over: Partial<StepContext> = {}): StepCon
   };
 }
 
-/** Step a run to its end (or oil exhaustion) with Autopilot; returns final state + ledger. */
-export function playToEnd(seed: number, hollow: HollowId = 1, level = 4, oil = 999) {
+/** Step a run to its end with Autopilot; returns final state + ledger. */
+export function playToEnd(seed: number, hollow: HollowId = 1, level = 4) {
   let meta = emptyMeta();
   let run = newRun(seed, hollow, level, meta);
-  let o = oil;
   const ledger: StepOutcome['ledger'] = [];
   let guard = 0;
   while (run.result === 'active' && guard < 1000) {
-    const out = stepRun(run, mkCtx(meta, { oil: o }));
-    if (out.oilSpent === 0 && !out.ended) break;
+    const out = stepRun(run, mkCtx(meta));
+    if (out.run.stepIndex === run.stepIndex && out.run.result === run.result) break;
     run = out.run;
     meta = out.meta;
-    o = spendOil(o, out.oilSpent);
     ledger.push(...out.ledger);
     guard += 1;
   }

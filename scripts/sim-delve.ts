@@ -30,7 +30,7 @@ import {
   gainMastery,
   newRun,
   oilCapacity,
-  spendOil,
+  RUN_COST,
   stepRun,
   unlockBuilding,
   upgradeBuilding,
@@ -178,7 +178,7 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
     const today = `2026-${String(Math.floor((day - 1) / 28) + 1).padStart(2, '0')}-${String(((day - 1) % 28) + 1).padStart(2, '0')}`;
 
     let guard = 0;
-    while (oil > 0 && guard < 500) {
+    while (guard < 500) {
       guard += 1;
       if (!run) {
         const level = levelForXp(xp).level;
@@ -189,6 +189,9 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
         else if (meta.clearedHollows.includes(1) && level >= 6) hollow = 2;
         else if (meta.clearedHollows.includes(2)) hollow = 2;
         else if (meta.clearedHollows.includes(1)) hollow = 1;
+        // Oil buys the run, not the rooms (§6). Without the price there is no descent today.
+        if (oil < RUN_COST[hollow]) break;
+        oil -= RUN_COST[hollow];
         run = newRun(userSeed, hollow, level, meta);
         meta = { ...meta, runsStarted: meta.runsStarted + 1 };
         stats.runs += 1;
@@ -203,10 +206,8 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
         today,
       };
       const out = stepRun(run, ctx);
-      if (out.oilSpent === 0 && !out.ended) break; // camped (no oil / pending choice never happens under autopilot)
       run = out.run;
       meta = out.meta;
-      oil = spendOil(oil, out.oilSpent);
       now += 30_000;
       for (const e of out.ledger) {
         if (delveXpToday + e.xp <= 30) {
@@ -231,8 +232,6 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
         stats.totalFloors += run.floor - 1 + (run.result === 'cleared' ? 1 : 0);
         meta = autoBuy(meta);
         run = null;
-        // A new run the same day starts after a short breather.
-        if (oil < 1) break;
       }
     }
     now += DAY_MS - 30_000 * Math.min(guard, 500);
@@ -265,8 +264,10 @@ function report(def: PersonaDef, s: PersonaStats): void {
 
 /** The Breaker sweeps each build with these routes, never retreating on HP. */
 export const BREAKER_ROUTES: readonly AutopilotPolicy['route'][] = ['safe', 'balanced', 'greedy'];
-/** The Breaker probes the level ceiling rather than a fresh account, to find the strongest case. */
+/** The max sweep runs at the level ceiling, so a degenerate build has nowhere to hide. */
 export const BREAKER_LEVEL = 20;
+/** The rush probe enters the deepest Hollow the moment its gate opens (level 5), with nothing. */
+export const BREAKER_RUSH_LEVEL = 5;
 
 /**
  * A maximally kitted meta: every Forge node, every talent node on every build, buildings at the
@@ -335,81 +336,78 @@ export interface BreakerResult {
   buildId: string;
   route: AutopilotPolicy['route'];
   heat: number;
+  level: number;
   /** Floors the hollow needs to clear (10 in Hollow 3). */
   floorTarget: number;
   deepestFloor: number;
-  clearedInADay: boolean;
+  /** True when one paid run cleared the whole Hollow. */
+  cleared: boolean;
   steps: number;
 }
 
 /**
- * Breaker probe (SPEC 6.11 N): with the maxed meta, Heat 5 and Hollow 3, spend only Trickle's free
- * oil for `days` days and see whether any build clears. A clear inside a day is a balance failure.
+ * Breaker probe (SPEC 6.11 N, restated by DELVE_REDESIGN §6). Runs, not rooms, are the unit now, so
+ * one paid descent answers both questions that matter:
+ *
+ *  - max sweep: a fully kitted account at the level ceiling. Every build must clear — a build that
+ *    cannot clear the deepest Hollow at max power is dead content;
+ *  - rush probe: an empty account at the level Hollow 3 unlocks. Any clear here means one run can
+ *    skip the whole game, which is the balance failure the old oil-per-room cap used to hide.
+ *
+ * §11's rounds-per-floor objective replaces the rush probe once the 4-skill sets exist (7c).
  */
 export function runBreaker(
-  days = 1,
   seeds: readonly number[] = [0xb1e0001, 0xb1e0002],
+  options: { level?: number; maxed?: boolean } = {},
 ): BreakerResult[] {
+  const level = options.level ?? BREAKER_LEVEL;
+  const maxed = options.maxed ?? true;
   const out: BreakerResult[] = [];
   for (const build of BUILDS) {
     for (const route of BREAKER_ROUTES) {
       let deepestFloor = 0;
-      let clearedInADay = false;
+      let cleared = false;
       let steps = 0;
       for (const userSeed of seeds) {
-        let meta = buildMaxMeta();
-        let oil = 0;
+        let meta = maxed ? buildMaxMeta() : emptyMeta();
         let now = 1_700_000_000_000;
-        let run: RunState | null = null;
         const policy: AutopilotPolicy = {
           mode: 'autopilot',
           tagPriority: ['fury', 'guard', 'vigor', 'fortune', 'thrift'] as BoonTag[],
           retreatHpPercent: 0,
           route,
         };
-        let clearedToday = false;
-        for (let day = 1; day <= days; day++) {
-          oil = Math.min(oilCapacity(meta, false), oil + dailyOil(PERSONAS.trickle, day));
-          let guard = 0;
-          while (oil > 0 && guard < 500) {
-            guard += 1;
-            if (!run) {
-              run = newRun(userSeed, 3, BREAKER_LEVEL, meta, build.id, HEAT_MAX);
-              meta = { ...meta, runsStarted: meta.runsStarted + 1 };
-            }
-            const ctx: StepContext = {
-              now,
-              oil,
-              oilCapacity: oilCapacity(meta, false),
-              signals: PERSONAS.trickle.signals(day),
-              meta,
-              policy,
-              today: `2026-10-${String(day).padStart(2, '0')}`,
-            };
-            const step = stepRun(run, ctx);
-            if (step.oilSpent === 0 && !step.ended) break;
-            run = step.run;
-            meta = step.meta;
-            oil = spendOil(oil, step.oilSpent);
-            now += 30_000;
-            steps += 1;
-            if (run.floor > deepestFloor) deepestFloor = run.floor;
-            if (run.result !== 'active') {
-              if (day === 1 && run.result === 'cleared') clearedToday = true;
-              run = null;
-              if (oil < 1) break;
-            }
-          }
+        let run: RunState = newRun(userSeed, 3, level, meta, build.id, HEAT_MAX);
+        meta = { ...meta, runsStarted: meta.runsStarted + 1 };
+        let guard = 0;
+        while (run.result === 'active' && guard < 2000) {
+          guard += 1;
+          const ctx: StepContext = {
+            now,
+            oil: 0,
+            oilCapacity: oilCapacity(meta, false),
+            signals: PERSONAS.trickle.signals(1),
+            meta,
+            policy,
+            today: '2026-10-01',
+          };
+          const step = stepRun(run, ctx);
+          run = step.run;
+          meta = step.meta;
+          now += 30_000;
+          steps += 1;
+          if (run.floor > deepestFloor) deepestFloor = run.floor;
         }
-        clearedInADay ||= clearedToday;
+        if (run.result === 'cleared') cleared = true;
       }
       out.push({
         buildId: build.id,
         route,
         heat: HEAT_MAX,
+        level,
         floorTarget: HOLLOW_FLOORS[3],
         deepestFloor,
-        clearedInADay,
+        cleared,
         steps,
       });
     }
@@ -417,16 +415,14 @@ export function runBreaker(
   return out;
 }
 
-function reportBreaker(results: BreakerResult[]): boolean {
-  const degenerate = results.filter((r) => r.clearedInADay);
+function reportBreaker(results: BreakerResult[], label: string): void {
   for (const r of results) {
     console.log(
-      `Breaker  | ${r.buildId.padEnd(7)} ${r.route.padEnd(9)} | Heat ${r.heat} Hollow 3 | ` +
-        `deepest floor ${r.deepestFloor}/${r.floorTarget} | ` +
-        `${String(r.steps).padStart(3)} steps | ${r.clearedInADay ? 'CLEARED IN A DAY' : 'no clear'}`,
+      `Breaker  | ${label.padEnd(13)} ${r.buildId.padEnd(7)} ${r.route.padEnd(9)} | ` +
+        `L${r.level} Heat ${r.heat} Hollow 3 | deepest floor ${r.deepestFloor}/${r.floorTarget} | ` +
+        `${String(r.steps).padStart(3)} steps | ${r.cleared ? 'CLEARED IN ONE RUN' : 'no clear'}`,
     );
   }
-  return degenerate.length === 0;
 }
 
 // CLI entry: only run the report when executed directly (tests import the runner instead).
@@ -492,15 +488,23 @@ if (isCli) {
   }
 
   if (personaArg === 'all' || personaArg === 'breaker') {
+    const seeds = [0xb1e0001, 0xb1e0002, 0xb1e0003];
     console.log('');
-    console.log('Breaker check — every build at max meta, Heat 5 Hollow 3, on Trickle daily oil:');
-    const ok = reportBreaker(runBreaker(1, [0xb1e0001, 0xb1e0002, 0xb1e0003]));
-    if (!ok) {
+    console.log('Breaker check — Hollow 3, Heat 5, one paid run:');
+    const maxed = runBreaker(seeds);
+    reportBreaker(maxed, 'max kit');
+    const rush = runBreaker(seeds, { level: BREAKER_RUSH_LEVEL, maxed: false });
+    reportBreaker(rush, 'fresh @ gate');
+    const deadBuilds = maxed.filter((r) => !r.cleared);
+    const rushed = rush.filter((r) => r.cleared);
+    if (deadBuilds.length > 0 || rushed.length > 0) {
       console.error(
-        'Balance check FAILED: a maxed build cleared Heat 5 Hollow 3 within one day of Trickle oil.',
+        'Balance check FAILED: ' +
+          `${deadBuilds.length} maxed build(s) could not clear; ` +
+          `${rushed.length} empty account(s) one-ran the deepest Hollow.`,
       );
       process.exit(1);
     }
-    console.log('Breaker check passed: no build one-days the deepest Hollow.');
+    console.log('Breaker check passed: every maxed build clears, and no empty account rushes it.');
   }
 }

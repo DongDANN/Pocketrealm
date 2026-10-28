@@ -40,7 +40,7 @@ function request(seed: number, absenceMs = TWELVE_HOURS): CatchUpJobRequest {
   return {
     run,
     ctx,
-    maxSteps: catchUpStepCount(ctx.meta.lastStepAt, ctx.now, ctx.oil),
+    maxSteps: catchUpStepCount(ctx.meta.lastStepAt, ctx.now),
     chunkSize: 64,
   };
 }
@@ -110,7 +110,7 @@ describe('catch-up job', () => {
 
   it('grants no steps for a backwards clock or an absence under one step', () => {
     const req = request(5, -DAY_MS);
-    expect(catchUpStepCount(NOW, NOW - DAY_MS, 1440)).toBe(0);
+    expect(catchUpStepCount(NOW, NOW - DAY_MS)).toBe(0);
     expect(runCatchUpJob(req).result.applied).toBe(0);
     expect(runCatchUpJob(request(6, 10_000)).result.applied).toBe(0);
   });
