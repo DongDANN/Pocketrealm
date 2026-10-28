@@ -26,6 +26,7 @@ import {
   masteryLevel,
   mechanicTitle,
   openingDefence,
+  skillLevels,
   spawnEnemies,
   statusShield,
   type AttackInput,
@@ -65,7 +66,7 @@ function roomView(run: RunState, meta: DelveMeta, signals: BudgetSignals): RoomV
   return {
     run,
     enemies: spawnEnemies(room, run.floor, run.heat),
-    defence: openingDefence(run, mods),
+    defence: openingDefence(run, mods, skillLevels(meta)),
     atk: base.atk + mods.atk,
     critMult: mods.critDamageMult,
     eliteBonus: mods.eliteDamageBonus,

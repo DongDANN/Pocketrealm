@@ -160,7 +160,9 @@ function attackContext(
 ): { ctx: AttackContext; def: number; damageReduction: number } {
   const mods = computeModifiers(run, forgeTotals(meta.forge), computeBuffs(signals));
   const base = companionBase(run.companionLevel);
-  const opening = openingDefence(run, mods);
+  // The same ladder the fight resolves with, so an LV5 passive opens behind the Shield it advertises.
+  const levels = skillLevels(meta);
+  const opening = openingDefence(run, mods, levels);
   return {
     ctx: {
       atk: base.atk + mods.atk,
@@ -168,7 +170,7 @@ function attackContext(
       eliteBonus: mods.eliteDamageBonus,
       knownWeaknesses: meta.knownWeaknesses ?? [],
       mastery: meta.mastery ?? {},
-      skillLevels: skillLevels(meta),
+      skillLevels: levels,
     },
     def: opening.def,
     damageReduction: opening.damageReduction,

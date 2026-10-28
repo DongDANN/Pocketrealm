@@ -1882,3 +1882,81 @@ nothing else could play the run; this gate proves a player can.
   player carries a Stun, a Shield and a Burn in the same panel, are 7f questions with the pacing tests
   in it. Of the 60 catalogue entries, only the ones the resolver can honour are swingable today, so the
   7c-3b LV5 modifiers stay withheld.
+
+### Gate 7c-3b — The top rung has to be a number the fight can actually spend (2026-10-28)
+
+- **What this gate is.** §7 D.6's second sentence: level 5 attaches a modifier, and 7c-3 shipped the
+  ladder with that sentence deliberately unspent. This gate closes it. `Level5Fx` in
+  `src/core/delve/data/skills.ts` is a closed vocabulary of six kinds, every one of them a field
+  `combat.ts` already applies, and all sixty `level5` lines were rewritten against it. `fxAtLevel()` in
+  `src/core/delve/combat.ts` is the single fold point: the engine, the menu and
+  the readout all read the rung through it, so an option the player was shown and the blow the engine
+  resolved are one computation rather than two that happen to agree today.
+- **The six kinds, and what each one is allowed to sit on.** `statusRounds` lengthens the status a swing
+  already lands; `spread` puts that same status on the first other living enemy; `shieldPercent` raises
+  the fraction of damage dealt that becomes Shield; `critPoints` adds percentage points to the crit roll
+  for this swing; `varianceFloor` stops the seeded −1 from subtracting; `openingShield` raises the flat
+  Shield an opening passive puts up. The distribution is fixed by test — 21 / 8 / 15 / 7 / 5 / 4 —
+  because a ladder where one kind dominates is a ladder with one interesting rung on it.
+- **Three latent defects in the data surfaced while writing the contract, and all three were real.**
+  `statusDuration` was authored on forty cards and read by nobody — the resolver always used the table's
+  duration, and on seventeen of those forty the two numbers disagree, so seventeen cards were silently
+  lying about how long their Chill or Poison held (Cold Bar prints 3 rounds of Chill against a table that
+  says 2). `bonusCrit` was written as a fraction (`0.12`) and added to a percentage (`+12`) in the roll,
+  so every crit bonus the catalogue offered was a hundredth of what its copy promised. And a `regen`
+  status landed on the _target_, which meant Deep Breath was healing the Tollbug it hit; a status that
+  mends belongs to the companion, and the resolver now routes it there behind `You gain Regen.` The
+  Stun's own counter is left inert on purpose — the skip handler deletes the entry after one round —
+  which is why `statusRounds` and `spread` are refused on a Stun card by test rather than merely
+  discouraged.
+- **A rung is a fold into the printed number, not a replacement of the card.** `fxAtLevel` returns the
+  printed `fx` with the rung folded in, and the fold is only ever an increase on the field the rung
+  names: `status` and `burningBonus` and `interruptsTelegraph` are untouched at every level, so buying
+  the top rung cannot quietly change which promise a card keeps. The one float artifact that fell out
+  (`0.5 + 0.4 = 0.8999999999999999`) is folded through `foldFraction`, rounding the percentage to three
+  decimals once, because a Shield term printed as 89.999… is a UI lie of a different kind.
+- **The rng stream is untouched, and that is the reason the goldens still match.** `varianceFloor`
+  refuses the −1's _contribution_ after the draw, never the draw itself, and `spread` reuses the same
+  status application for the second victim instead of taking another number. A run that reaches LV5 on a
+  floor card therefore consumes exactly the entropy the same run consumed at LV1. `AttackInput.varianceFloor`
+  is optional and absent-on-false, so every hit record written before this gate is still a valid input
+  that re-derives to the number it printed. All five digests came back **unchanged** — `94a4734277595fe7`
+  / `3576928019daf46e` / `ead747a9c3dee2e7` / `9b13691c4c130d6e` / `bcc6e6e8a66ebb11` — which is
+  evidence rather than assertion: a default book cannot reach a fifth rung today, so nothing it fights
+  with can differ.
+- **The prose and the number are pinned against each other by construction.** For each of the four kinds
+  that states a number, the catalogue test extracts the number the `level5` line prints — anchored on the
+  noun it quantifies, so a stray digit fails — and requires it to equal the total `fxAtLevel(skill, 5)`
+  reports, not the `add` the rung contributed. `LV5: the shield it raises is worth 35% of the damage
+dealt.` is 0.35 because Bark Wall prints 0.2 and the rung adds 0.15, and the test reads both halves.
+  The two kinds that state no number still have to name their noun: a spread line says _one other
+  enemy_, a floor line says _under its likely number_. Every line starts `LV5: `, all sixty are unique,
+  and the old `overreach` guard now covers `level5` as well as `effect` — the exemption 7c-3 wrote for
+  itself is retired, because the surface it excused is the one this gate made real.
+- **Nothing attaches before the fifth rung, and a build's own skill never attaches one at all.** Four
+  rungs buy potency only, so a half-bought ladder is a shorter ladder rather than a different skill; and
+  `warden-bastion` prices and resolves exactly as printed at LV5, which keeps §2 invariant 5 honest —
+  choosing Warden over a catalogue build cannot quietly change what one of its swings does. Both readings
+  are tested across all sixty cards and all four builds, not asserted in a comment.
+- **Two rules the data taught me rather than the other way round.** A `critPoints` rung does not require
+  a card that printed a crit bonus: Lantern Watch and Slack Line buy their first points at LV5, which is
+  a legitimate rung and a sentence the copy says out loud. A `shieldPercent` rung does not require a
+  printed fraction either — Root Grip's hook takes a Shield it never had, and its line carries the word
+  _also_ to say so. I wrote both rules too strict, watched the catalogue test refuse them, and read the
+  data before deciding which side was wrong; the tests now require the folded total to be above zero
+  rather than requiring a base to raise.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean after re-formatting three files; `npx vitest run`
+  **verified 928/928 across 77 files** (905/76 before, plus the eighteen-test rung-in-a-fight suite and
+  five net new contract tests, one older truthiness check having been folded into them).
+  `npm run sim:golden` **verified all five digests unchanged**.
+  `npm run test:e2e` **verified 67/67** in Chromium against the production build (5.7m) — no screen
+  changed, so the suite is proof the fold did not move a fight a player can currently reach.
+  `e2e/offline.spec.ts` stays parked and uncommitted.
+- **Not verified / still open:** still no door. The rung is now resolvable, priceable and readable by the
+  engine, but nothing on screen buys a fifth level or prints a `level5` line, so the whole gate is
+  reachable through tests and the data API — 7c-5 owns the Workshop, capsule and Codex screens, and the
+  two UI lines that quote `build.skills` as the skill list
+  (`src/ui/screens/Delve.tsx:801` and `src/ui/screens/DelveForge.tsx:165`) stay where 7c-4 left them.
+  What the rungs are _worth_ is untested: 90 Dust for +32% potency and a modifier is a pacing claim about
+  a curve no persona sim yet exercises at LV5, and that is 7f's question with the goldens in it.

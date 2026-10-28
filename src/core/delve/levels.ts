@@ -4,8 +4,8 @@
  * Two sources, one currency. A duplicate capsule pays its tier's dust on the spot (`DUST_BY_RARITY`,
  * drawn in `capsules.ts`), and a skill that actually gets swung pays 1 dust per ten uses when the run
  * settles. Levels cost 5 / 15 / 40 / 90 dust for LV2 through LV5 and each rung adds a flat 8% to that
- * skill's own potency — that is the whole effect, because §15 Risk 2 is sixty skills times five levels
- * and a flat multiplier is the part of that surface a person can still reason about.
+ * skill's own potency, because §15 Risk 2 is sixty skills times five levels and a flat multiplier is
+ * the part of that surface a person can still reason about.
  *
  * The use counter carries its remainder. §7 D.6 reads "every 10 uses of a skill in a run", and taken
  * strictly that discards the nine swings that did not finish a ten — which taxes exactly the retreat
@@ -13,16 +13,17 @@
  * of ten, wherever those uses happened, and `uses` holds what is left toward the next one. A run that
  * ends early keeps every swing it made.
  *
- * Level 5's attached modifier (§7 D.6) is deliberately absent here: the catalogue's LV5 lines are prose
- * that `combat.ts` has no field for, and a ladder whose top rung prints a promise the resolver cannot
- * keep is the UI lie this project already agreed not to ship. Potency is the only thing a level buys
- * until those lines are made honourable.
+ * Level 5 also attaches a modifier (§7 D.6), and `data/skills.ts`'s `Level5Fx` is the closed list of
+ * six things it may do — every one a field `combat.ts` already applies. The prose the Codex prints and
+ * the number the resolver folds in are pinned against each other by the catalogue test, because a
+ * ladder whose top rung prints a promise the resolver cannot keep is the UI lie this project already
+ * agreed not to ship. A build's own skills have no rung to attach, so they buy potency and nothing else.
  */
 
 import { hitOf } from './damage';
 import type { DelveMeta, RunState } from './types';
 
-/** The top of the ladder, and the only level that would have owed a modifier (§7 D.6). */
+/** The top of the ladder, and the rung that attaches a catalogue skill's modifier (§7 D.6). */
 export const MAX_SKILL_LEVEL = 5;
 
 /** Dust that buys each rung. Indexed by the level being bought, so LV1 holds two empty slots. */
@@ -53,6 +54,16 @@ export function potencyPercent(level: number | undefined): number {
 /** LV1 reads as no bonus at all, so a level the player has not bought never appears in a damage sum. */
 export function isLeveled(level: number | undefined): boolean {
   return clampLevel(level) > 1;
+}
+
+/**
+ * Whether a skill sits on the top rung, where §7 D.6 attaches its modifier.
+ *
+ * The comparison is an equality on purpose: a rung the book has not bought yet attaches nothing, and
+ * the ladder has no sixth rung to overshoot into — `clampLevel` already caps it at five.
+ */
+export function reachesLevel5(level: number | undefined): boolean {
+  return clampLevel(level) === MAX_SKILL_LEVEL;
 }
 
 /** Every owned skill and its level, in the shape combat and the menu price from. */

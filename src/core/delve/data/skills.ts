@@ -11,22 +11,68 @@
  * entry: 22 common, 16 uncommon, 12 rare, 7 epic, 3 mythic. `tests/delve-skills-catalogue.test.ts`
  * fails if a tier drifts, which is the only reason the grouping is load-bearing rather than cosmetic.
  *
- * Every effect is written in the vocabulary `combat.ts` already honours (`SkillHitFx` / `PassiveFx`),
- * because a skill the resolver cannot honour is a promise the UI would have to break. The level-5
- * line is the one exception: §7 D.6 attaches a modifier at the top of the dust ladder, and it is
- * prose until 7c-3 gives it teeth.
+ * Every effect is written in the vocabulary `combat.ts` honours (`SkillHitFx` / `PassiveFx`), because
+ * a skill the resolver cannot honour is a promise the UI would have to break. The top of the Dust
+ * ladder is written in the same discipline: §7 D.6 attaches a modifier at LV5 and `Level5Fx` below is
+ * the closed list of six things that modifier may do, each one a field the resolver already reads or
+ * one more enemy in the same status application. `level5` stays as the line the screen prints, and
+ * `tests/delve-skills-catalogue.test.ts` reconciles it against `level5Fx` — the copy quotes the number
+ * the engine will actually apply, so a top rung cannot drift away from its own description.
+ *
+ * Two units worth stating, because both have been written wrong here once: `bonusCrit` is **percentage
+ * points added to the crit roll** (the same unit as a tree node's `+3% crit chance`), not a fraction,
+ * and `statusDuration` is the number of rounds the status is applied for — Gate 7c-3b made the
+ * resolver read both, so a card's number now has to be in that unit rather than near it.
  */
 
 import type { BoonTag, Rarity } from '../types';
 import type { PassiveFx, SkillDef, SkillHitFx } from './builds';
 import type { Element } from './elements';
 
+/**
+ * The six things a top rung may do (§7 D.6). Small on purpose: every kind is one number the resolver
+ * already applies, so "the modifier lands" is a test and not a hope.
+ *
+ * - `statusRounds` raises the rounds of the status this skill applies, and it needs a status that is
+ *   not Stun — Stun is spent by the skip it causes, so its round count is inert by design.
+ * - `spread` applies that same status to one more living enemy, chosen in roster order so the extra
+ *   target is deterministic.
+ * - `shieldPercent` raises the fraction of the damage dealt that becomes Shield.
+ * - `critPoints` raises the percentage points this swing adds to the crit roll.
+ * - `varianceFloor` stops the seeded −1/0/+1 roll from coming in under its likely number.
+ * - `openingShield` raises the flat Shield an opening passive puts up.
+ *
+ * What is deliberately not here: energy refunds, Glint payouts, effects that cross a room or a floor,
+ * conditional triggers (on crit, on kill, while a shield stands), status stacking beyond the table's
+ * own rule, and any bypass of a boss's resistances. Those are the promises §7 D.6's prose made before
+ * there was a resolver to keep them, and 7c-3b rewrote every line that leaned on one.
+ */
+export type Level5Fx =
+  | { kind: 'statusRounds'; add: number }
+  | { kind: 'spread' }
+  | { kind: 'shieldPercent'; add: number }
+  | { kind: 'critPoints'; add: number }
+  | { kind: 'varianceFloor' }
+  | { kind: 'openingShield'; add: number };
+
+/** The vocabulary as data, so a test can refuse a kind that is not in it. */
+export const LEVEL5_KINDS: readonly Level5Fx['kind'][] = [
+  'statusRounds',
+  'spread',
+  'shieldPercent',
+  'critPoints',
+  'varianceFloor',
+  'openingShield',
+];
+
 /** A catalogue entry: a combat skill plus the collection facts that put it in a capsule. */
 export interface CatalogueSkill extends SkillDef {
   rarity: Rarity;
   /** The boon tag this skill chains with (§7 D.1). */
   tag: BoonTag;
-  /** The modifier the top of the dust ladder attaches (§7 D.6). */
+  /** The modifier the top of the dust ladder attaches, as the resolver reads it (§7 D.6). */
+  level5Fx: Level5Fx;
+  /** That modifier in the words the Codex prints. The test keeps it and `level5Fx` in agreement. */
   level5: string;
 }
 
@@ -55,6 +101,7 @@ function active(
   effect: string,
   fx: SkillHitFx,
   level5: string,
+  level5Fx: Level5Fx,
   role?: 'guard' | 'burst',
 ): CatalogueSkill {
   return skill({
@@ -69,6 +116,7 @@ function active(
     effect,
     fx,
     level5,
+    level5Fx,
     ...(role ? { role } : {}),
   });
 }
@@ -80,8 +128,9 @@ function passive(
   effect: string,
   fx: PassiveFx,
   level5: string,
+  level5Fx: Level5Fx,
 ): CatalogueSkill {
-  return skill({ name, kind: 'passive', tag, rarity, effect, fx, level5 });
+  return skill({ name, kind: 'passive', tag, rarity, effect, fx, level5, level5Fx });
 }
 
 export const SKILLS: readonly CatalogueSkill[] = [
@@ -96,7 +145,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     0.9,
     'A short frost jab that raises a little shield from the damage it deals.',
     { shieldPercent: 0.2 },
-    'LV5: the shield also stands through the round after this one.',
+    'LV5: the shield it raises is worth 35% of the damage dealt.',
+    { kind: 'shieldPercent', add: 0.15 },
   ),
   active(
     'Root Grip',
@@ -108,7 +158,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     0.95,
     'Hooks a target in place, holding it out of the next round of its own turn.',
     { status: 'stun', statusDuration: 1 },
-    'LV5: the hold ignores a boss’s stun resistance once per room.',
+    'LV5: planting the hook also raises Shield worth 20% of the damage dealt.',
+    { kind: 'shieldPercent', add: 0.2 },
   ),
   active(
     'Slack Rope',
@@ -120,7 +171,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     0.85,
     'A pulling strike that makes the target softer to everything that follows.',
     { status: 'mark', statusDuration: 2 },
-    'LV5: the softening also covers the companion’s next basic swing.',
+    'LV5: the softening spreads — the Mark also lands on one other enemy.',
+    { kind: 'spread' },
   ),
   active(
     'Knot Guard',
@@ -132,7 +184,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.0,
     'A tied blow that chills on contact and slows everything the target tries next.',
     { status: 'chill', statusDuration: 2, shieldPercent: 0.15 },
-    'LV5: the chill lasts a third round on anything already chilled.',
+    'LV5: the Chill it ties in holds for 3 rounds.',
+    { kind: 'statusRounds', add: 1 },
   ),
   active(
     'Stone Sleeves',
@@ -144,7 +197,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.1,
     'Heavy sleeves: the hit is slow, the shield it raises is not.',
     { shieldPercent: 0.45 },
-    'LV5: the shield is raised before the blow lands, so it also guards the counter.',
+    'LV5: the sleeves weigh more — 65% of the damage dealt becomes Shield.',
+    { kind: 'shieldPercent', add: 0.2 },
     'guard',
   ),
   active(
@@ -157,7 +211,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.05,
     'Reads the enemy’s next move and answers it before it arrives.',
     { status: 'stun', statusDuration: 1, interruptsTelegraph: true },
-    'LV5: a reading that lands also reveals the weakness of everything standing.',
+    'LV5: the reading is exact — this swing is worth +15 crit chance.',
+    { kind: 'critPoints', add: 15 },
   ),
   passive(
     'Deep Cellar',
@@ -165,7 +220,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     'uncommon',
     'The run opens with a shield already standing, thick enough to blunt a first volley.',
     { kind: 'startShield', amount: 10 },
-    'LV5: the opening shield is raised again at the start of every floor.',
+    'LV5: the run opens behind 16 Shield.',
+    { kind: 'openingShield', add: 6 },
   ),
   active(
     'Cold Bar',
@@ -177,7 +233,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.25,
     'A barred swing that freezes the target mid-intent and shields on impact.',
     { status: 'chill', statusDuration: 3, shieldPercent: 0.3 },
-    'LV5: a chilled target cannot act on the round it thaws.',
+    'LV5: the freeze sets deeper, for 4 rounds of Chill.',
+    { kind: 'statusRounds', add: 1 },
     'guard',
   ),
   active(
@@ -188,9 +245,10 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     4,
     1.3,
-    'A hook that catches the toughest target standing and leaves it marked for the run.',
-    { status: 'mark', statusDuration: 3, bonusCrit: 0.1 },
-    'LV5: the mark it leaves is the one the boss phases answer to.',
+    'A hook that catches a target and leaves it marked for everything that follows.',
+    { status: 'mark', statusDuration: 3, bonusCrit: 10 },
+    'LV5: the hook drags one other enemy into the Mark as well.',
+    { kind: 'spread' },
   ),
   active(
     'Iron Patience',
@@ -202,7 +260,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.55,
     'Takes the round on the chin and answers it with a shield thick enough to show for it.',
     { shieldPercent: 0.6, status: 'chill', statusDuration: 2 },
-    'LV5: bracing on the same round as this blow halves the damage a second time.',
+    'LV5: the shield is worth 90% of the damage dealt.',
+    { kind: 'shieldPercent', add: 0.3 },
     'guard',
   ),
   passive(
@@ -211,7 +270,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     'epic',
     'Holding still pays: the run opens behind a shield thick enough to be worth the epic draw.',
     { kind: 'startShield', amount: 14 },
-    'LV5: the opening shield still stands in the round after the first volley.',
+    'LV5: holding still pays more — the run opens behind 20 Shield.',
+    { kind: 'openingShield', add: 6 },
   ),
   active(
     'Bulwark Bloom',
@@ -223,7 +283,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     2.05,
     'A wall of frost on one swing: the heaviest shield an active pays out, chilled all the way through.',
     { shieldPercent: 0.8, status: 'chill', statusDuration: 3, interruptsTelegraph: true },
-    'LV5: the shield carries into the next room untouched.',
+    'LV5: the wall blooms slower — 4 rounds of Chill.',
+    { kind: 'statusRounds', add: 1 },
     'guard',
   ),
 
@@ -238,7 +299,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.05,
     'A quick ember slash that leaves a low burn behind it.',
     { status: 'burn', statusDuration: 2 },
-    'LV5: the burn spreads to one enemy standing beside the target.',
+    'LV5: the Burn it leaves lasts 4 rounds.',
+    { kind: 'statusRounds', add: 2 },
     'burst',
   ),
   active(
@@ -250,8 +312,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     2,
     1.0,
     'Cheap, fast, and more likely to catch a critical than a heavier swing.',
-    { bonusCrit: 0.12 },
-    'LV5: a critical flick is ready again the round after it lands.',
+    { bonusCrit: 12 },
+    'LV5: the splinter is weighted — this swing is worth +20 crit chance.',
+    { kind: 'critPoints', add: 8 },
   ),
   active(
     'Brimstone Jab',
@@ -263,7 +326,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.1,
     'A short punch of sulphur that hits harder on anything already burning.',
     { status: 'burn', statusDuration: 2, bonusIfBurning: 1.3 },
-    'LV5: the bonus applies to the burn’s own ticks as well.',
+    'LV5: the sulphur smoulders — 3 rounds of Burn.',
+    { kind: 'statusRounds', add: 1 },
     'burst',
   ),
   active(
@@ -276,7 +340,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.0,
     'A backhanded swipe of ash that stings and blights the target.',
     { status: 'poison', statusDuration: 2 },
-    'LV5: a poisoned target drops its own shield when this lands.',
+    'LV5: the ash settles on one other enemy, and the Poison lands there too.',
+    { kind: 'spread' },
   ),
   active(
     'Ember Lash',
@@ -288,7 +353,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.2,
     'A long lash that bites deeper into anything already alight.',
     { status: 'burn', statusDuration: 3, bonusIfBurning: 1.4 },
-    'LV5: every burn tick on the target refunds one energy.',
+    'LV5: the lash catches — 4 rounds of Burn.',
+    { kind: 'statusRounds', add: 1 },
     'burst',
   ),
   active(
@@ -299,9 +365,10 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     4,
     1.3,
-    'A umbra bite that leaves a mark the rest of the run can see by.',
-    { status: 'mark', statusDuration: 2, bonusCrit: 0.08 },
-    'LV5: a marked target is also stunned when this criticals.',
+    'A umbra bite that leaves the target marked for what comes after it.',
+    { status: 'mark', statusDuration: 2, bonusCrit: 8 },
+    'LV5: the Mark it leaves is readable for 3 rounds.',
+    { kind: 'statusRounds', add: 1 },
     'burst',
   ),
   passive(
@@ -310,7 +377,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     'uncommon',
     'Every critical this companion lands sets its target alight on its own.',
     { kind: 'critBurn', duration: 2 },
-    'LV5: the fire it lights lasts two rounds longer.',
+    'LV5: the fire a critical lights lasts 4 rounds.',
+    { kind: 'statusRounds', add: 2 },
   ),
   active(
     'Pyre Reap',
@@ -320,9 +388,10 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     5,
     1.4,
-    'Reaps a burning target: the fire on it is spent to make this hit hurt.',
+    'Reaps a burning target: the fire on it is counted to make this hit hurt.',
     { bonusIfBurning: 1.8, status: 'burn', statusDuration: 2 },
-    'LV5: spending the burn pays back half the energy this blow costs.',
+    'LV5: the reap never comes up short — this blow never rolls under its likely number.',
+    { kind: 'varianceFloor' },
     'burst',
   ),
   active(
@@ -334,8 +403,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     1.45,
     'A bell-strike out of the dark that cancels a telegraphed mechanic when it crits.',
-    { interruptsTelegraph: true, bonusCrit: 0.15 },
-    'LV5: cancelling a telegraph also stuns the boss for a round.',
+    { interruptsTelegraph: true, bonusCrit: 15 },
+    'LV5: the bell is rung truer — this swing is worth +25 crit chance.',
+    { kind: 'critPoints', add: 10 },
     'burst',
   ),
   active(
@@ -348,7 +418,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.75,
     "The room's heat is called in as a sentence, and burning targets serve it twice.",
     { bonusIfBurning: 2.1, status: 'burn', statusDuration: 3 },
-    'LV5: a target killed by this passes its burns to the strongest enemy left.',
+    'LV5: the sentence is read twice — the Burn lands on one other enemy as well.',
+    { kind: 'spread' },
     'burst',
   ),
   active(
@@ -360,8 +431,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     6,
     1.8,
     'A howl that lands late and impossible to read, marking whatever it catches.',
-    { status: 'mark', statusDuration: 3, bonusCrit: 0.25 },
-    'LV5: every enemy marked by this loses its own next action.',
+    { status: 'mark', statusDuration: 3, bonusCrit: 25 },
+    'LV5: the howl marks one other enemy as it lands.',
+    { kind: 'spread' },
     'burst',
   ),
   active(
@@ -375,12 +447,13 @@ export const SKILLS: readonly CatalogueSkill[] = [
     'A whole falling sky on one edge: it burns, it crits hard, and it ends telegraphs.',
     {
       bonusIfBurning: 2.0,
-      bonusCrit: 0.3,
+      bonusCrit: 30,
       status: 'burn',
       statusDuration: 4,
       interruptsTelegraph: true,
     },
-    'LV5: the drop also shields the companion for the damage it dealt.',
+    'LV5: the drop also raises Shield worth 100% of the damage dealt.',
+    { kind: 'shieldPercent', add: 1 },
     'burst',
   ),
 
@@ -394,8 +467,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     3,
     0.95,
     'A tossed piece of metal, thrown hard enough to count and light enough to luck out.',
-    { bonusCrit: 0.15 },
-    'LV5: a critical flick returns the energy it cost.',
+    { bonusCrit: 15 },
+    'LV5: the coin is flipped its own way — this swing is worth +25 crit chance.',
+    { kind: 'critPoints', add: 10 },
   ),
   active(
     'Loaded Dice',
@@ -406,8 +480,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     4,
     1.0,
     'The roll is weighted before it ever leaves the hand.',
-    { bonusCrit: 0.2 },
-    'LV5: the weighting carries over to the companion’s next basic swing.',
+    { bonusCrit: 20 },
+    'LV5: the dice are weighted past the roll — this blow never rolls under its likely number.',
+    { kind: 'varianceFloor' },
   ),
   active(
     'Penny Trail',
@@ -417,9 +492,10 @@ export const SKILLS: readonly CatalogueSkill[] = [
     3,
     3,
     1.0,
-    'A bright strike that leaves a mark the run can follow.',
+    'A bright strike that leaves the target marked and easy to follow.',
     { status: 'mark', statusDuration: 2 },
-    'LV5: following a mark pays one Glint per round it stays lit.',
+    'LV5: the Mark stays lit for 3 rounds.',
+    { kind: 'statusRounds', add: 1 },
   ),
   active(
     'Foxlight Bet',
@@ -430,8 +506,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     4,
     1.05,
     'A cold gamble: modest damage unless it crits, and it wants to.',
-    { bonusCrit: 0.22, status: 'chill', statusDuration: 1 },
-    'LV5: a crit chills for two rounds more.',
+    { bonusCrit: 22, status: 'chill', statusDuration: 1 },
+    'LV5: the cold bet pays a Chill that holds 3 rounds.',
+    { kind: 'statusRounds', add: 2 },
   ),
   active(
     'Toss Turn',
@@ -442,8 +519,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     4,
     1.1,
     'Flips the round in the companion’s favour, then hits while the target is dizzy.',
-    { status: 'stun', statusDuration: 1, bonusCrit: 0.1 },
-    'LV5: a dizzy target takes this blow at the marked rate.',
+    { status: 'stun', statusDuration: 1, bonusCrit: 10 },
+    'LV5: the round is flipped further — this swing is worth +18 crit chance.',
+    { kind: 'critPoints', add: 8 },
   ),
   active(
     'Glint Snare',
@@ -455,7 +533,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.1,
     'Baited light: the strike is cheap, the shield it pays out is not.',
     { shieldPercent: 0.35 },
-    'LV5: the payout is Glint instead of a shield when the room is already walled.',
+    'LV5: the bait pays 55% of the damage dealt as Shield.',
+    { kind: 'shieldPercent', add: 0.2 },
   ),
   active(
     'Crossed Fingers',
@@ -466,8 +545,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     1.2,
     'A careful wind-up with a wide chance of landing as a critical.',
-    { bonusCrit: 0.28 },
-    'LV5: this blow never rolls below its likely number.',
+    { bonusCrit: 28 },
+    'LV5: the fingers stay crossed — this blow never rolls under its likely number.',
+    { kind: 'varianceFloor' },
   ),
   active(
     'Jackal Draw',
@@ -478,8 +558,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     1.25,
     'Draws the worst card in the deck onto the target and burns it there.',
-    { status: 'burn', statusDuration: 3, bonusCrit: 0.15 },
-    'LV5: the burn also lands on the target’s strongest ally.',
+    { status: 'burn', statusDuration: 3, bonusCrit: 15 },
+    'LV5: the worst card is dealt twice — the Burn lands on one other enemy.',
+    { kind: 'spread' },
     'burst',
   ),
   active(
@@ -491,8 +572,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     1.3,
     'Luck arriving all at once: a fast strike that pays shield and crit chance alike.',
-    { shieldPercent: 0.3, bonusCrit: 0.2 },
-    'LV5: the shield scales with the damage actually dealt, not the likely number.',
+    { shieldPercent: 0.3, bonusCrit: 20 },
+    'LV5: the luck arrives thicker — 55% of the damage dealt becomes Shield.',
+    { kind: 'shieldPercent', add: 0.25 },
   ),
   active(
     'Thorn Wager',
@@ -503,8 +585,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     5,
     1.4,
     'A wager on the roll: deep poison, and the critical chance to pay for it.',
-    { status: 'poison', statusDuration: 3, bonusCrit: 0.3 },
-    'LV5: a winning wager returns the HP it staked.',
+    { status: 'poison', statusDuration: 3, bonusCrit: 30 },
+    'LV5: the wager stings for 4 rounds of Poison.',
+    { kind: 'statusRounds', add: 1 },
     'burst',
   ),
   passive(
@@ -513,7 +596,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     'rare',
     'Luck catches fire on contact: every critical this companion lands sets its target alight.',
     { kind: 'critBurn', duration: 3 },
-    'LV5: the fire lasts one round longer than the critical that lit it.',
+    'LV5: a critical lights a fire that lasts 4 rounds.',
+    { kind: 'statusRounds', add: 1 },
   ),
   active(
     'Fortune Teeth',
@@ -524,8 +608,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     6,
     1.6,
     'Luck with a jaw: it burns, it marks, it shields and it crits on the same swing.',
-    { status: 'burn', statusDuration: 3, bonusCrit: 0.25, shieldPercent: 0.25 },
-    'LV5: every effect already on the target is extended by one round when this crits.',
+    { status: 'burn', statusDuration: 3, bonusCrit: 25, shieldPercent: 0.25 },
+    'LV5: every tooth catches — 5 rounds of Burn.',
+    { kind: 'statusRounds', add: 2 },
     'burst',
   ),
 
@@ -540,7 +625,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     0.95,
     'A patient strike that leaves a poison working and a little shield standing.',
     { status: 'poison', statusDuration: 3, shieldPercent: 0.1 },
-    'LV5: each poison tick on the target heals the companion for 1 HP.',
+    'LV5: the patience pays — 25% of the damage dealt becomes Shield.',
+    { kind: 'shieldPercent', add: 0.15 },
   ),
   active(
     'Bramble Punch',
@@ -552,7 +638,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.0,
     'Thorns on the knuckles: it hurts them more than it hurts the swing.',
     { status: 'poison', statusDuration: 2 },
-    'LV5: the counter-blow that follows is reduced by the same amount.',
+    'LV5: the thorns work for 3 rounds of Poison.',
+    { kind: 'statusRounds', add: 1 },
   ),
   active(
     'Deep Breath',
@@ -564,7 +651,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     0.9,
     'Sets the stance, takes a breath, and mends a little on the spot.',
     { status: 'regen', statusDuration: 2 },
-    'LV5: the mending refreshes whenever the companion braces.',
+    'LV5: the breath goes deeper — 3 rounds of Regen.',
+    { kind: 'statusRounds', add: 1 },
   ),
   active(
     'Sap Hook',
@@ -576,7 +664,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.0,
     'Pulls a shield straight out of the wound it makes.',
     { shieldPercent: 0.3 },
-    'LV5: half of what it drains is healed outright instead of shielded.',
+    'LV5: it drains 60% of the damage into the shield.',
+    { kind: 'shieldPercent', add: 0.3 },
   ),
   active(
     'Thornbark',
@@ -588,7 +677,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.05,
     'A thick-handed blow that leaves the target slow and the companion warded.',
     { status: 'chill', statusDuration: 2, shieldPercent: 0.25 },
-    'LV5: the ward lasts through the next room as well.',
+    'LV5: the ward is a Shield worth 50% of the damage dealt.',
+    { kind: 'shieldPercent', add: 0.25 },
     'guard',
   ),
   active(
@@ -601,7 +691,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.15,
     'Patient growth: modest damage, and a mending that keeps arriving round after round.',
     { status: 'regen', statusDuration: 3 },
-    'LV5: the mending scales with the damage taken since the last round.',
+    'LV5: the mending keeps arriving for 5 rounds of Regen.',
+    { kind: 'statusRounds', add: 2 },
   ),
   passive(
     'Second Wind',
@@ -609,7 +700,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     'uncommon',
     'The body is already warm when the room opens: a shield stands before the first volley lands.',
     { kind: 'startShield', amount: 8 },
-    'LV5: the shield is raised again whenever a floor is cleared.',
+    'LV5: the body is warmer — the run opens behind 13 Shield.',
+    { kind: 'openingShield', add: 5 },
   ),
   active(
     'Ironbark Stance',
@@ -621,7 +713,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.2,
     'Braces mid-swing: the blow lands and the companion stops being soft.',
     { shieldPercent: 0.5, status: 'chill', statusDuration: 2 },
-    'LV5: bracing on the same round as this blow costs no energy.',
+    'LV5: the stance hardens — 80% of the damage dealt becomes Shield.',
+    { kind: 'shieldPercent', add: 0.3 },
     'guard',
   ),
   active(
@@ -634,7 +727,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.25,
     'Ring by ring: it mends as it lands and pays a shield on top of that.',
     { status: 'regen', statusDuration: 2, shieldPercent: 0.3 },
-    'LV5: the growth carries across rooms until the run ends.',
+    'LV5: ring by ring — the Regen keeps arriving for 4 rounds.',
+    { kind: 'statusRounds', add: 2 },
   ),
   active(
     'Well Root',
@@ -646,7 +740,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.35,
     'Drinks from the floor: a wound that keeps working, and a shield to stand behind it.',
     { status: 'poison', statusDuration: 3, shieldPercent: 0.4 },
-    'LV5: the poison it leaves heals the companion on every tick.',
+    'LV5: the Poison keeps working on one other enemy too.',
+    { kind: 'spread' },
   ),
   active(
     'Brambleheart',
@@ -658,7 +753,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.4,
     'A thicket around the chest: the blow lands, a shield holds, and the wound keeps working.',
     { shieldPercent: 0.65, status: 'poison', statusDuration: 3 },
-    'LV5: anything that strikes the companion while this shield stands is poisoned.',
+    'LV5: the thicket is a Shield worth 100% of the damage dealt.',
+    { kind: 'shieldPercent', add: 0.35 },
     'guard',
   ),
   active(
@@ -671,7 +767,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.65,
     'A promise kept in frost: heavy damage, a chill that lasts, and a shield that stays standing.',
     { status: 'chill', statusDuration: 4, shieldPercent: 0.55 },
-    'LV5: the chill cannot be shaken while any shield stands.',
+    'LV5: the promise is kept for 5 rounds of Chill.',
+    { kind: 'statusRounds', add: 1 },
     'guard',
   ),
 
@@ -685,8 +782,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     2,
     0.9,
     'The least energy on the panel for a small, dependable sting.',
-    { bonusCrit: 0.08 },
-    'LV5: costs nothing at all when the companion is at full HP.',
+    { bonusCrit: 8 },
+    'LV5: the cheap shot still finds its line — this swing is worth +15 crit chance.',
+    { kind: 'critPoints', add: 7 },
   ),
   active(
     'Barter Cut',
@@ -698,7 +796,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     0.95,
     'Haggles the target’s guard down so every swing after it lands heavier.',
     { status: 'mark', statusDuration: 1 },
-    'LV5: the discount covers every skill for one round.',
+    'LV5: the guard stays down 2 rounds under the Mark.',
+    { kind: 'statusRounds', add: 1 },
   ),
   active(
     'Pinch Blade',
@@ -710,7 +809,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.0,
     'A careful nick that never wastes more than it takes.',
     { shieldPercent: 0.15 },
-    'LV5: refunds one energy whenever it fails to crit.',
+    'LV5: the nick pays 35% of the damage dealt as Shield.',
+    { kind: 'shieldPercent', add: 0.2 },
   ),
   active(
     'Tallow Dash',
@@ -722,7 +822,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.05,
     'Greased and quick: a light burn, a light cost, no wasted motion.',
     { status: 'burn', statusDuration: 1 },
-    'LV5: keeping the burn alight costs no energy at all.',
+    'LV5: the grease catches and holds for 2 rounds of Burn.',
+    { kind: 'statusRounds', add: 1 },
   ),
   active(
     'Haggler Stroke',
@@ -733,8 +834,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     4,
     1.1,
     'Haggles the roll in the run’s favour, then collects in shield.',
-    { bonusCrit: 0.12, shieldPercent: 0.2 },
-    'LV5: the energy saved is paid out as Glint when the room ends.',
+    { bonusCrit: 12, shieldPercent: 0.2 },
+    'LV5: the haggling settles at 40% of the damage dealt as Shield.',
+    { kind: 'shieldPercent', add: 0.2 },
   ),
   active(
     'Slack Line',
@@ -746,7 +848,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.15,
     'Lets the target overreach, lose its footing, and miss its next turn.',
     { status: 'stun', statusDuration: 1 },
-    'LV5: an overreaching target drops its own shield when this lands.',
+    'LV5: the slip is costly — this swing is worth +10 crit chance.',
+    { kind: 'critPoints', add: 10 },
   ),
   active(
     'Thriftbind',
@@ -758,7 +861,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.2,
     'Binds the target in a cold knot: everything it tries from here, it tries slower.',
     { status: 'chill', statusDuration: 2 },
-    'LV5: the binding also cuts the target’s damage, not only its speed.',
+    'LV5: the knot holds for 3 rounds of Chill.',
+    { kind: 'statusRounds', add: 1 },
     'guard',
   ),
   active(
@@ -770,8 +874,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     4,
     1.3,
     'A careful edge: it raises a shield from what it deals and sharpens the roll after it.',
-    { shieldPercent: 0.35, bonusCrit: 0.15 },
-    'LV5: the energy cost is refunded in full on a critical.',
+    { shieldPercent: 0.35, bonusCrit: 15 },
+    'LV5: nothing is wasted on the roll — this blow never lands under its likely number.',
+    { kind: 'varianceFloor' },
   ),
   active(
     'Ledger Cut',
@@ -783,7 +888,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     1.4,
     'Balances the target in one stroke: the wound keeps paying out long after the blow lands.',
     { status: 'poison', statusDuration: 3 },
-    'LV5: the poison also stacks once more on anything already poisoned.',
+    'LV5: the Poison is written against one other enemy as well.',
+    { kind: 'spread' },
     'burst',
   ),
   passive(
@@ -792,7 +898,8 @@ export const SKILLS: readonly CatalogueSkill[] = [
     'rare',
     'The run starts behind a cushion already paid for out of what the last run saved.',
     { kind: 'startShield', amount: 12 },
-    'LV5: the cushion is raised again after every rest taken in the run.',
+    'LV5: the cushion is thicker — the run opens behind 19 Shield.',
+    { kind: 'openingShield', add: 7 },
   ),
   active(
     'Avarice Fang',
@@ -803,8 +910,9 @@ export const SKILLS: readonly CatalogueSkill[] = [
     6,
     1.6,
     'Takes more than it spends: burn, shield, and a critical that pays the bill.',
-    { status: 'burn', statusDuration: 3, shieldPercent: 0.5, bonusCrit: 0.2 },
-    'LV5: never costs energy if the target dies to it.',
+    { status: 'burn', statusDuration: 3, shieldPercent: 0.5, bonusCrit: 20 },
+    'LV5: it takes 90% of the damage dealt and keeps it as Shield.',
+    { kind: 'shieldPercent', add: 0.4 },
     'burst',
   ),
   active(
@@ -816,13 +924,25 @@ export const SKILLS: readonly CatalogueSkill[] = [
     7,
     2.05,
     'Pays for itself nine times over: heavy damage, a thick shield, a critical that lands, a mark that stays.',
-    { shieldPercent: 0.8, status: 'mark', statusDuration: 4, bonusCrit: 0.3 },
-    'LV5: the shield, the refund and the marks all survive into the next room.',
+    { shieldPercent: 0.8, status: 'mark', statusDuration: 4, bonusCrit: 30 },
+    'LV5: the purse never comes up light — this blow never rolls under its likely number.',
+    { kind: 'varianceFloor' },
   ),
 ];
 
+const CATALOGUE_BY_ID = new Map(SKILLS.map((s) => [s.id, s]));
+
 export function skillById(id: string): CatalogueSkill | undefined {
-  return SKILLS.find((s) => s.id === id);
+  return CATALOGUE_BY_ID.get(id);
+}
+
+/**
+ * The top rung attached to one skill id, or undefined for a build's own skill, which has no rung to
+ * attach. Whether the skill has actually reached the rung is the caller's business — `levels.ts` owns
+ * that reading, so the catalogue stays data.
+ */
+export function level5FxOf(id: string): Level5Fx | undefined {
+  return CATALOGUE_BY_ID.get(id)?.level5Fx;
 }
 
 export function skillsOfRarity(rarity: Rarity): CatalogueSkill[] {

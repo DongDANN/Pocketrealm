@@ -66,6 +66,12 @@ export interface AttackInput {
   shield: number;
   /** The target's HP before the hit. */
   hp: number;
+  /**
+   * A skill whose LV5 rung floors the roll (§7 D.6): the −1 of the seeded variance is spent, so the
+   * hit never comes in under its likely number. Absent reads as no floor. The roll is still drawn —
+   * only its contribution to the sum is refused — so the seeded stream a replay depends on is untouched.
+   */
+  varianceFloor?: boolean;
 }
 
 export interface IncomingInput {
@@ -112,9 +118,12 @@ export function attackBreakdown(input: AttackInput): DamageBreakdown {
     beforeDef = Math.round(beforeDef * potency);
     terms.push({ label: 'Potency', op: 'mult', value: mult(potency) });
   }
-  if (input.variance !== 0) {
-    beforeDef += input.variance;
-    terms.push({ label: 'Variance', op: 'add', value: input.variance });
+  // A floored skill spends the low end of the roll: the −1 is drawn and refused, so the sum it
+  // produces is the likely number and the itemization never shows a Variance term going down.
+  const variance = input.varianceFloor ? Math.max(0, input.variance) : input.variance;
+  if (variance !== 0) {
+    beforeDef += variance;
+    terms.push({ label: 'Variance', op: 'add', value: variance });
   }
   beforeDef -= input.def;
   terms.push({ label: 'DEF', op: 'sub', value: input.def });

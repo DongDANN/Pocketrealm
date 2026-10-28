@@ -24,14 +24,21 @@ export type TreeNodeFx =
   | { kind: 'damageReduction'; percent: number }
   | { kind: 'healAfterCombat'; percent: number };
 
-/** On-hit effects for active skills. */
+/**
+ * On-hit effects for active skills, in the units `combat.ts` reads them.
+ *
+ * A status whose own table entry heals (`Regen`) is applied to the companion rather than the target:
+ * the resolver has one rule for a hot and one for a dot, and which side it lands on follows the
+ * status, not the card.
+ */
 export interface SkillHitFx {
   /** Gain shield equal to this fraction of damage dealt. */
   shieldPercent?: number;
-  /** Status applied to the target. */
+  /** Status applied to the target — or mended on the companion, for a healing-over-time status. */
   status?: string;
+  /** Rounds the status is applied for; its table duration when the skill does not name one. */
   statusDuration?: number;
-  /** Extra flat crit chance for this hit. */
+  /** Extra crit chance for this hit, in percentage points added to the roll — not a fraction. */
   bonusCrit?: number;
   /** Damage multiplier when the target is already burning. */
   bonusIfBurning?: number;
@@ -40,7 +47,10 @@ export interface SkillHitFx {
 }
 
 export type PassiveFx =
-  { kind: 'startShield'; amount: number } | { kind: 'critBurn'; duration: number };
+  /** Shield the fight opens behind, on top of the room's own ward. */
+  | { kind: 'startShield'; amount: number }
+  /** Burn a critical lights on its target, for these rounds. */
+  | { kind: 'critBurn'; duration: number };
 
 export interface SkillDef {
   id: string;

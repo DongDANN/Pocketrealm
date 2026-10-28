@@ -5,12 +5,19 @@
  *
  * Gate 1.6 layers: the moveset the run carries supplies up to four active skills (energy, cooldowns)
  * and one passive — its own, or the build's when it names nothing (§7 D.2); statuses
- * (burn/poison/chill/stun/mark/regen) tick every round and clear after combat;
+ * (burn/poison/chill/stun/mark/regen) tick every round and clear after combat, each for the rounds its
+ * card states;
  * skill attacks carry an element and hit ±25% weakness/resistance (weakness only once the codex
  * knows it, resistance always). Affixes (armored/swift/vampiric/splitting/enraged/thorned/
  * warded/frenzied) modify enemy stats and behavior; bosses enter harder phases at 66%/33% HP
  * with three counters to telegraphed mechanics: guard skills halve them, stun interrupts them,
  * and critical interrupts-telegraph skills cancel them. Boss Study reveals names and tells.
+ *
+ * Gate 7c-3b adds the Dust ladder's top rung (§7 D.6): `fxAtLevel` folds a catalogue skill's LV5
+ * modifier into the same fields the printed fx uses, so the shield fraction, the crit points, the
+ * status rounds, the second target a status spreads to, and the floored variance roll are all read from
+ * one place by the engine and by the menu that prices it. A build's own skill has no rung to attach and
+ * resolves to exactly its printed numbers.
  */
 
 import { hashCombine, hashString, mulberry32, type Rng } from '../rng';
@@ -23,7 +30,8 @@ import {
   type PassiveFx,
   type SkillDef,
 } from './data/builds';
-import { potencyMult } from './levels';
+import { level5FxOf, type Level5Fx } from './data/skills';
+import { potencyMult, reachesLevel5 } from './levels';
 import { runMoveset } from './moveset';
 import {
   ENRAGE_ATK_MULTIPLIER,
@@ -196,12 +204,18 @@ export function computeModifiers(
   return m;
 }
 
-/** Apply a status with its stacking rules. Stun rolls boss/recent resistance (seeded). */
+/**
+ * Apply a status with its stacking rules. Stun rolls boss/recent resistance (seeded).
+ *
+ * `rounds` is the card's own duration — its table duration with no LV5 rung, the rung's total once the
+ * ladder is bought. A Stun ignores it in practice: the skip handler removes the status outright, so its
+ * count is inert, which is why §7 D.6 never puts a `statusRounds` rung on a stun skill.
+ */
 export function applyStatus(
   statuses: StatusInstance[],
   id: string,
   rng: Rng,
-  opts: { isBoss?: boolean; roundsSinceStun?: number } = {},
+  opts: { isBoss?: boolean; roundsSinceStun?: number; rounds?: number } = {},
 ): StatusInstance[] {
   const def = statusById(id);
   if (!def) return statuses;
@@ -214,18 +228,19 @@ export function applyStatus(
       return statuses;
     }
   }
+  const rounds = opts.rounds && opts.rounds > 0 ? opts.rounds : def.duration;
   const maxStacks = def.maxStacks ?? 1;
   const existing = statuses.find((s) => s.id === id);
   if (!existing) {
     const stacks =
       def.stacking === 'add' ? Math.min(def.amount ?? 1, maxStacks) : Math.min(1, maxStacks);
-    return [...statuses, { id, stacks, duration: def.duration }];
+    return [...statuses, { id, stacks, duration: rounds }];
   }
   const stacks =
     def.stacking === 'stack' || def.stacking === 'add'
       ? Math.min(existing.stacks + (def.stacking === 'add' ? (def.amount ?? 1) : 1), maxStacks)
       : existing.stacks;
-  return statuses.map((s) => (s.id === id ? { ...s, stacks, duration: def.duration } : s));
+  return statuses.map((s) => (s.id === id ? { ...s, stacks, duration: rounds } : s));
 }
 
 /** SPD while statuses apply (chill halves). */
@@ -249,6 +264,102 @@ function markDamageMult(target: EnemyState): number {
 
 function isPassiveFx(fx: SkillDef['fx']): fx is PassiveFx {
   return !!fx && 'kind' in fx;
+}
+
+/**
+ * A skill's printed `fx` with the LV5 rung folded in (§7 D.6). One shape read by the fight, by the
+ * menu that prices it, and by anything else that has to state what a swing does, so the top of the
+ * Dust ladder can never be true in one place and a promise in another.
+ *
+ * The folded fields are the ones `Level5Fx` can touch. Everything else about a swing — its power,
+ * its element, its energy cost — is exactly what the card prints.
+ */
+export interface ResolvedSkillFx {
+  /** Fraction of the damage dealt that comes back as Shield; 0 when the swing raises none. */
+  shieldPercent: number;
+  /** Percentage points this swing adds to the crit roll. */
+  critPoints: number;
+  /** Damage multiplier against an already-burning target; 0 when the swing does not care. */
+  burningBonus: number;
+  /** A critical with this skill cancels a boss's telegraphed mechanic. */
+  interruptsTelegraph: boolean;
+  /** The status the hit lands, or undefined for a swing that leaves nothing behind. */
+  status?: string;
+  /** Rounds `status` lasts: the card's own number, raised by the rung, else the table's duration. */
+  statusRounds: number;
+  /** True when `status` also lands on one other living enemy, chosen in roster order. */
+  spread: boolean;
+  /** True when the seeded −1 is refused, so this blow never undercuts its likely number. */
+  varianceFloor: boolean;
+}
+
+/** The rung on one skill's ladder, or nothing for a skill the catalogue does not hold. */
+function level5Of(id: string | undefined, level: number | undefined): Level5Fx | undefined {
+  if (!id || !reachesLevel5(level)) return undefined;
+  return level5FxOf(id);
+}
+
+/** A folded fraction kept to three decimals, so the number the log multiplies is the one the card prints. */
+function foldFraction(base: number, add: number): number {
+  return Math.round((base + add) * 1000) / 1000;
+}
+
+/** The active skill's on-hit effect, with its LV5 modifier applied. Passives and bare attacks are empty. */
+export function fxAtLevel(skill: SkillDef | undefined, level: number | undefined): ResolvedSkillFx {
+  const printed = skill?.fx;
+  const hit = printed && !isPassiveFx(printed) ? printed : undefined;
+  const out: ResolvedSkillFx = {
+    shieldPercent: hit?.shieldPercent ?? 0,
+    critPoints: hit?.bonusCrit ?? 0,
+    burningBonus: hit?.bonusIfBurning ?? 0,
+    interruptsTelegraph: hit?.interruptsTelegraph ?? false,
+    status: hit?.status,
+    statusRounds:
+      hit?.statusDuration ?? (hit?.status ? (statusById(hit.status)?.duration ?? 0) : 0),
+    spread: false,
+    varianceFloor: false,
+  };
+  const rung = level5Of(skill?.id, level);
+  if (!rung) return out;
+  switch (rung.kind) {
+    case 'statusRounds':
+      // Only a swing that names a status has rounds to lengthen; on a passive the same rung kind is
+      // read by `passiveCritBurnRounds`, against that passive's own Burn.
+      if (out.status) out.statusRounds += rung.add;
+      break;
+    case 'spread':
+      out.spread = true;
+      break;
+    case 'shieldPercent':
+      out.shieldPercent = foldFraction(out.shieldPercent, rung.add);
+      break;
+    case 'critPoints':
+      out.critPoints += rung.add;
+      break;
+    case 'varianceFloor':
+      out.varianceFloor = true;
+      break;
+    case 'openingShield':
+      // A passive's opening Shield; read by `passiveShieldAmount` rather than here.
+      break;
+  }
+  return out;
+}
+
+/** The Shield a passive opens the fight behind, with its LV5 rung folded in. */
+export function passiveShieldAmount(skill: SkillDef, level: number | undefined): number {
+  const fx = skill.fx;
+  if (!isPassiveFx(fx) || fx.kind !== 'startShield') return 0;
+  const rung = level5Of(skill.id, level);
+  return fx.amount + (rung?.kind === 'openingShield' ? rung.add : 0);
+}
+
+/** Rounds the Burn from a crit-lighting passive lasts, with its LV5 rung folded in. */
+export function passiveCritBurnRounds(skill: SkillDef, level: number | undefined): number {
+  const fx = skill.fx;
+  if (!isPassiveFx(fx) || fx.kind !== 'critBurn') return 0;
+  const rung = level5Of(skill.id, level);
+  return fx.duration + (rung?.kind === 'statusRounds' ? rung.add : 0);
 }
 
 /**
@@ -397,12 +508,22 @@ export interface ShieldPart {
   amount: number;
 }
 
-/** The Shield a fight opens with: the room's ward, then the passive in play, then a Shield Charm. */
-export function openingShield(run: RunState, modifiers: CombatModifiers): ShieldPart[] {
+/**
+ * The Shield a fight opens with: the room's ward, then the passive in play, then a Shield Charm.
+ *
+ * `levels` is the Dust ladder (§7 D.6), so a top-rung passive puts up the Shield its own LV5 line
+ * states. An id that is not in the map is LV1 and grants exactly its printed amount.
+ */
+export function openingShield(
+  run: RunState,
+  modifiers: CombatModifiers,
+  levels: Record<string, number> = {},
+): ShieldPart[] {
   const parts: ShieldPart[] = [{ label: '', amount: modifiers.roomShield }];
   const s = runMoveset(run).passive;
-  if (s && s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'startShield') {
-    parts.push({ label: `${s.name} grants ${s.fx.amount} Shield.`, amount: s.fx.amount });
+  if (s && s.kind === 'passive') {
+    const amount = passiveShieldAmount(s, levels[s.id]);
+    if (amount > 0) parts.push({ label: `${s.name} grants ${amount} Shield.`, amount });
   }
   if (run.consumables.includes('shield-charm') && !run.consumablesUsed['shield-charm']) {
     parts.push({ label: 'Shield Charm: +8 Shield.', amount: 8 });
@@ -419,11 +540,15 @@ export interface CombatDefence {
 }
 
 /** Everything an enemy swing has to get through on the first action of a fight. */
-export function openingDefence(run: RunState, modifiers: CombatModifiers): CombatDefence {
+export function openingDefence(
+  run: RunState,
+  modifiers: CombatModifiers,
+  levels: Record<string, number> = {},
+): CombatDefence {
   const base = companionBase(run.companionLevel);
   const maxHp = base.maxHp + modifiers.maxHp;
   let shield = 0;
-  for (const part of openingShield(run, modifiers)) shield += part.amount;
+  for (const part of openingShield(run, modifiers, levels)) shield += part.amount;
   return {
     def: base.def + modifiers.def,
     hp: Math.min(Math.max(0, run.unit.hp), maxHp),
@@ -470,8 +595,9 @@ export function attackInputFor(
   ctx: AttackContext,
   roll: { variance: number; crit: boolean },
 ): AttackInput {
-  const fx = skill?.fx;
-  const potency = skill ? potencyMult(ctx.skillLevels[skill.id] ?? 1) : 1;
+  const level = skill ? ctx.skillLevels[skill.id] : undefined;
+  const fx = skill ? fxAtLevel(skill, level) : undefined;
+  const potency = skill ? potencyMult(level ?? 1) : 1;
   return {
     atk: ctx.atk,
     power: skill?.power ?? 1,
@@ -480,7 +606,7 @@ export function attackInputFor(
     variance: roll.variance,
     crit: roll.crit,
     critMult: ctx.critMult,
-    burningBonus: fx && !isPassiveFx(fx) ? (fx.bonusIfBurning ?? 0) : 0,
+    burningBonus: fx?.burningBonus ?? 0,
     targetBurning: hasStatus(target.statuses, 'burn'),
     markMult: markDamageMult(target),
     elementMult: skill ? skillMultiplier(target, skill, ctx.knownWeaknesses) : 1,
@@ -489,6 +615,8 @@ export function attackInputFor(
     targetElite: target.elite,
     shield: statusShield(target.statuses),
     hp: target.hp,
+    // Written only when the rung is bought, so an unpaid hit record stays the object it was before.
+    ...(fx?.varianceFloor ? { varianceFloor: true } : {}),
   };
 }
 
@@ -528,9 +656,11 @@ export function runCombat(
     moveset.passive && isPassiveFx(moveset.passive.fx) && moveset.passive.fx.kind === 'critBurn'
       ? moveset.passive
       : undefined;
+  /** Rounds the Burn a critical lights, with the passive's own LV5 rung folded in. */
+  const burnRounds = critBurn ? passiveCritBurnRounds(critBurn, skillLevels[critBurn.id]) : 0;
 
   const base = companionBase(run.companionLevel);
-  const defence = openingDefence(run, modifiers);
+  const defence = openingDefence(run, modifiers, skillLevels);
   const maxHp = defence.maxHp;
   let hp = defence.hp;
 
@@ -544,7 +674,7 @@ export function runCombat(
   let fled = false;
 
   let shield = 0;
-  for (const part of openingShield(run, modifiers)) {
+  for (const part of openingShield(run, modifiers, skillLevels)) {
     shield += part.amount;
     if (part.label) logLine(part.label);
   }
@@ -612,10 +742,48 @@ export function runCombat(
     return { ...record };
   };
 
-  const hitEnemy = (target: EnemyState, input: AttackInput, skill?: SkillDef): void => {
+  /**
+   * Land one swing's status. The status table decides the side it belongs to: a healing status mends
+   * the companion even though the card reads "applies to the target". A LV5 `spread` rung puts the same
+   * status on the first other living enemy, chosen in roster order — deterministic, and for anything
+   * but Stun it costs no extra roll.
+   */
+  function landStatus(target: EnemyState, fx: ResolvedSkillFx): void {
+    const id = fx.status;
+    const statusDef = id ? statusById(id) : undefined;
+    if (!id || !statusDef) return;
+    if (statusDef.kind === 'hot') {
+      const before = statuses;
+      statuses = applyStatus(before, id, rng, { rounds: fx.statusRounds });
+      if (statuses !== before) logLine(`You gain ${statusDef.name}.`);
+      return;
+    }
+    const touched: EnemyState[] = [target];
+    if (fx.spread) {
+      const other = enemies.find((e) => e !== target && e.hp > 0);
+      if (other) touched.push(other);
+    }
+    for (const enemy of touched) {
+      const out = applyStatus(enemy.statuses, id, rng, {
+        isBoss: enemy.bossId !== undefined,
+        roundsSinceStun: enemy.turnsSinceStun,
+        rounds: fx.statusRounds,
+      });
+      if (out !== enemy.statuses) {
+        enemy.statuses = out;
+        logLine(`${enemy.name} gains ${statusDef.name}.`);
+      }
+    }
+  }
+
+  const hitEnemy = (
+    target: EnemyState,
+    input: AttackInput,
+    skill?: SkillDef,
+    fx?: ResolvedSkillFx,
+  ): void => {
     const sum = attackBreakdown(input);
     const dmg = sum.dealt;
-    const fx = skill?.fx;
     if (sum.absorbed > 0) {
       const absorbed = sum.absorbed;
       target.statuses = target.statuses
@@ -634,38 +802,20 @@ export function runCombat(
       const mult = skillMultiplier(target, skill, knownWeaknesses);
       if (mult > 1) logLine(`Weakness! +25% ${skill.element} damage.`);
     }
-    if (fx && !isPassiveFx(fx) && fx.shieldPercent) {
+    if (fx?.shieldPercent) {
       const gain = Math.round(dmg * fx.shieldPercent);
       shield += gain;
       logLine(`You gain ${gain} Shield.`);
     }
-    if (fx && !isPassiveFx(fx) && fx.status) {
-      const out = applyStatus(target.statuses, fx.status, rng, {
-        isBoss: target.bossId !== undefined,
-        roundsSinceStun: target.turnsSinceStun,
-      });
-      if (out !== target.statuses) {
-        target.statuses = out;
-        const def = statusById(fx.status)!;
-        logLine(`${target.name} gains ${def.name}.`);
-      }
-    }
-    if (sum.crit && critBurn && isPassiveFx(critBurn.fx) && critBurn.fx.kind === 'critBurn') {
-      const out = applyStatus(target.statuses, 'burn', rng, {});
+    if (fx?.status) landStatus(target, fx);
+    if (sum.crit && critBurn) {
+      const out = applyStatus(target.statuses, 'burn', rng, { rounds: burnRounds });
       if (out !== target.statuses) {
         target.statuses = out;
         logLine(`${target.name} gains Burn.`);
       }
     }
-    if (
-      bossTelegraph &&
-      target.bossId &&
-      sum.crit &&
-      skill &&
-      fx &&
-      !isPassiveFx(fx) &&
-      fx.interruptsTelegraph
-    ) {
+    if (bossTelegraph && target.bossId && sum.crit && skill && fx?.interruptsTelegraph) {
       bossTelegraph = false;
       guardActive = false;
       logLine(`${skill.name} interrupts the telegraph!`);
@@ -809,8 +959,7 @@ export function runCombat(
         }
         const chosen = acted.skill;
         const target = acted.target;
-        const fx = chosen?.fx;
-        const bonusCrit = fx && !isPassiveFx(fx) ? (fx.bonusCrit ?? 0) : 0;
+        const fx = chosen ? fxAtLevel(chosen, skillLevels[chosen.id]) : undefined;
         if (chosen) {
           energy -= chosen.energyCost ?? 1;
           cooldowns[chosen.id] = chosen.cooldown ?? 1;
@@ -819,7 +968,7 @@ export function runCombat(
             logLine('You brace your guard.');
           }
         }
-        const roll = damageRoll(rng, luck, modifiers.critChance + bonusCrit);
+        const roll = damageRoll(rng, luck, modifiers.critChance + (fx?.critPoints ?? 0));
         const input = attackInputFor(
           target,
           chosen ?? null,
@@ -833,7 +982,7 @@ export function runCombat(
           },
           roll,
         );
-        hitEnemy(target, input, chosen);
+        hitEnemy(target, input, chosen, fx);
         continue;
       }
 
