@@ -4,6 +4,7 @@
  * Lantern Oil can never be crafted or bought, so oil still comes from habits and the free trickle.
  */
 
+import { addMaterials, spendMaterials } from './materials';
 import { offerRng } from './offers';
 import type { DelveMeta, Materials, RoomDef, RunState } from './types';
 
@@ -49,12 +50,6 @@ export function consumableById(id: string): ConsumableDef | undefined {
   return CONSUMABLES.find((c) => c.id === id);
 }
 
-export const EMPTY_MATERIALS: Materials = { ore: 0, herb: 0, echo: 0 };
-
-export function addMaterials(a: Materials, b: Materials): Materials {
-  return { ore: a.ore + b.ore, herb: a.herb + b.herb, echo: a.echo + b.echo };
-}
-
 /** Workshop upgrade 2 cuts the Ember part of craft costs by 20%. */
 export function emberCraftCost(meta: DelveMeta, base: number): number {
   const lvl = meta.buildingLevels?.['workshop'] ?? 0;
@@ -69,21 +64,18 @@ export function craftConsumable(
 ): { meta: DelveMeta; ok: boolean; reason: string } {
   const def = consumableById(id);
   if (!def) return { meta, ok: false, reason: 'Unknown consumable.' };
-  const mats = meta.materials ?? EMPTY_MATERIALS;
-  if (mats.ore < def.cost.ore || mats.herb < def.cost.herb || mats.echo < def.cost.echo) {
-    return { meta, ok: false, reason: 'Not enough materials.' };
-  }
   const embers = emberCraftCost(meta, def.cost.embers);
   if (meta.embers < embers) return { meta, ok: false, reason: 'Not enough Embers.' };
+  const paid = spendMaterials(meta, {
+    ore: def.cost.ore,
+    herb: def.cost.herb,
+    echo: def.cost.echo,
+  });
+  if (!paid.ok) return { meta, ok: false, reason: paid.reason };
   return {
     meta: {
-      ...meta,
-      embers: meta.embers - embers,
-      materials: {
-        ore: mats.ore - def.cost.ore,
-        herb: mats.herb - def.cost.herb,
-        echo: mats.echo - def.cost.echo,
-      },
+      ...paid.meta,
+      embers: paid.meta.embers - embers,
       consumableStock: {
         ...(meta.consumableStock ?? {}),
         [def.id]: (meta.consumableStock?.[def.id] ?? 0) + 1,

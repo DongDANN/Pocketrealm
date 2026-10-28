@@ -20,28 +20,36 @@ import {
   buildingMilestones,
   buyForgeNode,
   buyTreeNode,
+  craftCapsule,
   craftConsumable,
+  dismissCapsuleReveal,
   emptyMeta,
   equipConsumable,
   finishDailyRun,
   heatUnlocked,
   hollowUnlocked,
+  isCapsuleCeiling,
   newDailyRun,
   newRun,
   oilCapacity,
+  openCapsule,
   respecBuild,
   resolveChoice,
   retreatRun,
   RUN_COST,
+  skillById,
   stepRun,
   unequipConsumable,
   unlockBuilding,
   upgradeBuilding,
   type BudgetSignals,
   type BuildId,
+  type CapsuleCeiling,
+  type CapsuleReveal,
   type CombatPause,
   type DelveMeta,
   type HollowId,
+  type Materials,
   type MilestoneInput,
   type RunResult,
   type RunState,
@@ -154,6 +162,43 @@ function skillStates(value: unknown): DelveMeta['skills'] {
 }
 
 /**
+ * The per-Hollow provenance ledger, when the book has one. Absent is not an error: a book written
+ * before Gate 7c has only the flat total, and `materialsLedger` in core attributes it to the deepest
+ * Hollow the player has cleared.
+ */
+function materialsFromValue(value: unknown): Partial<Record<HollowId, Materials>> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const out: Partial<Record<HollowId, Materials>> = {};
+  for (const [key, raw] of Object.entries(asRecord(value))) {
+    const id = hollowId(Number(key));
+    if (id === null) continue;
+    const m = asRecord(raw);
+    out[id] = { ore: count(m.ore), herb: count(m.herb), echo: count(m.echo) };
+  }
+  return out;
+}
+
+/**
+ * A capsule already opened. The prize is validated against the catalogue rather than trusted, because
+ * a reveal naming a skill this build does not have would print a name the Codex cannot show.
+ */
+function capsuleRevealValue(value: unknown): CapsuleReveal | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const raw = asRecord(value);
+  const ceiling = text(raw.ceiling);
+  const skill = skillById(text(raw.skillId));
+  if (!skill || !isCapsuleCeiling(ceiling)) return null;
+  return {
+    index: count(raw.index),
+    ceiling,
+    skillId: skill.id,
+    rarity: skill.rarity,
+    duplicate: raw.duplicate === true,
+  };
+}
+
+/**
  * Fill a stored meta with the current shape. Rows written by an older Gate, or a hand-edited
  * backup, keep every field they have and gain the defaults they lack, so no screen has to guard
  * against a missing `materials` or `daily`.
@@ -188,6 +233,7 @@ export function normalizeMeta(raw?: unknown): DelveMeta {
       herb: count(asRecord(m.materials).herb),
       echo: count(asRecord(m.materials).echo),
     },
+    materialsFrom: materialsFromValue(m.materialsFrom),
     consumableStock: numberRecord(m.consumableStock),
     equippedConsumables: uniqueText(m.equippedConsumables).slice(0, 3),
     buildingLevels: numberRecord(m.buildingLevels),
@@ -205,6 +251,7 @@ export function normalizeMeta(raw?: unknown): DelveMeta {
     capsuleIndex: count(m.capsuleIndex),
     pitySinceEpic: count(m.pitySinceEpic),
     capsuleTagStreak: count(m.capsuleTagStreak),
+    capsuleReveal: capsuleRevealValue(m.capsuleReveal),
   };
 }
 
@@ -969,6 +1016,46 @@ export function craftAtWorkshop(db: PocketDb, options: CraftOptions): Promise<Me
     const out = craftConsumable(meta, options.consumableId);
     return { ok: out.ok, meta: out.meta, reason: out.reason };
   });
+}
+
+export interface OpenCapsuleOptions extends DelveActionOptions {
+  ceiling: CapsuleCeiling;
+}
+
+export function craftCapsuleAction(
+  db: PocketDb,
+  options: DelveActionOptions,
+): Promise<MetaActionResult> {
+  return mutateMeta(db, options, (meta) => {
+    const out = craftCapsule(meta);
+    return { ok: out.ok, meta: out.meta, reason: out.reason };
+  });
+}
+
+/**
+ * Open a capsule. The draw is keyed on the book's own seed and the capsule's issue number (§7 D.5),
+ * and the prize is written to the meta row in the same transaction as the reveal — so closing the app
+ * before the animation finishes cannot reroll a capsule that already paid out.
+ */
+export async function openCapsuleAction(
+  db: PocketDb,
+  options: OpenCapsuleOptions,
+): Promise<MetaActionResult> {
+  const bookSeed = await questSeed(db);
+  return mutateMeta(db, options, (meta) => {
+    const out = openCapsule(meta, bookSeed, options.ceiling);
+    return { ok: out.ok, meta: out.meta, reason: out.reason };
+  });
+}
+
+export function dismissCapsuleRevealAction(
+  db: PocketDb,
+  options: DelveActionOptions,
+): Promise<MetaActionResult> {
+  return mutateMeta(db, options, (meta) => ({
+    ok: true,
+    meta: dismissCapsuleReveal(meta),
+  }));
 }
 
 export interface EquipOptions extends DelveActionOptions {

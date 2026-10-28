@@ -14,6 +14,7 @@ import {
   builtinDecider,
   emptyMeta,
   newRun,
+  skillById,
   type CombatPause,
   type DelveMeta,
   type HollowId,
@@ -24,11 +25,14 @@ import type { RewardEvent } from '../src/core/types';
 import type { PocketDb } from '../src/data/db';
 import {
   chooseDelve,
+  craftCapsuleAction,
+  dismissCapsuleRevealAction,
   listDelveHistory,
   loadBuildingMilestones,
   loadDelveSnapshot,
   loadDelveSignals,
   normalizeMeta,
+  openCapsuleAction,
   purchaseForge,
   retreatDelve,
   startDailyDelve,
@@ -177,6 +181,44 @@ describe('normalizeMeta', () => {
     expect(meta.lastStepAt).toBe(0);
     expect(meta.builds).toEqual({});
     expect(meta.dailyBest).toBe(0);
+  });
+
+  it('keeps the provenance ledger and clamps it like every other count', () => {
+    expect(normalizeMeta({ materials: { ore: 3 } }).materialsFrom).toBeUndefined();
+    const meta = normalizeMeta({
+      materials: { ore: 3, herb: 1, echo: 0 },
+      materialsFrom: {
+        1: { ore: 2, herb: 1 },
+        2: { ore: 1, herb: -2 },
+        9: { ore: 5 },
+        x: { ore: 7 },
+      },
+    });
+    expect(meta.materialsFrom).toEqual({
+      1: { ore: 2, herb: 1, echo: 0 },
+      2: { ore: 1, herb: 0, echo: 0 },
+    });
+  });
+
+  it('drops a reveal the catalogue could not show and re-derives its tier', () => {
+    const stored = { index: 3, ceiling: 'epic', skillId: 'skill-cold-bar', rarity: 'common' };
+    expect(normalizeMeta({ capsuleReveal: stored }).capsuleReveal).toEqual({
+      index: 3,
+      ceiling: 'epic',
+      skillId: 'skill-cold-bar',
+      rarity: 'rare',
+      duplicate: false,
+    });
+    // A ceiling that is not a capsule make, and a skill this build does not ship, are both discarded:
+    // printing either would name a thing the Codex cannot show.
+    expect(
+      normalizeMeta({ capsuleReveal: { ...stored, ceiling: 'gold' } }).capsuleReveal,
+    ).toBeNull();
+    expect(
+      normalizeMeta({ capsuleReveal: { ...stored, skillId: 'skill-not-a-skill' } }).capsuleReveal,
+    ).toBeNull();
+    expect(normalizeMeta({ capsuleReveal: null }).capsuleReveal).toBeNull();
+    expect(normalizeMeta({}).capsuleReveal).toBeUndefined();
   });
 });
 
@@ -525,6 +567,94 @@ describe('meta progression actions', () => {
     expect(again.ok).toBe(false);
     expect(again.reason).toContain('Already unlocked');
     expect((await loadMeta(db))?.meta.buildingLevels.treasury).toBe(1);
+  });
+});
+
+describe('capsules', () => {
+  it('banks a finished run under the Hollow it walked, and that Hollow sets the capsule make', async () => {
+    await addCompanion();
+    const walked = {
+      ...forkRun(),
+      hollowId: 2 as HollowId,
+      materials: { ore: 2, herb: 1, echo: 0 },
+    };
+    await putRun(walked, emptyMeta());
+    const retreated = await retreatDelve(db, OPTIONS);
+    expect(retreated.ok).toBe(true);
+
+    const stored = await loadMeta(db);
+    expect(stored?.meta.materials).toEqual({ ore: 2, herb: 1, echo: 0 });
+    expect(stored?.meta.materialsFrom).toEqual({
+      1: { ore: 0, herb: 0, echo: 0 },
+      2: { ore: 2, herb: 1, echo: 0 },
+      3: { ore: 0, herb: 0, echo: 0 },
+    });
+
+    const crafted = await craftCapsuleAction(db, OPTIONS);
+    expect(crafted.ok, crafted.reason).toBe(true);
+    expect(crafted.wallet.meta.capsules).toEqual({ epic: 1 });
+    expect(crafted.wallet.meta.materials).toEqual({ ore: 0, herb: 0, echo: 0 });
+  });
+
+  it('grants the prize in the same write that prints the reveal, and reloads it unchanged', async () => {
+    await addCompanion();
+    await putMeta(
+      { ...emptyMeta(), capsules: { epic: 2 }, materials: { ore: 9, herb: 9, echo: 0 } },
+      50,
+      0,
+    );
+
+    const out = await openCapsuleAction(db, { ...OPTIONS, ceiling: 'epic' });
+    expect(out.ok, out.reason).toBe(true);
+    const reveal = out.wallet.meta.capsuleReveal!;
+    expect(reveal.rarity).not.toBe('common');
+    expect(reveal.ceiling).toBe('epic');
+    expect(skillById(reveal.skillId)).toBeDefined();
+    expect(out.wallet.meta.skills[reveal.skillId]).toBeDefined();
+    expect(out.wallet.meta.capsules).toEqual({ epic: 1 });
+    expect(out.wallet.meta.capsuleIndex).toBe(1);
+
+    // Reopening the app after the draw reads the same prize back out of the row it was written to.
+    const stored = await loadMeta(db);
+    expect(stored?.meta.capsuleReveal).toEqual(reveal);
+    expect(Object.keys(stored?.meta.skills ?? {})).toContain(reveal.skillId);
+
+    // Acknowledging clears the print but never the collection, and the next open is a new capsule.
+    const dismissed = await dismissCapsuleRevealAction(db, OPTIONS);
+    expect(dismissed.wallet.meta.capsuleReveal).toBeNull();
+    expect(dismissed.wallet.meta.skills[reveal.skillId]).toBeDefined();
+
+    const next = await openCapsuleAction(db, { ...OPTIONS, ceiling: 'epic' });
+    expect(next.wallet.meta.capsuleReveal!.index).toBe(1);
+    expect(next.wallet.meta.capsules).toEqual({ epic: 0 });
+  });
+
+  it('draws the same capsule twice for the same book, so a reload cannot reroll a prize', async () => {
+    await addCompanion();
+    const start = { ...emptyMeta(), capsules: { mythic: 1 } };
+    await putMeta(start, 50, 0);
+    const first = await openCapsuleAction(db, { ...OPTIONS, ceiling: 'mythic' });
+    expect(first.ok).toBe(true);
+
+    // The book is wound back to exactly the state before the open: the draw is keyed on the book seed
+    // and the capsule number alone, so it lands on the same skill rather than a new roll.
+    await putMeta(start, 50, 0);
+    const again = await openCapsuleAction(db, { ...OPTIONS, ceiling: 'mythic' });
+    expect(again.wallet.meta.capsuleReveal).toEqual(first.wallet.meta.capsuleReveal);
+  });
+
+  it('refuses to open a make the player is not holding and to craft without the price', async () => {
+    await addCompanion();
+    await putMeta({ ...emptyMeta(), embers: 400 }, 50, 0);
+    const noCapsule = await openCapsuleAction(db, { ...OPTIONS, ceiling: 'rare' });
+    expect(noCapsule.ok).toBe(false);
+    expect((await loadMeta(db))?.meta.capsuleReveal ?? null).toBeNull();
+
+    const noMaterials = await craftCapsuleAction(db, OPTIONS);
+    expect(noMaterials.ok).toBe(false);
+    expect(noMaterials.reason).toContain('2 Ore');
+    expect((await loadMeta(db))?.meta.capsules).toEqual({});
+    expect((await loadMeta(db))?.meta.embers).toBe(400);
   });
 });
 

@@ -14,8 +14,8 @@ import type { Transaction as DexieUpgradeTransaction } from 'dexie';
 import { occurrenceKey } from '../core/recurring';
 import { today } from '../core/dates';
 import type { LocalDate, Transaction } from '../core/types';
-import { retreatRun } from '../core/delve';
-import type { DelveMeta, HollowId, RunState } from '../core/delve';
+import { CAPSULE_CEILING, retreatRun } from '../core/delve';
+import type { DelveMeta, RunState } from '../core/delve';
 import type { DelveMetaRow, DelveRunRow } from './db';
 /**
  * Dexie store spec: table -> "primaryKey, index, &unique, *multi, [compound]". There is no
@@ -106,9 +106,6 @@ const META_KEY = 'meta';
 
 /** What one equipped Habit Card is worth once cards stop existing (§10.2). */
 export const CARD_DUST_VALUE = 5;
-
-/** The best tier a capsule made from this Hollow's materials can reach (§7 D.3). */
-const CAPSULE_CEILING: Record<HollowId, string> = { 1: 'rare', 2: 'epic', 3: 'mythic' };
 
 /** The two Delve tables, as stored. */
 export interface DelveRows {

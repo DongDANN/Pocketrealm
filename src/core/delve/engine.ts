@@ -19,7 +19,8 @@ import { generateFloor, HOLLOW_FLOORS } from './map';
 import { computeBuffs } from './signals';
 import { lookaheadRows, masteryMult } from './buildings';
 import { gainMastery } from './mastery';
-import { addMaterials, dropMaterials } from './workshop';
+import { addMaterials, bankMaterials } from './materials';
+import { dropMaterials } from './workshop';
 import type {
   ChoiceOption,
   DelveMeta,
@@ -471,10 +472,8 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
 
 /** Bank gathered materials and consume spent consumables when a run ends. */
 function settleRunEnd(meta: DelveMeta, run: RunState): DelveMeta {
-  let m = {
-    ...meta,
-    materials: addMaterials(meta.materials ?? { ore: 0, herb: 0, echo: 0 }, run.materials),
-  };
+  // Provenance is kept at the only moment it is knowable: the Hollow this run actually walked.
+  let m = bankMaterials(meta, run.hollowId, run.materials);
   const used = run.consumablesUsed ?? {};
   const kept = (m.equippedConsumables ?? []).filter((id) => !used[id]);
   if (kept.length !== m.equippedConsumables.length) m = { ...m, equippedConsumables: kept };

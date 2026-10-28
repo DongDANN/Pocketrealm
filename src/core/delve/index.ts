@@ -9,14 +9,32 @@ export * from './turn';
 export * from './forge';
 export * from './signals';
 export * from './offers';
+export * from './materials';
+export * from './capsules';
 export * from './engine';
 export * from './workshop';
 export * from './buildings';
 export * from './mastery';
 export * from './daily';
 export * from './golden';
-export { BOONS, RELICS, boonById, relicById, RARITY_WEIGHT, MAX_BOON_LEVEL } from './data/boons';
+export {
+  BOONS,
+  RELICS,
+  BOON_TAGS,
+  boonById,
+  relicById,
+  RARITY_WEIGHT,
+  MAX_BOON_LEVEL,
+} from './data/boons';
 export type { BoonLike } from './data/boons';
+export {
+  SKILLS,
+  RARITIES,
+  skillById,
+  skillsOfRarity,
+  skillsWithTag,
+  type CatalogueSkill,
+} from './data/skills';
 export { FUSIONS, fusionById, anyBoonById, fusionRecipesFor } from './data/fusions';
 export type { FusionDef } from './data/fusions';
 export {

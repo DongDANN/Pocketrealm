@@ -293,6 +293,34 @@ export interface DelveMeta {
   pitySinceEpic: number;
   /** Capsules opened since the last one matched the player's most-used tag (§7 D.4, layer 3). */
   capsuleTagStreak: number;
+  /**
+   * Which Hollow each material came from. A capsule's tier ceiling is set by the deepest Hollow its
+   * materials came from (§7 D.3), so the bank keeps provenance rather than one anonymous pile.
+   * `materials` stays the total every screen prints, and the two always agree —
+   * `tests/delve-capsules.test.ts` pins the invariant, because a drift would let Hollow 1 ore buy a
+   * Mythic capsule.
+   */
+  materialsFrom?: Partial<Record<HollowId, Materials>>;
+  /**
+   * The last capsule opened, kept so a reload during the reveal shows the same prize instead of
+   * handing out a new one (§7 D.5). The grant has already happened by the time this is written, so a
+   * player cannot lose a prize by closing the app, and cannot reroll one by reloading.
+   */
+  capsuleReveal?: CapsuleReveal | null;
+}
+
+/** The best tier a capsule may hold, named after the Hollow whose materials paid for it (§7 D.3). */
+export type CapsuleCeiling = 'rare' | 'epic' | 'mythic';
+
+/** A capsule already opened and already granted: the record of what the reveal should print. */
+export interface CapsuleReveal {
+  /** The `capsuleIndex` value the contents were drawn from — the anti-scumming key (§7 D.5). */
+  index: number;
+  ceiling: CapsuleCeiling;
+  skillId: string;
+  rarity: Rarity;
+  /** True when the companion already knew the skill, so the prize became Skill Dust instead. */
+  duplicate: boolean;
 }
 
 /** Narrow, read-only snapshot of budgeting behaviour. Delve never mutates it. */

@@ -1652,8 +1652,8 @@ nothing else could play the run; this gate proves a player can.
   polish: the turn panel prints the effect line as the thing a player spends energy against, and since
   7b-7 the e2e hand reads the screen rather than the engine, so a promise the resolver cannot keep is a
   UI lie a test can now catch.
-- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean; `npm run
-format:check` **verified** clean; `npx vitest run` **verified 796/796 across 73 files** (784/72
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 796/796 across 73 files** (784/72
   before, plus this suite). `npm run sim:golden` prints the same five digests as 7b-7 —
   `837106532b87b6aa`, `7fbf913c7da7c523`, `317ae9b8898d8b8b`, `5491625f617eb6e9`, `fd1fa46095a964c5` —
   which is the check that matters here: a catalogue nothing reads yet must not move a single damage
@@ -1666,5 +1666,75 @@ format:check` **verified** clean; `npx vitest run` **verified 796/796 across 73 
   moveset the turn panel offers still comes from the three builds in `data/builds.ts`. The `level5`
   lines are authored prose with no arithmetic behind them until 7c-3, and the power ladder is authored
   rather than simulated: whether a Mythic is actually worth the pity is a 7f question with 7c's economy
-  in it. Chromium was not re-run for this gate beyond the production build, because no product code
-  path changed — see the 7b-7 entry for the browser evidence that stands.
+  in it.
+
+### Gate 7c-2 — A capsule decides its prize when it is drawn (2026-10-28)
+
+- **What this gate is.** §7 D.3–D.5: the door the collection is built behind. Runs drop Ore and Herb,
+  the Workshop turns a fixed price into a capsule, the player chooses when to open it, and the pity
+  layers make the outcome legible before it is revealed. 7c-2 ships the mechanism only — the Workshop
+  and Codex screens arrive at 7c-5, so no player can craft one yet.
+- **Provenance came first, because a ceiling has to be earned somewhere.** §7 D.3 sets a capsule's tier
+  by _the deepest Hollow whose materials paid for it_, which the flat `materials` triple cannot answer:
+  two piles of Ore are the same number and a different promise. `src/core/delve/materials.ts` is new and
+  keeps a per-Hollow ledger, spends it deepest-first, and reports which Hollow contributed — that
+  Hollow owns the ceiling. `meta.materials` stays the total every screen prints, and the ledger is what
+  spends, so a drift would let Hollow 1 ore buy a Mythic capsule; `tests/delve-capsules.test.ts` pins
+  the invariant after every write instead of trusting it. A book written before the ledger gets one
+  documented attribution (its pile lands on the deepest Hollow it has cleared) and is authoritative from
+  the next bank onward. `settleRunEnd` is the only place materials enter the bank, and it now banks
+  under the Hollow the run actually walked.
+- **The three pity layers are three different mechanisms, not one table.** No dud is a floor on the tier
+  band, so `CEILING_BAND` never reaches down to Common — which means the twenty-two Commons are _not_
+  capsule prizes and 7c-4 owes them to the companion as free knows instead (§7 D.2). Hard pity is an
+  override on the roll: at ten misses the band becomes the Epic-or-better slice of that capsule's own
+  band. Relevance chooses _within_ the tier that was rolled, narrowing the pool to the player's dominant
+  tag or element. `capsuleOdds` is computed from the same band, floor and pity state the draw reads, so
+  the disclosure cannot rot into a comment, and the distribution test measures 4000 draws against the
+  percentages it prints.
+- **Two defects were caught before shipping, both about promising what a capsule cannot pay.**
+  `pitySinceEpic` would have advanced on a Hollow 1 capsule once the counter passed ten, stranding a
+  counter at a number the shallowest band can never reach — so a rare-ceiling capsule now neither
+  advances nor spends hard pity, and its disclosure promises no Epic either. And the first cut at
+  relevance widened the _tier_ to find a match, which could hand back a less valuable skill than the one
+  printed on the front: trading one broken promise for another. It now lets the roll stand and leaves the
+  debt on the counter for the next capsule. A probe over 2000 seeded draws confirmed the widening path
+  never fired with the shipped catalogue (every tag has an entry at every tier below Mythic), so the
+  branch was deleted rather than left as insurance.
+- **The §14 exit condition is the reload test.** Contents are keyed on `(book seed, capsule number)` and
+  nothing else — the book seed is the same `questSeed` the floors use, and the capsule number only ever
+  advances. Open, grant, decrement, advance the index and write the reveal happen in one meta write, so a
+  player who closes the app mid-animation comes back to a prize already in the collection, and a player
+  who reloads to re-roll a capsule they do not like gets the same capsule. The fuzz runs every ceiling
+  across five seeds with a JSON round-trip between draws: no Common, always inside the band, indices
+  strictly increasing, held capsules down to zero, and every spent capsule leaving something owned behind.
+- **Skill Dust is granted, not yet spent.** A duplicate pays 1/3/8/20/50 by tier (§7 D.6) at the moment
+  it is drawn; the dust ladder, the +8% potency and the `level5` modifiers are 7c-3. The suite asserts
+  the whole book's dust equals the sum of its duplicates, so a double-grant cannot hide.
+- **No schema version bump.** `materialsFrom` and `capsuleReveal` are optional on `DelveMeta` and
+  defaulted by `normalizeMeta`, so v3 rows and existing backups keep loading and no browser migration is
+  needed. The stored reveal is not trusted: its `skillId` and `rarity` are re-derived from the catalogue
+  and a ceiling that is not a capsule make is dropped, because printing either would name a thing the
+  Codex cannot show. `migrations.ts` now imports `CAPSULE_CEILING` from core instead of repeating it.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 835/835 across 74 files** (796/73
+  before, plus the 31-test capsule suite, six controller tests and two golden tests).
+  `npm run sim:golden` **re-recorded all five digests** — `837106532b87b6aa` → `c39220a1d5e4b7f8`,
+  `7fbf913c7da7c523` → `54436a238366b9d7`, `317ae9b8898d8b8b` → `e81b2310ed671b71`,
+  `5491625f617eb6e9` → `9850885dc742970e`, `fd1fa46095a964c5` → `1b2f147fca52d3ac` — and the reason is
+  pinned rather than noted: the hashed _shape_ gained `materialsFrom`, so `tests/delve-golden.test.ts` now
+  asserts both digests per case, and stripping that one key returns the Gate 7b-6 value exactly for all
+  five. Every case still ends fainted on the same floor and step, and each pile lands whole in the Hollow
+  its run walked, which is the proof that no generation, combat or reward number moved.
+  `npm run test:e2e` **verified 67/67** in Chromium against the production build (6.2m), including the
+  hand-played run and the turn-panel golden — unchanged, which is the point: this gate touches no screen.
+  `e2e/offline.spec.ts` stays parked and uncommitted.
+- **Not verified / still open:** the mechanism has no door yet — nothing in the UI crafts or opens a
+  capsule, so the pity pips and the odds disclosure 7c-5 has to print are proven in tests only.
+  Relevance reads `skills[id].lifetime`, and **nothing writes lifetime today**: combat does not count a
+  skill use yet, so a real player's dominant tag stays null and the third layer is inert until 7c-3/7c-4
+  wire use-counting behind the moveset. The tests feed lifetime by hand, which proves the layer works
+  once it has data and does not prove it has data. Capsule crafting inherits the Workshop's existing
+  shape of no core-side unlock gate (the milestone check lives in the screen), so 7c-5 decides whether
+  crafting needs one. Whether 2 Ore + 1 Herb is the right price for a shot at an Epic is a 7f question
+  with the persona pacing in it.

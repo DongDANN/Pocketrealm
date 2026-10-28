@@ -16,6 +16,12 @@
  * answered, and a shop with a full boon shelf no longer offers one it cannot sell. All five replays
  * now end fainted, because the headless decider never braces — bracing is the player's call. The
  * golden pins that ending, and 7c/7f own making a player better at avoiding it.
+ *
+ * Gate 7c-2 re-recorded all five for the same reason 7b-1 did: the hashed shape grew. `DelveMeta`
+ * gained `materialsFrom`, the per-Hollow provenance ledger a capsule's tier ceiling reads (§7 D.3).
+ * Delete that one key and the same five replays return the Gate 7b-6 digests (83710653…, 7fbf913c…,
+ * 317ae9b8…, 5491625f…, fd1fa460…) exactly, and every material pile lands on the same Hollow it was
+ * gathered in — which is the proof that no generation, combat or reward number moved.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -29,24 +35,59 @@ interface GoldenCase {
   level: number;
   /** Recorded from the engine; re-record deliberately when balance intentionally moves. */
   hash: string;
+  /** The same replay with `materialsFrom` stripped out of the meta (Gate 7b-6's shape). */
+  hashWithoutLedger: string;
 }
 
 const CASES: GoldenCase[] = [
-  { label: 'H1 seed 12345', seed: 12345, hollow: 1, level: 5, hash: '837106532b87b6aa' },
+  {
+    label: 'H1 seed 12345',
+    seed: 12345,
+    hollow: 1,
+    level: 5,
+    hash: 'c39220a1d5e4b7f8',
+    hashWithoutLedger: '837106532b87b6aa',
+  },
   {
     label: 'H2 golden-ratio seed',
     seed: 0x9e3779b1,
     hollow: 2,
     level: 6,
-    hash: '7fbf913c7da7c523',
+    hash: '54436a238366b9d7',
+    hashWithoutLedger: '7fbf913c7da7c523',
   },
-  { label: 'H3 seed 777', seed: 777, hollow: 3, level: 8, hash: '317ae9b8898d8b8b' },
-  { label: 'H2 seed 4242', seed: 4242, hollow: 2, level: 9, hash: '5491625f617eb6e9' },
-  { label: 'H3 seed 20261025', seed: 20261025, hollow: 3, level: 12, hash: 'fd1fa46095a964c5' },
+  {
+    label: 'H3 seed 777',
+    seed: 777,
+    hollow: 3,
+    level: 8,
+    hash: 'e81b2310ed671b71',
+    hashWithoutLedger: '317ae9b8898d8b8b',
+  },
+  {
+    label: 'H2 seed 4242',
+    seed: 4242,
+    hollow: 2,
+    level: 9,
+    hash: '9850885dc742970e',
+    hashWithoutLedger: '5491625f617eb6e9',
+  },
+  {
+    label: 'H3 seed 20261025',
+    seed: 20261025,
+    hollow: 3,
+    level: 12,
+    hash: '1b2f147fca52d3ac',
+    hashWithoutLedger: 'fd1fa46095a964c5',
+  },
 ];
 
+function stateOf(c: Pick<GoldenCase, 'seed' | 'hollow' | 'level'>) {
+  return playToEnd(c.seed, c.hollow, c.level);
+}
+
 function hashOf(c: Pick<GoldenCase, 'seed' | 'hollow' | 'level'>): string {
-  const { run, meta } = playToEnd(c.seed, c.hollow, c.level);
+  const { run, meta } = stateOf(c);
   return stateHash({ run: { ...run, log: [] }, meta });
 }
 
@@ -79,5 +120,27 @@ describe('golden runs', () => {
 
   it('pin the five fixed scenarios', () => {
     for (const c of CASES) expect(hashOf(c), c.label).toBe(c.hash);
+  });
+
+  it('moved only because the provenance ledger joined the shape', () => {
+    for (const c of CASES) {
+      const { run, meta } = stateOf(c);
+      const beforeLedger = { ...meta };
+      delete beforeLedger.materialsFrom;
+      expect(stateHash({ run: { ...run, log: [] }, meta: beforeLedger }), c.label).toBe(
+        c.hashWithoutLedger,
+      );
+    }
+  });
+
+  it('banks each pile under the Hollow the run walked, and mints none of its own', () => {
+    for (const c of CASES) {
+      const { run, meta } = stateOf(c);
+      expect(meta.materials, c.label).toEqual(run.materials);
+      const ledger = meta.materialsFrom!;
+      for (const id of [1, 2, 3] as HollowId[]) {
+        if (id !== run.hollowId) expect(ledger[id]).toEqual({ ore: 0, herb: 0, echo: 0 });
+      }
+    }
   });
 });

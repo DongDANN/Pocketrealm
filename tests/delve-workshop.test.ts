@@ -5,9 +5,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { emptyMeta, newRun, type DelveMeta, type RoomDef } from '../src/core/delve';
+import { addMaterials } from '../src/core/delve/materials';
 import {
   CONSUMABLES,
-  addMaterials,
   consumableById,
   craftConsumable,
   dropMaterials,

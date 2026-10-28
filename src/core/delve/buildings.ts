@@ -5,6 +5,7 @@
  * (each upgrade contributes 5%, so at most two buildings can be upgraded).
  */
 
+import { spendMaterials } from './materials';
 import type { DelveMeta, Materials } from './types';
 
 export interface BuildingDef {
@@ -136,20 +137,13 @@ export function upgradeBuilding(
     };
   }
   const cost = def.cost(lvl);
-  const mats = meta.materials ?? { ore: 0, herb: 0, echo: 0 };
-  if (mats.ore < cost.ore || mats.herb < cost.herb || mats.echo < cost.echo) {
-    return { meta, ok: false, reason: 'Not enough materials.' };
-  }
   if (meta.embers < cost.embers) return { meta, ok: false, reason: 'Not enough Embers.' };
+  const paid = spendMaterials(meta, { ore: cost.ore, herb: cost.herb, echo: cost.echo });
+  if (!paid.ok) return { meta, ok: false, reason: paid.reason };
   return {
     meta: {
-      ...meta,
-      embers: meta.embers - cost.embers,
-      materials: {
-        ore: mats.ore - cost.ore,
-        herb: mats.herb - cost.herb,
-        echo: mats.echo - cost.echo,
-      },
+      ...paid.meta,
+      embers: paid.meta.embers - cost.embers,
       buildingLevels: { ...levels, [id]: lvl + 1 },
     },
     ok: true,
