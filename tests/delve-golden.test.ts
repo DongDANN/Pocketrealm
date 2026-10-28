@@ -14,8 +14,8 @@
  * and `policy` from the run and the meta, a fight room now stores the orders its player gave it, oil
  * buys the descent instead of each room, a boon offer no longer holds a run in the room it already
  * answered, and a shop with a full boon shelf no longer offers one it cannot sell. All five replays
- * now end fainted, which is what the headless decider does when no order of its ever says `guard` —
- * the golden pins that, and 7c/7f own making a player better at it.
+ * now end fainted, because the headless decider never braces — bracing is the player's call. The
+ * golden pins that ending, and 7c/7f own making a player better at avoiding it.
  */
 
 import { describe, expect, it } from 'vitest';

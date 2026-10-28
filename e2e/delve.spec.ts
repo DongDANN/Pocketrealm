@@ -1,7 +1,19 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BUILDINGS } from '../src/core/delve/buildings';
 import { COSMETICS } from '../src/core/cosmetics';
-import { allText, completeOnboarding, pinClockAndIds, startRun, visibleText } from './helpers';
+import {
+  advance,
+  allText,
+  answerChoices,
+  completeOnboarding,
+  pinClockAndIds,
+  resolveTurn,
+  type Played,
+  startRun,
+  turnRound,
+  visibleText,
+  walkToFight,
+} from './helpers';
 
 const cheapestCosmetic = Math.min(...COSMETICS.map((def) => def.price));
 
@@ -22,115 +34,6 @@ function watchErrors(page: Page): string[] {
 async function openScreen(page: Page, path: string, title: string): Promise<void> {
   await page.goto(path);
   await expect(page.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
-}
-
-/**
- * A fingerprint of the offer on screen, or '' when nothing is waiting for an answer. Read straight
- * off the DOM: a locator would wait for the panel that has just unmounted, and the answer that
- * clears an offer is exactly the moment it disappears.
- */
-async function offerFingerprint(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const box = document.querySelector('.pending-choice');
-    if (!box) return '';
-    const labels = Array.from(box.querySelectorAll('[aria-label]')).map((node) =>
-      (node.getAttribute('aria-label') ?? '').slice(0, 24),
-    );
-    return `${box.querySelectorAll('.delve-choice').length} ${labels.join('|')}`;
-  });
-}
-
-/**
- * Answer every offer the run puts up, until it stops asking. One answer is not enough: a win holds
- * its boon pick until the player takes it, so the room's settlement raises a question of its own
- * after the last round, and a step that lands in an event asks before it moves.
- */
-async function answerChoices(page: Page): Promise<void> {
-  for (let offer = 0; offer < 6; offer += 1) {
-    const before = await offerFingerprint(page);
-    if (before === '') return;
-    await page.locator('.pending-choice .delve-choice').first().click();
-    await expect
-      .poll(() => offerFingerprint(page), `the answer to "${before}" to land`)
-      .not.toBe(before);
-  }
-  expect(await offerFingerprint(page), 'the run keeps raising offers').toBe('');
-}
-
-async function stepsTaken(page: Page): Promise<number> {
-  const text = await visibleText(page, '.stat-grid');
-  return Number(text.match(/(\d+) steps/)?.[1] ?? Number.NaN);
-}
-
-/**
- * The open room's round, or 0 when no room waits. One DOM read rather than a locator call: a
- * locator waits for its element to attach, and the panel unmounting as the room ends would leave
- * the read pending for the rest of the test.
- */
-async function turnRound(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const panel = document.querySelector('.turn-panel');
-    return panel ? Number(panel.getAttribute('data-round')) || 0 : 0;
-  });
-}
-
-/**
- * Answer the open room round by round with the basic attack until it finishes. A menu that stops
- * advancing without closing is a failure, not a slow room.
- */
-async function resolveTurn(page: Page): Promise<void> {
-  for (let round = 0; round < 40; round += 1) {
-    const shown = await turnRound(page);
-    if (shown === 0) return;
-    const attack = page.locator('[data-kind="attack"] .turn-target:not([disabled])').first();
-    await attack.click();
-    await expect
-      .poll(async () => {
-        const now = await turnRound(page);
-        return now === 0 || now > shown ? 'moved' : 'held';
-      }, `round ${shown} to resolve`)
-      .not.toBe('held');
-  }
-  await expect(page.locator('.turn-panel'), 'the room finished inside its round cap').toHaveCount(
-    0,
-  );
-}
-
-/**
- * Open one room, wait for its write to land, and clear whatever it put on screen: a choice, a room
- * waiting for orders, or nothing. The step counter only moves on a committed step, so it is the
- * signal that the button's work is done rather than the button's fleeting disabled state.
- */
-async function advance(page: Page): Promise<void> {
-  const step = page.getByRole('button', { name: /Open the next room|Answer the choice first/ });
-  await expect(step).toBeEnabled();
-  const before = await stepsTaken(page);
-  await step.click();
-  await expect
-    .poll(async () => {
-      if (
-        await page
-          .locator('.turn-panel')
-          .isVisible()
-          .catch(() => false)
-      )
-        return 'turn';
-      if (
-        await page
-          .locator('.pending-choice .delve-choice')
-          .first()
-          .isVisible()
-          .catch(() => false)
-      ) {
-        return 'choice';
-      }
-      const now = await stepsTaken(page);
-      return Number.isFinite(now) && now > before ? 'moved' : 'waiting';
-    }, 'the step to land')
-    .not.toBe('waiting');
-  await answerChoices(page);
-  await resolveTurn(page);
-  await answerChoices(page);
 }
 
 async function oil(page: Page): Promise<number> {
@@ -231,29 +134,6 @@ test('a run descends on one payment, and retreat banks the Embers', async ({ pag
   expect(errors).toEqual([]);
 });
 
-/**
- * Walk until the room *ahead* is a fight, where the readout prices it before the player commits.
- * Which room comes first is the floor plan's business, not the test's; each room behind us is
- * played out by hand before the next one is priced.
- */
-async function walkToFight(page: Page): Promise<void> {
-  for (let room = 0; room < 6; room += 1) {
-    if (
-      await page
-        .locator('.delve-readout')
-        .first()
-        .isVisible()
-        .catch(() => false)
-    )
-      return;
-    await advance(page);
-  }
-  await expect(
-    page.locator('.delve-readout').first(),
-    'a combat room within six steps',
-  ).toBeVisible();
-}
-
 test('the room prices itself before the player commits to it', async ({ page }) => {
   const errors = watchErrors(page);
   await pinClockAndIds(page);
@@ -344,6 +224,62 @@ test('a reload reopens the room the run is waiting in, at the same round', async
   await expect(page.locator('.turn-panel')).toHaveCount(0);
   await answerChoices(page);
   await expect(page.getByRole('button', { name: 'Open the next room' })).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
+/**
+ * Play rooms by hand until the run finishes. The budget is the test's own: Hollow 1 is three floors
+ * of a bounded row each, so a run still going this late is stuck in a room rather than descending.
+ */
+async function playRunToEnd(page: Page, played: Played): Promise<void> {
+  for (let room = 1; room <= 40; room += 1) {
+    await advance(page, played);
+    if (
+      await page
+        .locator('.ended-panel')
+        .isVisible()
+        .catch(() => false)
+    )
+      return;
+  }
+  throw new Error(`the run never finished inside 40 rooms: ${JSON.stringify(played)}`);
+}
+
+test('a whole Hollow is playable by hand, from the lantern to its end', async ({ page }) => {
+  const errors = watchErrors(page);
+  await pinClockAndIds(page);
+  await completeOnboarding(page, { income: '25000' });
+
+  await page.getByRole('link', { name: 'Open the Delve' }).click();
+  await page.getByRole('button', { name: /^Descend into Rootfall Warren/ }).click();
+  await expect(page.getByRole('heading', { name: /Rootfall Warren · F1/ })).toBeVisible();
+
+  const played: Played = { swings: 0, braces: 0 };
+  await playRunToEnd(page, played);
+
+  // The summary arrives with its own heading, and the hand wrote it: both orders the rooms accept.
+  const summary = await visibleText(page, '.ended-panel');
+  expect(summary).toMatch(/Cleared|Fainted|Retreated/);
+  expect(summary).toContain('Rootfall Warren');
+  expect(played.swings, summary).toBeGreaterThan(0);
+  expect(played.braces, summary).toBeGreaterThan(0);
+
+  // Descending is what makes this a run rather than a room: the hand cleared a floor and fought on
+  // the next. The rooms count is the engine's own, not one per button press — a treasure can hand
+  // its reward straight to the following room, and a fork asks before it counts.
+  const floor = Number(/Floor (\d+)/.exec(summary)?.[1] ?? 0);
+  expect(floor, summary).toBeGreaterThanOrEqual(2);
+  const visited = Number(/(\d+) rooms visited/.exec(summary)?.[1] ?? 0);
+  expect(visited, summary).toBeGreaterThan(0);
+
+  // A faint costs the run, not the progress: the floors it walked are banked, and nothing else moved.
+  const banked = Number(/(\d+) Embers earned this run/.exec(summary)?.[1] ?? 0);
+  expect(banked, summary).toBeGreaterThan(0);
+  expect(summary).not.toContain('NaN');
+
+  // And the book keeps the run it ended: the same floor, on the history screen.
+  await openScreen(page, '/delve/history', 'Run history');
+  expect(await visibleText(page, 'main')).toContain(`Rootfall Warren · Floor ${floor}`);
   expect(errors).toEqual([]);
 });
 

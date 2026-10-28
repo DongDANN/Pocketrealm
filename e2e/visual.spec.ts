@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { completeOnboarding, pinClockAndIds, startRun } from './helpers';
+import { completeOnboarding, pinClockAndIds, startRun, turnRound, walkToFight } from './helpers';
 
 test.describe('style-lock goldens', () => {
   test.use({
@@ -93,5 +93,24 @@ test.describe('game goldens', () => {
         animations: 'disabled',
       });
     }
+  });
+
+  /**
+   * The screen the cut leaves the player on: a room open and waiting for orders. It gets its own
+   * golden because it is the densest panel in the game — four action groups, a price per target, the
+   * round's incoming sum — and none of it appears on a camp screen. The pinned book fixes the floor
+   * plan, so the same enemy row is priced on every run of this test.
+   */
+  test('an open room mid-fight at 390px', async ({ page }) => {
+    await completeOnboarding(page, { income: '25000' });
+    await startRun(page);
+    await walkToFight(page);
+    await page.getByRole('button', { name: /Open the next room/ }).click();
+    await expect(page.locator('.turn-panel')).toBeVisible();
+    expect(await turnRound(page), 'the panel opens at round 1').toBe(1);
+    await expect(page).toHaveScreenshot('delve-turn-panel.png', {
+      fullPage: true,
+      animations: 'disabled',
+    });
   });
 });

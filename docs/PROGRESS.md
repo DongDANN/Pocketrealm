@@ -1565,3 +1565,53 @@ player touching it.
   by unit tests and the price identity rather than by clicks. The interim pacing bands remain the
   largest known gap to the redesign and belong to 7c/7f. `docs/FINAL_REPORT.md` still names Autopilot
   once, in its Gate 4 narrative; that copy is 7b-7's docs pass.
+
+### Gate 7b-7 — A hand plays a whole run in the browser (2026-10-28)
+
+§14's exit condition for 7b is "a full run playable by hand end to end in Chromium." 7b-6 proved
+nothing else could play the run; this gate proves a player can.
+
+- **The hand reads the screen, not the engine.** `readTurn` (`e2e/helpers.ts:158`) takes only what the
+  panel prints: each target's `likely`, whether its own line ends `0 HP after`, whether the button is
+  enabled, the HP in the panel's stat grid, and the incoming total the Brace row says it would halve.
+  `pickTurn` (`e2e/helpers.ts:197`) then plays what a readable panel invites — take the printed kill,
+  brace when the printed incoming would end the run, otherwise swing the largest number on screen.
+  Neither imports a damage function, deliberately: a price that is wrong on screen has to fail a test
+  instead of being quietly corrected in code.
+- **A run, lantern to summary.** `e2e/delve.spec.ts:248` descends into Rootfall Warren and plays every
+  room the pinned floor plan puts up — fights, treasure, events, shops, rests, and the boon picks a
+  win holds back — with no console error anywhere. It asserts the hand used both orders (14 swings and
+  2 braces over the run), that it got past the first floor, that Embers were banked, and that the same
+  floor is on the history screen afterwards. The measured ending is **Fainted · Rootfall Warren ·
+  Floor 2 · 5 Embers earned this run · 6 rooms visited**: a fresh book with nothing bought dies on the
+  second floor, which is `docs/DELVE_REDESIGN.md` §15 Risk 1 as a number rather than a worry. 7b's
+  exit condition is that the loop is playable end to end, not that a bare hand clears it — the clear
+  is 7c's skills and 7f's balance.
+- **The walking hand moved into `e2e/helpers.ts`** (`:90`–`:311`): `advance`, `answerChoices`,
+  `resolveTurn`, `walkToFight` and the reading hand now sit beside `startRun`, because a golden has to
+  walk the same rooms the run tests do or it photographs a different game. `e2e/delve.spec.ts` gave up
+  about 200 lines and imports them instead.
+- **The turn panel has a golden.** `e2e/visual.spec.ts:104` walks to a real fight, opens it, asserts the
+  panel mounts at round 1, and records `delve-turn-panel.png` at 390px: the four action groups, the
+  price per target, the itemized sums. None of that appears on any camp screen, so until now the
+  densest panel in the game had never been looked at twice.
+- **Docs the cut owed.** `docs/MANUAL_TEST.md` gains §10 "Playing a room by hand" — the seven things
+  only a phone can answer, including whether the panel's footer note clears the fixed thumb bar, and
+  marked **partially verified** because Chromium cannot feel a thumb. `docs/FINAL_REPORT.md` now marks
+  five acceptance rows **superseded** (13, 15, 16, 24, 30) with what replaced each of them rather than
+  deleting them, says so above the table, fixes row 41 to name the v2 → v3 settlement, drops the
+  worker out of row 20's chunk claim, and notes under the bundle table that its Delve line predates
+  the cut and is re-measured at 7f. One garbled sentence in `tests/delve-golden.test.ts`'s header is
+  rewritten to say plainly that the headless decider never braces.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 784/784 across 72 files**;
+  `npm run sim:golden` prints the same five digests as 7b-6, which is the point — this gate touched no
+  engine arithmetic; `npx playwright test` **verified 67/67** in Chromium against the production build
+  (65 before this gate, plus the hand-played run and its golden), with `e2e/offline.spec.ts` still
+  parked and uncommitted.
+- **Not verified / still open:** the hand has not cleared a Hollow — the run this test plays ends in a
+  faint, so "playable to a clear" is still unproven in the browser and belongs to 7c/7f. The hand
+  answers every boon, shop and event offer with the first option, so those screens are proven clickable
+  rather than legible. Item orders stay unimplemented, so the panel's Item group is only proven to
+  refuse. Whether any of this is usable with a thumb on a real phone is `docs/MANUAL_TEST.md` §10 and
+  has not been run.

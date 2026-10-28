@@ -7,7 +7,7 @@ the two are not confused.
 Status labels: **verified** (run and passed), **partially verified** (automated/Chromium evidence
 only), **not run** (no evidence), **blocked** (cannot be run until the app is deployed).
 
-Last updated: 2026-10-26.
+Last updated: 2026-10-28.
 
 ## Summary
 
@@ -22,6 +22,7 @@ Last updated: 2026-10-26.
 | 7   | Deployed CSP, headers and manifest type             | **partially verified** | `e2e/security.spec.ts` runs the local `vercel.json` emulator     |
 | 8   | Deployed Lighthouse and real-device performance     | **not run**            | local Lighthouse: 0.93–0.94 performance, 1.0 a11y/BP             |
 | 9   | Haptics and reduced motion on a real phone          | **not run**            | reduced-motion Canvas behavior is tested in Chromium             |
+| 10  | Playing a room by hand                              | **partially verified** | `e2e/delve.spec.ts` plays a whole run in Chromium; no phone run  |
 
 ## 1. Android Chrome: install and standalone launch
 
@@ -194,6 +195,37 @@ local numbers. Real-device FPS and catch-up timing are not currently verified an
 
 Expected: haptics are optional and never the only feedback; reduced motion removes decorative motion
 without removing information.
+
+## 10. Playing a room by hand
+
+**Status: partially verified.** Chromium plays a whole run end to end
+(`e2e/delve.spec.ts` → "a whole Hollow is playable by hand"), and the open panel has a golden
+(`e2e/visual.spec.ts` → `delve-turn-panel.png`). What Chromium cannot tell anyone is whether the
+panel is usable with a thumb, in daylight, on a phone.
+
+1. Descend into a Hollow with one payment. Confirm nothing moves until you press, and that the only
+   thing the payment bought is the run — not rooms inside it.
+2. Walk to a fight and read the room before committing. Every option should print its own arithmetic
+   (`ATK 9 −4 DEF = 5` style) and the enemy row should say what each one is about to do. Check the
+   numbers are legible at arm's length in daylight, without zooming.
+3. Order a Brace with one thumb. Confirm the button is a thumb-sized target and that you did not
+   have to re-read the panel after scrolling to find the incoming total it halves.
+4. Scroll to the foot of the panel and read its note — each sum is computed by the function that
+   resolves the hit. It sits under the Brace button, and the thumb bar is `position: fixed` over the
+   bottom of the viewport, so confirm the note is reachable by scrolling rather than permanently
+   parked behind the bar. (The full-page golden paints the bar across that line; in a stitched
+   full-page capture a fixed element always lands mid-frame, so that part is the screenshot, not the
+   layout.)
+5. Commit one attack and compare what you pressed with what the recap charged. The printed sum and
+   the log's sum must be the same number. A mis-tap costs the round, not the run — there is no undo,
+   so confirm the price you read is the price you got.
+6. Kill the app mid-fight and relaunch. The room should reopen at the same round with the same
+   prices, not restart or resolve itself behind your back.
+7. Lose a run. The summary should say what was banked and confirm nothing outside the run moved:
+   level, Spark, cosmetics and Forge nodes stay where they were.
+
+Expected: the room waits for you, prices what it will charge, and charges exactly that. The panel is
+the game now, so its reachability and legibility are the checks that matter on a phone.
 
 ## Sign-off
 
