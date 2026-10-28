@@ -17,7 +17,7 @@ import { hashCombine, hashString, mulberry32, type Rng } from '../rng';
 import { BOON_TAGS } from './data/boons';
 import { SKILLS, skillById, type CatalogueSkill } from './data/skills';
 import type { Element } from './data/elements';
-import { spendMaterials } from './materials';
+import { deepestPayee, spendMaterials } from './materials';
 import type {
   BoonTag,
   CapsuleCeiling,
@@ -112,6 +112,24 @@ export function craftCapsule(meta: DelveMeta): {
     ok: true,
     reason: `Crafted a ${ceiling}-ceiling capsule.`,
     ceiling,
+  };
+}
+
+/**
+ * What crafting one right now would produce, without spending anything. The Workshop prints the band
+ * and the odds from this before the player commits, so the disclosure and `craftCapsule` cannot disagree:
+ * both ask the ledger the same question. A `paidFrom` of null means the book cannot cover the price.
+ */
+export function craftPreview(meta: DelveMeta): {
+  canCraft: boolean;
+  paidFrom: HollowId | null;
+  ceiling: CapsuleCeiling | null;
+} {
+  const paidFrom = deepestPayee(meta, CAPSULE_COST);
+  return {
+    canCraft: paidFrom !== null,
+    paidFrom,
+    ceiling: paidFrom === null ? null : CAPSULE_CEILING[paidFrom],
   };
 }
 

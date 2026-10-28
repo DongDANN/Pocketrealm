@@ -1960,3 +1960,72 @@ dealt.` is 0.35 because Bark Wall prints 0.2 and the rung adds 0.15, and the tes
   (`src/ui/screens/Delve.tsx:801` and `src/ui/screens/DelveForge.tsx:165`) stay where 7c-4 left them.
   What the rungs are _worth_ is untested: 90 Dust for +32% potency and a modifier is a pacing claim about
   a curve no persona sim yet exercises at LV5, and that is 7f's question with the goldens in it.
+
+### Gate 7c-5 — The Workshop prints every promise before it takes anything (2026-10-28)
+
+- **What shipped.** The Workshop is now four tabs — Consumables, Capsules, Moveset, Skill Dust — and the
+  Codex has a Skills shelf next to the species one. All the print-logic lives in one new file,
+  `src/ui/lib/delveCollection.ts`: `capsuleBoard`, `dustRows`, `movesetBoard` and `skillLibrary` turn a
+  `DelveMeta` into lines, and the two screens do nothing but place them. That split is what makes the
+  honesty testable at all — 27 tests in `tests/ui/delve-collection.test.ts` read the same strings the
+  player reads, which a JSX tree on a `node` test environment does not offer.
+- **A preview asks the ledger the same question the purchase asks.** The band a capsule can hold comes
+  from the Hollow that pays for it, and paying is the deepest-Hollow-first walk §7 D.3 defines — so a
+  screen that guessed at the ceiling would print a band the craft then failed to produce.
+  `spendMaterials` was split into `planSpend` (work out the takes across the ledger, spend nothing,
+  return null when the pools disagree even though the printed total says they can), `deepestPayee` and
+  `craftPreview`. `craftCapsule` spends through the plan; `capsuleBoard` reads it. The disclosure —
+  "Cinder Vault pays for this one: Epic make, holding Uncommon → Rare → Epic" with 53.8 / 30.8 / 15.4
+  beside it — is therefore the draw's own distribution, not a description of it. Checked in the live
+  build on a mixed-provenance ledger: the craft then removed exactly Cinder Vault's materials, 10 ore
+  to 8 and 6 herb to 5, and left the older pools alone.
+- **Written down at the draw, so a reload is not a reroll.** §7 D.4's rule that the prize is keyed on
+  `(userSeed, capsuleIndex)` and persisted when it is drawn only means something if the screen cannot
+  dodge it. The reveal sheet is rendered from the stored capsule, not from a component's memory: on the
+  browser I reloaded `/delve/workshop` mid-reveal and got the same skill, the same pity already spent
+  (1 of 10, because a Hollow 2 capsule that hands over a Rare advances the counter without resetting it)
+  and the same pips lit. Dismissing writes it into the book, where
+  it becomes learnable and, being a passive, wearable in the passive slot — "Lucky Root" went from
+  capsule to equipped to `LV1 +0%` in the Dust tab without leaving the screen.
+- **Every collection decision takes the same lock.** Ten data-layer actions (craft, open, dismiss,
+  level up, learn, forget, equip, unequip, wear passive, clear passive) go through one `withLock` helper
+  (`src/ui/app/delve.tsx:448`): take the lock, run it, accept the wallet it returns or say the refusal.
+  The Moveset board refuses every button while a run is waiting for its next order — a fight reads the
+  equipped kit, so changing the kit mid-turn would rewrite the price the intent strip just printed. That
+  is asserted in the board test, not left to the disabled attribute.
+- **Two lies closed by construction rather than by copy.** The Codex used to want an `equipped` flag on
+  every skill; a museum with four slots and four builds has to pick a kit to be wrong about, so the field
+  is gone and `skillLibrary` reports only what the book holds and what the companion knows — deliberately
+  separate, and tested through `forgetSkill`, which keeps the entry and drops the know slot. The other
+  one was worse because players meet it first: the run-launch picker printed `build.skills` as the kit
+  the run would swing. It prints `movesetFor(meta, build.id)` now, actives plus the worn passive, and the
+  Forge says so out loud — "Seeds … The four slots a run actually swings are set in the Workshop."
+- **Defects only a running app shows.** Walking the redesigned screens in Chromium found five copy bugs
+  no unit test could see: "a Epic make" (an article picked off a band edge, now off the tier label),
+  "Bastion · Build · build" (the slot's kind printed next to a word that already said it), "At LV5:
+  LV5: …" (every one of the sixty catalogue `level5` strings already begins `LV5: ` — 60 of 60, counted —
+  so screens print them verbatim and never re-prefix), a wallet that read "ECHO 4 100 EMBERS" because two
+  `PixelText` spans abutted, and the Codex claiming Commons arrive in a capsule when §7 D.1 puts them
+  outside the draw entirely. The Codex filler line is rarity-aware now: Commons appear here the moment the
+  companion learns one, every tier above arrives in a capsule.
+- **Tabs that e2e can actually reach.** The tab strips are raw `<button type="button" role="tab">` inside
+  `role="tablist"` chip rows. `PixelButton` forwards arbitrary props to the DOM node, so giving it a
+  `role` would still leave the `role="button"` it sets itself — a tablist with buttons in it is worse for
+  a screen reader than a plain row of buttons. Since `visibleText` scrapes `aria-label`s, and PixelText
+  renders one canvas per word behind `role="img"`, every new line is readable from the DOM without a
+  `data-testid`; the five new styles in `global.css` are layout only.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 955/955 across 78 files**
+  (928/77 before, plus the new 27-test collection board suite). `npm run sim:golden` **verified all five
+  digests unchanged** — `94a4734277595fe7` / `3576928019daf46e` / `ead747a9c3dee2e7` / `9b13691c4c130d6e`
+  / `bcc6e6e8a66ebb11` — the collection is a wallet and a book, and no fight constant moved.
+  `npm run test:e2e` **verified 67/67** in Chromium against the production build (4.7m). Two visual
+  goldens regenerated and were inspected: `delve-workshop` and `delve-codex`, both because this gate
+  redesigned them on purpose; the other eight came back byte-identical. `e2e/offline.spec.ts` stays
+  parked and uncommitted.
+- **Not verified / still open:** no browser test drives the flow yet. Everything above was checked by
+  hand in a live build and by unit tests on the print logic — the craft → open → reload-cannot-reroll →
+  learn → equip → dust-ladder path needs committed coverage, which is 7c-6. The Consumables tab is still
+  the pre-7c panel; it shares the wallet header but was not redesigned. And the rungs' _worth_ remains
+  7f's question: 90 Dust for +32% potency and a modifier is a pacing claim no persona sim yet exercises
+  at LV5.

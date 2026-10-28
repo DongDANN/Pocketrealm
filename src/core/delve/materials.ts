@@ -71,10 +71,60 @@ export function bankMaterials(meta: DelveMeta, hollowId: HollowId, gained: Mater
 }
 
 /**
- * Spend `cost` from the deepest Hollow that can pay, falling back through shallower Hollows until the
- * price is covered. Reports which Hollow actually paid, because that is the capsule's ceiling. A book
- * that cannot pay at all is refused: nothing here guesses at a partial purchase.
+ * A payment planned across the ledger. `from` is the deepest Hollow that contributes anything and
+ * therefore the one that decides a capsule's ceiling; `takes` is what every Hollow gives up, with
+ * non-payers holding zeros so a caller can subtract the whole map without special cases.
  */
+export interface SpendPlan {
+  from: HollowId;
+  takes: Record<HollowId, Materials>;
+}
+
+/**
+ * Work out how `cost` would be paid, without spending it: deepest Hollow first, shallower ones filling
+ * only what the deeper pools leave unpaid, and never alone. Null when the ledger cannot cover the price
+ * — including the case where the printed total says it can and the pools disagree, which is refused
+ * rather than guessed at. Both the purchase and the screen's ceiling preview read this one function, so
+ * a preview cannot name a band the spend would not have produced.
+ */
+export function planSpend(
+  ledger: Partial<Record<HollowId, Materials>>,
+  cost: Materials,
+): SpendPlan | null {
+  const takes: Record<HollowId, Materials> = {
+    1: { ...EMPTY_MATERIALS },
+    2: { ...EMPTY_MATERIALS },
+    3: { ...EMPTY_MATERIALS },
+  };
+  let owed = { ...cost };
+  let from: HollowId | null = null;
+  for (const id of [...HOLLOW_IDS].reverse()) {
+    const have = ledger[id] ?? EMPTY_MATERIALS;
+    if (isPaid(owed, have)) {
+      takes[id] = owed;
+      if (!from) from = id;
+      owed = EMPTY_MATERIALS;
+      break;
+    }
+    // A shallower Hollow can only fill what the deeper ones left unpaid, and never alone: the
+    // deepest Hollow that contributes anything owns the capsule's ceiling.
+    const part = {
+      ore: Math.min(owed.ore, have.ore),
+      herb: Math.min(owed.herb, have.herb),
+      echo: Math.min(owed.echo, have.echo),
+    };
+    if (part.ore > 0 || part.herb > 0 || part.echo > 0) {
+      takes[id] = part;
+      if (!from) from = id;
+      owed = minus(owed, part);
+    }
+  }
+  if (owed.ore > 0 || owed.herb > 0 || owed.echo > 0) return null;
+  if (!from) from = HOLLOW_IDS[HOLLOW_IDS.length - 1]!;
+  return { from, takes };
+}
+
+/** Spend `cost` from the deepest Hollow that can pay. A book that cannot pay at all is refused. */
 export function spendMaterials(
   meta: DelveMeta,
   cost: Materials,
@@ -84,38 +134,28 @@ export function spendMaterials(
     return { meta, ok: false, paidFrom: null, reason: 'Not enough materials.' };
   }
   const ledger = materialsLedger(meta);
-  let owed = { ...cost };
-  let paidFrom: HollowId | null = null;
-  for (const id of [...HOLLOW_IDS].reverse()) {
-    if (isPaid(owed, ledger[id] ?? EMPTY_MATERIALS)) {
-      ledger[id] = minus(ledger[id] ?? EMPTY_MATERIALS, owed);
-      if (!paidFrom) paidFrom = id;
-      owed = EMPTY_MATERIALS;
-      break;
-    }
-    // A shallower Hollow can only fill what the deeper ones left unpaid, and never alone: the
-    // deepest Hollow that contributes anything to the price owns the capsule's ceiling.
-    const have = ledger[id] ?? EMPTY_MATERIALS;
-    const part = {
-      ore: Math.min(owed.ore, have.ore),
-      herb: Math.min(owed.herb, have.herb),
-      echo: Math.min(owed.echo, have.echo),
-    };
-    if (part.ore > 0 || part.herb > 0 || part.echo > 0) {
-      ledger[id] = minus(have, part);
-      if (!paidFrom) paidFrom = id;
-      owed = minus(owed, part);
-    }
-  }
-  if (!isPaid(cost, minus(cost, owed))) {
+  const plan = planSpend(ledger, cost);
+  if (!plan) {
     // The pools could not cover the price even though the total said they could: an inconsistent
     // book. Refuse rather than hand out a capsule the ledger cannot pay for.
     return { meta, ok: false, paidFrom: null, reason: 'Not enough materials.' };
   }
+  for (const id of HOLLOW_IDS) {
+    ledger[id] = minus(ledger[id] ?? EMPTY_MATERIALS, plan.takes[id]);
+  }
   return {
     meta: { ...meta, materialsFrom: ledger, materials: ledgerTotal(ledger) },
     ok: true,
-    paidFrom,
+    paidFrom: plan.from,
     reason: 'Spent.',
   };
+}
+
+/**
+ * Which Hollow would pay `cost`, read without spending anything. Null means the book cannot pay, which
+ * is what a screen has to know before it offers the button.
+ */
+export function deepestPayee(meta: DelveMeta, cost: Materials): HollowId | null {
+  if (!isPaid(cost, meta.materials ?? EMPTY_MATERIALS)) return null;
+  return planSpend(materialsLedger(meta), cost)?.from ?? null;
 }

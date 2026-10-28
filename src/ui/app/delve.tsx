@@ -7,12 +7,28 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { BuildId, CombatPause, HollowId, RunState, TurnOrder } from '../../core/delve';
+import type {
+  BuildId,
+  CapsuleCeiling,
+  CombatPause,
+  HollowId,
+  RunState,
+  TurnOrder,
+} from '../../core/delve';
 import {
   chooseDelve,
+  clearRealmPassive,
   craftAtWorkshop,
+  craftCapsuleAction,
+  dismissCapsuleRevealAction,
   equipConsumableAction,
+  equipRealmPassive,
+  equipRealmSkill,
+  forgetRealmSkill,
+  learnRealmSkill,
+  levelUpRealmSkill,
   loadDelveSnapshot,
+  openCapsuleAction,
   purchaseForge,
   purchaseTreeNode,
   respecTree,
@@ -21,6 +37,7 @@ import {
   startDelve,
   stepDelve,
   unequipConsumableAction,
+  unequipRealmSkill,
   unlockRealmBuilding,
   upgradeRealmBuilding,
   type DelveRunResult,
@@ -65,6 +82,20 @@ export interface DelveSession {
   unequip(consumableId: string): Promise<MetaActionResult | null>;
   unlockBuilding(buildingId: string): Promise<MetaActionResult | null>;
   upgradeBuilding(buildingId: string): Promise<MetaActionResult | null>;
+  /** Buy one capsule with materials. The ceiling comes from the deepest Hollow that can pay (§7 D.3). */
+  craftCapsule(): Promise<MetaActionResult | null>;
+  /** Draw and grant one held capsule. The prize is written before the reveal is acknowledged (§7 D.5). */
+  openCapsule(ceiling: CapsuleCeiling): Promise<MetaActionResult | null>;
+  dismissCapsule(): Promise<MetaActionResult | null>;
+  /** Buy the next rung of one skill's Dust ladder (§7 D.6). */
+  levelSkill(skillId: string): Promise<MetaActionResult | null>;
+  /** The four slots and the know list are campfire decisions — refused while a run is waiting. */
+  learnSkill(skillId: string, buildId: BuildId): Promise<MetaActionResult | null>;
+  forgetSkill(skillId: string, buildId: BuildId): Promise<MetaActionResult | null>;
+  equipMove(skillId: string, buildId: BuildId): Promise<MetaActionResult | null>;
+  unequipMove(skillId: string, buildId: BuildId): Promise<MetaActionResult | null>;
+  equipPassive(skillId: string, buildId: BuildId): Promise<MetaActionResult | null>;
+  clearPassive(buildId: BuildId): Promise<MetaActionResult | null>;
 }
 
 const DelveContext = createContext<DelveSession | null>(null);
@@ -409,6 +440,81 @@ export function DelveProvider({ children }: { children: ReactNode }) {
     [acceptMeta, begin, db, end, options],
   );
 
+  /**
+   * The collection actions all have one shape: take the lock, run it, then either apply the wallet the
+   * write returned or say the refusal. A screen never reads back what changed — the snapshot in context
+   * is the same object every panel already renders from.
+   */
+  const withLock = useCallback(
+    async (action: () => Promise<MetaActionResult>): Promise<MetaActionResult | null> => {
+      if (!begin()) return null;
+      try {
+        return acceptMeta(await action());
+      } catch (error) {
+        say(error instanceof Error ? error.message : String(error), 'warn');
+        return null;
+      } finally {
+        end();
+      }
+    },
+    [acceptMeta, begin, end],
+  );
+
+  const craftCapsule = useCallback(
+    () => withLock(() => craftCapsuleAction(db, options())),
+    [db, options, withLock],
+  );
+
+  const openCapsule = useCallback(
+    (ceiling: CapsuleCeiling) => withLock(() => openCapsuleAction(db, { ...options(), ceiling })),
+    [db, options, withLock],
+  );
+
+  const dismissCapsule = useCallback(
+    () => withLock(() => dismissCapsuleRevealAction(db, options())),
+    [db, options, withLock],
+  );
+
+  const levelSkill = useCallback(
+    (skillId: string) => withLock(() => levelUpRealmSkill(db, { ...options(), skillId })),
+    [db, options, withLock],
+  );
+
+  const learnSkill = useCallback(
+    (skillId: string, buildId: BuildId) =>
+      withLock(() => learnRealmSkill(db, { ...options(), skillId, buildId })),
+    [db, options, withLock],
+  );
+
+  const forgetSkill = useCallback(
+    (skillId: string, buildId: BuildId) =>
+      withLock(() => forgetRealmSkill(db, { ...options(), skillId, buildId })),
+    [db, options, withLock],
+  );
+
+  const equipMove = useCallback(
+    (skillId: string, buildId: BuildId) =>
+      withLock(() => equipRealmSkill(db, { ...options(), skillId, buildId })),
+    [db, options, withLock],
+  );
+
+  const unequipMove = useCallback(
+    (skillId: string, buildId: BuildId) =>
+      withLock(() => unequipRealmSkill(db, { ...options(), skillId, buildId })),
+    [db, options, withLock],
+  );
+
+  const equipPassive = useCallback(
+    (skillId: string, buildId: BuildId) =>
+      withLock(() => equipRealmPassive(db, { ...options(), skillId, buildId })),
+    [db, options, withLock],
+  );
+
+  const clearPassive = useCallback(
+    (buildId: BuildId) => withLock(() => clearRealmPassive(db, { ...options(), buildId })),
+    [db, options, withLock],
+  );
+
   const value: DelveSession = {
     snapshot,
     loading,
@@ -432,6 +538,16 @@ export function DelveProvider({ children }: { children: ReactNode }) {
     unequip,
     unlockBuilding,
     upgradeBuilding,
+    craftCapsule,
+    openCapsule,
+    dismissCapsule,
+    levelSkill,
+    learnSkill,
+    forgetSkill,
+    equipMove,
+    unequipMove,
+    equipPassive,
+    clearPassive,
   };
 
   return <DelveContext.Provider value={value}>{children}</DelveContext.Provider>;

@@ -2465,6 +2465,45 @@ a {
   flex: 1 1 100%;
 }
 
+/* A capsule's odds are printed before the draw, so the band sits in one quiet row of badges. */
+.capsule-odds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Hard pity counted in the open: every pip is a miss, and the filled ones are the misses already spent. */
+.pity-pips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.pip {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--ink-400);
+  background: var(--ink-800);
+}
+
+.pip.on {
+  border-color: var(--amber);
+  background: var(--amber);
+}
+
+.reveal-panel {
+  border-color: var(--amber);
+}
+
+/* One row can carry two orders at once — Equip and Forget, or Wear and Reset. */
+.delve-choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .delve-map {
   display: flex;
   flex-direction: column;

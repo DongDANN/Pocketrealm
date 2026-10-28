@@ -35,7 +35,10 @@ export {
   skillById,
   skillsOfRarity,
   skillsWithTag,
+  level5FxOf,
+  LEVEL5_KINDS,
   type CatalogueSkill,
+  type Level5Fx,
 } from './data/skills';
 export { FUSIONS, fusionById, anyBoonById, fusionRecipesFor } from './data/fusions';
 export type { FusionDef } from './data/fusions';

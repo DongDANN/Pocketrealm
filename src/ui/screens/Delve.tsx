@@ -10,6 +10,7 @@ import {
   heatUnlocked,
   hollowUnlocked,
   HOLLOW_FLOORS,
+  movesetFor,
   RUN_COST,
   turnMenu,
   anyBoonById,
@@ -781,6 +782,11 @@ export function Delve() {
             <div className="choice-stack">
               {BUILDS.map((build) => {
                 const open = buildUnlocked(build.id, meta, companionLevel);
+                // The run swings the equipped moveset, not the build's seed list, so this is the moveset.
+                const kit = movesetFor(meta, build.id);
+                const kitLine = `${kit.actives.map((skill) => skill.name).join(' · ')}${
+                  kit.passive ? ` · ${kit.passive.name}` : ''
+                }`;
                 return (
                   <button
                     key={build.id}
@@ -798,7 +804,7 @@ export function Delve() {
                     <PixelText
                       text={
                         open
-                          ? `${build.skills.map((skill) => skill.name).join(' · ')}. ${build.treeBranches.length} talent branches.`
+                          ? `Swings ${kitLine}. ${build.treeBranches.length} talent branches.`
                           : build.unlock.kind === 'level'
                             ? `Unlocks at level ${build.unlock.value}.`
                             : build.unlock.kind === 'hollowClear'

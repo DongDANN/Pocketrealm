@@ -162,7 +162,7 @@ export function DelveForge() {
           </div>
           <p className="panel-note">
             <PixelText
-              text={`Skills: ${buildTab.skills.map((s) => `${s.name} — ${s.effect}`).join(' · ')}`}
+              text={`Seeds ${buildTab.skills.map((s) => `${s.name} — ${s.effect}`).join(' · ')}. The four slots a run actually swings are set in the Workshop.`}
               color={C.paper3}
               pixelScale={2}
               wrap={38}
