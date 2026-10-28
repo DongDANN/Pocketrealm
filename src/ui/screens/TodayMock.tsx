@@ -404,7 +404,7 @@ export function TodayMock() {
               </h2>
               <p>
                 <PixelText
-                  text="Floor 2 · Oil 3 · Autopilot waiting"
+                  text="Floor 2 · Oil 3 · a room waits"
                   color={C.paper3}
                   pixelScale={2}
                   wrap={28}

@@ -14,7 +14,7 @@ import {
   topTag,
   type RunState,
 } from '../src/core/delve';
-import { CAMP_POLICY, POLICY, mkCtx, singleRowRun } from './delve-helpers';
+import { mkCtx, singleRowRun } from './delve-helpers';
 
 function zeroBuffs() {
   return { wardHp: 0, luckBonus: 0 };
@@ -45,7 +45,7 @@ describe('boon levels', () => {
         stepIndex: 0,
       },
     };
-    const out = resolveChoice(run, mkCtx(meta, { policy: CAMP_POLICY }), 'guard-ironhide');
+    const out = resolveChoice(run, mkCtx(meta), 'guard-ironhide');
     expect(out.run.boons).toEqual(['guard-ironhide']);
     expect(out.run.boonLevels['guard-ironhide']).toBe(2);
     expect(out.run.log.some((l) => l.text.includes('upgraded to level 2'))).toBe(true);
@@ -65,7 +65,7 @@ describe('boon levels', () => {
         stepIndex: 0,
       },
     };
-    const out = resolveChoice(run, mkCtx(meta, { policy: CAMP_POLICY }), 'guard-ironhide');
+    const out = resolveChoice(run, mkCtx(meta), 'guard-ironhide');
     expect(out.run.boonLevels['guard-ironhide']).toBe(3);
     expect(MAX_BOON_LEVEL).toBe(3);
   });
@@ -108,13 +108,13 @@ describe('fusion recipes', () => {
     expect(fusionRecipesFor({ ...run, boons: ['guard-ironhide'] })).toHaveLength(0);
   });
 
-  it('offers Fuse in a camp-mode rest room', () => {
+  it('offers Fuse in a rest room', () => {
     const meta = emptyMeta();
     const run = singleRowRun('rest', {
       boons: ['guard-ironhide', 'fury-emberfist'],
       boonLevels: { 'guard-ironhide': 1, 'fury-emberfist': 1 },
     });
-    const out = stepRun(run, mkCtx(meta, { policy: CAMP_POLICY }));
+    const out = stepRun(run, mkCtx(meta));
     expect(out.run.pendingChoice?.kind).toBe('rest');
     expect(out.run.pendingChoice!.options.some((o) => o.id === 'fuse:fuse-warchest')).toBe(true);
   });
@@ -125,12 +125,8 @@ describe('fusion recipes', () => {
       boons: ['guard-ironhide', 'fury-emberfist'],
       boonLevels: { 'guard-ironhide': 2, 'fury-emberfist': 1 },
     });
-    const entered = stepRun(run, mkCtx(meta, { policy: CAMP_POLICY }));
-    const out = resolveChoice(
-      entered.run,
-      mkCtx(meta, { policy: CAMP_POLICY }),
-      'fuse:fuse-warchest',
-    );
+    const entered = stepRun(run, mkCtx(meta));
+    const out = resolveChoice(entered.run, mkCtx(meta), 'fuse:fuse-warchest');
     expect(out.run.boons).toEqual(['fuse-warchest']);
     expect(out.run.boonLevels['fuse-warchest']).toBe(1);
     expect(out.run.pendingChoice).toBeNull();
@@ -139,22 +135,9 @@ describe('fusion recipes', () => {
 
   it('offers no fusion when the ingredients are not held', () => {
     const meta = emptyMeta();
-    const entered = stepRun(singleRowRun('rest'), mkCtx(meta, { policy: CAMP_POLICY }));
+    const entered = stepRun(singleRowRun('rest'), mkCtx(meta));
     expect(entered.run.pendingChoice?.kind).toBe('rest');
     expect(entered.run.pendingChoice!.options.some((o) => o.id.startsWith('fuse:'))).toBe(false);
-  });
-
-  it('greedy autopilot fuses at a rest room', () => {
-    const meta = emptyMeta();
-    const greedy = { ...POLICY, route: 'greedy' as const };
-    const run = singleRowRun('rest', {
-      boons: ['guard-ironhide', 'fury-emberfist'],
-      boonLevels: { 'guard-ironhide': 1, 'fury-emberfist': 1 },
-    });
-    const out = stepRun(run, mkCtx(meta, { policy: greedy }));
-    expect(out.run.boons).toContain('fuse-warchest');
-    expect(out.run.boons).not.toContain('guard-ironhide');
-    expect(out.run.log.some((l) => l.text.includes('Fused'))).toBe(true);
   });
 });
 
@@ -205,7 +188,7 @@ describe('Forge rerolls', () => {
     expect(newRun(11, 1, 3, meta).rerollsLeft).toBe(2);
   });
 
-  it('offers a reroll option in camp-mode boon choices while rerolls remain', () => {
+  it('offers a reroll option in boon choices while rerolls remain', () => {
     let found = false;
     for (let seed = 1; seed <= 60 && !found; seed++) {
       const meta = { ...emptyMeta(), forge: { reroll: 2 } };
@@ -213,10 +196,10 @@ describe('Forge rerolls', () => {
         ...newRun(seed, 1, 3, meta),
         floorPlan: {
           floor: 1,
-          rows: [[{ id: 'x', kind: 'skirmish', enemies: ['tollbug'], optionSeed: 0 }]],
+          rows: [[{ id: 'x', kind: 'treasure', enemies: [], optionSeed: 0 }]],
         },
       };
-      const out = stepRun(run, mkCtx(meta, { policy: CAMP_POLICY }));
+      const out = stepRun(run, mkCtx(meta));
       if (out.run.pendingChoice?.kind === 'boon') {
         found = true;
         expect(out.run.pendingChoice.options.some((o) => o.id === 'reroll')).toBe(true);
@@ -241,7 +224,7 @@ describe('Forge rerolls', () => {
         stepIndex: 0,
       },
     };
-    const out = resolveChoice(run, mkCtx(meta, { policy: CAMP_POLICY }), 'reroll');
+    const out = resolveChoice(run, mkCtx(meta), 'reroll');
     expect(out.ended).toBe(false);
     expect(out.run.rerollsLeft).toBe(1);
     expect(out.run.pendingChoice?.kind).toBe('boon');
@@ -262,7 +245,7 @@ describe('Forge rerolls', () => {
         stepIndex: 0,
       },
     };
-    const out = resolveChoice(run, mkCtx(meta, { policy: CAMP_POLICY }), 'reroll');
+    const out = resolveChoice(run, mkCtx(meta), 'reroll');
     expect(out.run).toEqual(run);
   });
 });

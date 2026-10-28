@@ -4,7 +4,7 @@
  * Lantern Oil can never be crafted or bought, so oil still comes from habits and the free trickle.
  */
 
-import { offerRng } from './autopilot';
+import { offerRng } from './offers';
 import type { DelveMeta, Materials, RoomDef, RunState } from './types';
 
 export const CONSUMABLE_SLOTS = 3;

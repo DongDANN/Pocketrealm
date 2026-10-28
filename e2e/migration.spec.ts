@@ -13,10 +13,13 @@ import { dateOf } from '../src/core/dates';
 import { occurrenceKey } from '../src/core/recurring';
 import { envelopesFromTemplate } from '../src/core/templates';
 import {
+  builtinDecider,
   emptyMeta,
   newRun,
+  resolveChoice,
   stepRun,
   type BudgetSignals,
+  type CombatPause,
   type DelveMeta,
   type RunState,
   type StepContext,
@@ -92,10 +95,10 @@ const V3_META_KEYS = [
   'capsuleTagStreak',
 ] as const;
 
-type PreV3Meta = Omit<DelveMeta, (typeof V3_META_KEYS)[number]>;
+type PreV3Meta = Omit<DelveMeta, (typeof V3_META_KEYS)[number]> & { cards: string[] };
 
 /** The keys v3 adds to a stored run; a v2 run row has none of them either. */
-const V3_RUN_KEYS = ['orders', 'floorRule', 'skipOutstanding'];
+const V3_RUN_KEYS = ['orders', 'floorRule', 'skipOutstanding', 'pendingTurn'];
 
 /**
  * Removes what a version had not written yet. The seeded rows must be genuinely old-shaped, because
@@ -125,21 +128,19 @@ function v2Meta(): PreV3Meta {
 
 /** Steps a real run until it is standing mid-Hollow with something earned, exactly as v2 left it. */
 function activeRun(meta: DelveMeta): { state: RunState; meta: DelveMeta } {
-  const ctx: StepContext = {
-    now: NOW,
-    oil: 200,
-    oilCapacity: 200,
-    signals: SIGNALS,
-    meta,
-    policy: { mode: 'autopilot', tagPriority: ['guard'], retreatHpPercent: 30, route: 'balanced' },
-    today: TODAY,
-  };
   let run = newRun(4242, 1, 5, meta);
   let value = meta;
-  for (let i = 0; i < 6 && run.result === 'active'; i += 1) {
-    const out = stepRun(run, { ...ctx, meta: value });
+  let pause: CombatPause | undefined;
+  // Embers, not steps: a floor only hands over its reward once the row is cleared and every offer it
+  // raised is answered, so "has something banked" is the condition that says the run has really walked.
+  for (let i = 0; i < 200 && run.result === 'active' && run.embersEarned === 0; i += 1) {
+    const ctx: StepContext = { now: NOW, signals: SIGNALS, meta: value, today: TODAY };
+    const out = run.pendingChoice
+      ? resolveChoice(run, ctx, run.pendingChoice.options[0]!.id)
+      : stepRun(run, pause ? { ...ctx, order: builtinDecider(pause.state) } : ctx);
     run = out.run;
     value = out.meta;
+    pause = out.pause;
   }
   return { state: asV2<RunState>(run, V3_RUN_KEYS), meta: value };
 }
@@ -246,7 +247,12 @@ async function seedV2Book(page: Page, book: Book): Promise<void> {
         ],
         transactions: [book.transaction],
         delveMeta: [
-          { key: 'meta', value: book.metaBefore, oil: 12, updatedAt: NOW } as DelveMetaRow,
+          {
+            key: 'meta',
+            value: book.metaBefore,
+            oil: 12,
+            updatedAt: NOW,
+          } as unknown as DelveMetaRow,
         ],
         delveRuns: [book.active, book.cleared],
       },
@@ -317,7 +323,7 @@ test('a saved v2 book is settled by the update, in the browser that saved it', a
   expect(settled.state.floorRule).toBeNull();
   expect(settled.state.skipOutstanding).toBe(false);
   expect(settled.state.log.at(-1)?.text).toContain('The update ended this run in camp');
-  expect(meta.cards).toEqual([]);
+  expect('cards' in (meta as unknown as Record<string, unknown>)).toBe(false);
   expect(meta.dust).toBe(book.metaBefore.cards.length * CARD_DUST_VALUE);
   expect(meta.capsules).toEqual({ rare: 1 });
   expect(meta.capsuleIndex).toBe(1);

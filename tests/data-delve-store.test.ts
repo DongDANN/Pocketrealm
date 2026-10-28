@@ -7,16 +7,25 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  applySteps,
+  builtinDecider,
   emptyMeta,
   newRun,
+  resolveChoice,
   stateHash,
+  stepRun,
+  type CombatPause,
   type DelveMeta,
   type RunState,
   type StepOutcome,
 } from '../src/core/delve';
 import type { PocketDb } from '../src/data/db';
-import { commitBatch, loadActiveRun, loadMeta, loadRun } from '../src/data/delveStore';
+import {
+  commitBatch,
+  commitChoice,
+  loadActiveRun,
+  loadMeta,
+  loadRun,
+} from '../src/data/delveStore';
 import { dbOn } from './data-harness';
 import { mkCtx, NOW, TODAY } from './delve-helpers';
 
@@ -29,24 +38,52 @@ function batch(run: RunState, meta: DelveMeta, oil: number, ledger: LedgerEntry[
   return { run, meta, oil, ledger, today: TODAY, now: NOW };
 }
 
-function walk(
-  run: RunState,
-  meta: DelveMeta,
-  oil: number,
-  steps: number,
-): { batch: ReturnType<typeof batch>; index: number }[] {
+interface Walked {
+  batches: { batch: ReturnType<typeof batch>; index: number; settled: boolean }[];
+  run: RunState;
+  meta: DelveMeta;
+  ledger: LedgerEntry[];
+}
+
+/**
+ * Play `steps` writes the way the controller does: the built-in decider answers fight rounds, the
+ * suite answers the engine's questions with its first option, and every move that changes the run is
+ * one batch. A room is entered by the write that moves the step index and settled by the write that
+ * does not, so `settled` says which of the two guarded paths the controller would take.
+ */
+function walk(run: RunState, meta: DelveMeta, oil: number, steps: number): Walked {
   let r = run;
   let m = meta;
-  const o = oil;
-  const out: { batch: ReturnType<typeof batch>; index: number }[] = [];
-  for (let i = 0; i < steps; i++) {
-    const res = applySteps(r, mkCtx(m, { oil: o }), 1);
-    if (res.applied === 0) break;
+  let pause: CombatPause | null = null;
+  const out: Walked = { batches: [], run: r, meta: m, ledger: [] };
+  const keep = (res: StepOutcome, moved: boolean) => {
+    out.batches.push({
+      batch: batch(res.run, res.meta, oil, res.ledger),
+      index: res.run.stepIndex,
+      settled: !moved,
+    });
+  };
+  for (let guard = 0; guard < 1000 && out.batches.length < steps; guard++) {
+    if (r.result !== 'active') break;
+    const beforeHash = stateHash(r);
+    const beforeIndex = r.stepIndex;
+    const res: StepOutcome = r.pendingChoice
+      ? resolveChoice(r, mkCtx(m), r.pendingChoice.options[0]!.id)
+      : stepRun(r, pause ? mkCtx(m, { order: builtinDecider(pause.state) }) : mkCtx(m));
     r = res.run;
     m = res.meta;
-    out.push({ batch: batch(r, m, o, res.ledger), index: r.stepIndex });
+    pause = res.pause ?? null;
+    out.ledger.push(...res.ledger);
+    if (stateHash(r) !== beforeHash) keep(res, r.stepIndex > beforeIndex);
   }
+  out.run = r;
+  out.meta = m;
   return out;
+}
+
+/** Land a walked batch the way the controller does: a step moves the index, a settlement does not. */
+function commitWalked(db: PocketDb, s: Walked['batches'][number]) {
+  return s.settled ? commitChoice(db, s.batch) : commitBatch(db, s.batch);
 }
 
 describe('delve batch store', () => {
@@ -61,7 +98,7 @@ describe('delve batch store', () => {
   it('writes the run, the meta and the oil wallet together', async () => {
     const meta = emptyMeta();
     const run = newRun(7, 1, 4, meta);
-    const [first] = walk(run, meta, 200, 1);
+    const [first] = walk(run, meta, 200, 1).batches;
     expect(first).toBeDefined();
 
     const result = await commitBatch(db, first!.batch);
@@ -88,15 +125,14 @@ describe('delve batch store', () => {
     const run = newRun(11, 1, 4, meta);
 
     const stepwise = walk(run, meta, 200, 5);
-    expect(stepwise.length).toBeGreaterThan(1);
-    for (const s of stepwise) await commitBatch(db, s.batch);
+    expect(stepwise.batches.length).toBeGreaterThan(1);
+    for (const s of stepwise.batches) await commitWalked(db, s);
 
     // Same engine path, but accumulated into a single write on a second database.
-    const merged = applySteps(run, mkCtx(meta, { oil: 200 }), stepwise.length);
+    const merged = walk(run, meta, 200, stepwise.batches.length);
+    const ledger = stepwise.batches.flatMap((s) => s.batch.ledger);
     const db2 = dbOn(new IDBFactory(), `${NAME}-merged`);
-    const mergedResult = await commitBatch(db2, {
-      ...batch(merged.run, merged.meta, 200, merged.ledger),
-    });
+    const mergedResult = await commitBatch(db2, batch(merged.run, merged.meta, 200, ledger));
 
     expect(await loadRun(db, run.runId)).toEqual(await loadRun(db2, run.runId));
     expect(await loadMeta(db)).toEqual(await loadMeta(db2));
@@ -110,8 +146,10 @@ describe('delve batch store', () => {
   it('treats a re-sent batch as a no-op after a reopen, so no reward is banked twice', async () => {
     const meta = emptyMeta();
     const run = newRun(3, 1, 4, meta);
-    const chain = walk(run, meta, 200, 4);
-    for (const s of chain) await commitBatch(db, s.batch);
+    // Long enough to cross a step boundary: a hand-played chain can spend several writes inside one
+    // room, and the older-batch check needs a batch from a step the store has already left behind.
+    const chain = walk(run, meta, 200, 24).batches;
+    for (const s of chain) await commitWalked(db, s);
     const runRow = await loadRun(db, run.runId);
     const wallet = await loadMeta(db);
     const keys = (await db.rewards.toArray()).map((e) => e.key);
@@ -128,7 +166,9 @@ describe('delve batch store', () => {
     expect(await loadMeta(again)).toEqual(wallet);
 
     // An older batch is refused the same way: the stored step index never moves backwards.
-    const stale = await commitBatch(again, chain[0]!.batch);
+    const older = chain.find((s) => s.batch.run.stepIndex < last.batch.run.stepIndex)!;
+    expect(older, 'the chain has to span more than one step').toBeDefined();
+    const stale = await commitBatch(again, older.batch);
     expect(stale).toMatchObject({ applied: false, skipped: 'stale' });
     expect((await loadRun(again, run.runId))?.stepIndex).toBe(last.batch.run.stepIndex);
   });
@@ -136,11 +176,11 @@ describe('delve batch store', () => {
   it('rolls the whole batch back when one write in it fails', async () => {
     const meta = emptyMeta();
     const run = newRun(5, 1, 4, meta);
-    const chain = walk(run, meta, 200, 40);
+    const chain = walk(run, meta, 200, 40).batches;
     // The batch under test has to carry a reward, otherwise the injected write failure never fires.
     const cut = chain.findIndex((s) => s.batch.ledger.length > 0);
     expect(cut).toBeGreaterThan(0);
-    for (const s of chain.slice(0, cut)) await commitBatch(db, s.batch);
+    for (const s of chain.slice(0, cut)) await commitWalked(db, s);
     const target = chain[cut]!;
     const before = await loadRun(db, run.runId);
     const walletBefore = await loadMeta(db);
@@ -156,7 +196,7 @@ describe('delve batch store', () => {
     expect(failing).toBe('sentinel');
     vi.spyOn(db.rewards, 'add').mockRejectedValue(new Error('quota'));
 
-    await expect(commitBatch(db, target.batch)).rejects.toThrow('quota');
+    await expect(commitWalked(db, target)).rejects.toThrow('quota');
     expect(await loadRun(db, run.runId)).toEqual(before);
     expect(await loadMeta(db)).toEqual(walletBefore);
     const keys = (await db.rewards.toArray()).map((e) => e.key);
@@ -168,8 +208,8 @@ describe('delve batch store', () => {
   it('keeps a finished run in history but out of the active slot', async () => {
     const meta = emptyMeta();
     const run = newRun(9, 1, 4, meta);
-    const chain = walk(run, meta, 200, 3);
-    for (const s of chain) await commitBatch(db, s.batch);
+    const chain = walk(run, meta, 200, 3).batches;
+    for (const s of chain) await commitWalked(db, s);
     expect((await loadActiveRun(db))?.runId).toBe(run.runId);
 
     // Retreating is a step of its own: the state changes and the index moves forward.
@@ -186,7 +226,7 @@ describe('delve batch store', () => {
   it('refuses a batch that cannot say where the run stopped', async () => {
     const meta = emptyMeta();
     const run = newRun(13, 1, 4, meta);
-    const [first] = walk(run, meta, 200, 1);
+    const [first] = walk(run, meta, 200, 1).batches;
     expect(first).toBeDefined();
 
     // A step index that is not a number never loses the `<=` comparison, so without a guard it is

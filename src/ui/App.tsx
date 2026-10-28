@@ -30,9 +30,6 @@ const Review = lazy(() => import('./screens/Review').then((m) => ({ default: m.R
 const Insights = lazy(() => import('./screens/Insights').then((m) => ({ default: m.Insights })));
 const Realm = lazy(() => import('./screens/Realm').then((m) => ({ default: m.Realm })));
 const Delve = lazy(() => import('./screens/Delve').then((m) => ({ default: m.Delve })));
-const DelveCards = lazy(() =>
-  import('./screens/DelveCards').then((m) => ({ default: m.DelveCards })),
-);
 const DelveCodex = lazy(() =>
   import('./screens/DelveCodex').then((m) => ({ default: m.DelveCodex })),
 );
@@ -41,9 +38,6 @@ const DelveForge = lazy(() =>
 );
 const DelveHistory = lazy(() =>
   import('./screens/DelveHistory').then((m) => ({ default: m.DelveHistory })),
-);
-const DelvePolicy = lazy(() =>
-  import('./screens/DelvePolicy').then((m) => ({ default: m.DelvePolicy })),
 );
 const DelveWorkshop = lazy(() =>
   import('./screens/DelveWorkshop').then((m) => ({ default: m.DelveWorkshop })),
@@ -116,10 +110,8 @@ export function App() {
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/realm" element={<Realm />} />
                 <Route path="/delve" element={<Delve />} />
-                <Route path="/delve/policy" element={<DelvePolicy />} />
                 <Route path="/delve/forge" element={<DelveForge />} />
                 <Route path="/delve/workshop" element={<DelveWorkshop />} />
-                <Route path="/delve/cards" element={<DelveCards />} />
                 <Route path="/delve/codex" element={<DelveCodex />} />
                 <Route path="/delve/history" element={<DelveHistory />} />
               </Route>

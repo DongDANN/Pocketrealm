@@ -9,6 +9,13 @@
  * eleven keys and the same five replays return the Gate 7a digests (9d19056d…, b118ad62…, 78fab713…,
  * ad6e6ddd…, 96d2bfc2…) exactly, which is the proof that no generation, combat or reward number
  * moved.
+ *
+ * Gate 7b-6 re-recorded them again, and this time the model moved with them: the cut deleted `cards`
+ * and `policy` from the run and the meta, a fight room now stores the orders its player gave it, oil
+ * buys the descent instead of each room, a boon offer no longer holds a run in the room it already
+ * answered, and a shop with a full boon shelf no longer offers one it cannot sell. All five replays
+ * now end fainted, which is what the headless decider does when no order of its ever says `guard` —
+ * the golden pins that, and 7c/7f own making a player better at it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -25,17 +32,17 @@ interface GoldenCase {
 }
 
 const CASES: GoldenCase[] = [
-  { label: 'H1 seed 12345', seed: 12345, hollow: 1, level: 5, hash: '103db8fe052548c8' },
+  { label: 'H1 seed 12345', seed: 12345, hollow: 1, level: 5, hash: '837106532b87b6aa' },
   {
     label: 'H2 golden-ratio seed',
     seed: 0x9e3779b1,
     hollow: 2,
     level: 6,
-    hash: 'bc14e7152d65da7f',
+    hash: '7fbf913c7da7c523',
   },
-  { label: 'H3 seed 777', seed: 777, hollow: 3, level: 8, hash: '8250a6f2fd0458da' },
-  { label: 'H2 seed 4242', seed: 4242, hollow: 2, level: 9, hash: 'ee51ae8cd4496032' },
-  { label: 'H3 seed 20261025', seed: 20261025, hollow: 3, level: 12, hash: '2909fc47d48f231a' },
+  { label: 'H3 seed 777', seed: 777, hollow: 3, level: 8, hash: '317ae9b8898d8b8b' },
+  { label: 'H2 seed 4242', seed: 4242, hollow: 2, level: 9, hash: '5491625f617eb6e9' },
+  { label: 'H3 seed 20261025', seed: 20261025, hollow: 3, level: 12, hash: 'fd1fa46095a964c5' },
 ];
 
 function hashOf(c: Pick<GoldenCase, 'seed' | 'hollow' | 'level'>): string {

@@ -1491,3 +1491,77 @@ the order through the controller, and reopens the same menu after a reload.
   and Guard are proven by the unit tests and the price identity rather than by a hand that clicks
   them. The panel has no "Break off" (§4 A.4) and no Item rules; item buttons say so instead of
   pretending. The engine keeps its hard 40-round cap, which still counts as a safe retreat.
+
+### Gate 7b-6 — The cut: nothing plays itself any more (2026-10-28)
+
+7b-1 through 7b-5 built the hand-played loop alongside the old one. This gate deletes the old one —
+what `docs/DELVE_REDESIGN.md` §5 calls the cut — and with it the last way a run can advance without a
+player touching it.
+
+- **What is gone.** `autopilot.ts`, `catchup.ts`, `policy.ts`, `workerJob.ts`, `src/data/delveWorker.ts`,
+  `src/data/workers/delveCatchup.worker.ts` and `src/ui/lib/delvePolicy.ts` are deleted, together with
+  the screens they existed for (`/delve/policy`, `/delve/cards`), the away sheet on Today, and the 60
+  lines of CSS that drew it. `src/data/delve.ts` gives up 244 lines: no catch-up replay, no worker
+  transport, no scheduled job.
+- **The state stops carrying an autopilot.** `RunState` and `DelveMeta` no longer have `cards` or
+  `policy` (`src/core/delve/types.ts`, 34 lines down), `StepContext` is
+  `{ now, signals, meta, today, order? }` (`src/core/delve/types.ts:302`), and `runCombat` takes
+  `decide: TurnDecider` as a required argument (`src/core/delve/combat.ts:506`). There is no default
+  policy to fall back to, which is the point: a step with no order rebuilds the menu and changes
+  nothing.
+- **The headless policy survives as a fixture, not a feature.** `data/habitCards.ts` keeps one fixed
+  `BUILTIN_DECK` (`:39`) and `builtinDecider` (`:167`) so the fuzz, golden and simulation suites can
+  still play a run without a human — through the same seam a player uses, and no UI module imports it.
+  `tests/delve-builtin-decider.test.ts` (5 new) pins the deck's shape and the property the suites lean
+  on: it always returns a legal order and always names a target the room actually has.
+- **Boon offers moved into their own module** (`src/core/delve/offers.ts`), split out of the engine with
+  the seeded offer generation and the fusion lookups, because after the cut they are the only choices
+  the engine still raises on its own.
+- **Two stranded buttons, each found by a red test first.** They are one rule seen from both sides: an
+  option the run cannot take must not be offered, and an offer the run has answered must not stay on
+  screen.
+  - An event whose outcome is a boon raises a follow-up offer. At the eight-boon cap no offer opens, and
+    the engine was leaving the _event's own_ offer pending — the run sat in a room it had already
+    answered, tapping a button that did nothing (`src/core/delve/engine.ts:1002`).
+  - The shop priced a wandering boon onto the shelf at that same cap (`src/core/delve/engine.ts:547`),
+    and three `sim:delve` pacing seeds then stalled on it: the headless player took the first option,
+    the engine refused it, and the day never ended.
+- **The suites had to learn to play by hand.** `tests/data-delve-store.test.ts`'s `walk` now mirrors the
+  controller's two write paths — a step that moves the index goes through `commitBatch`, a settlement
+  that does not goes through `commitChoice` — which is what the store's duplicate/stale guards were
+  always meant to protect. `tests/delve-bosses.test.ts` fights Thorncrown the way a player does,
+  casting the build's guard-role skill against the telegraph. `tests/delve-heat.test.ts` asserts the
+  per-floor reward arithmetic exactly instead of a run total, because Heat also seeds Elite rooms into
+  the map and a chosen Elite banks Embers of its own. The room, engine and data tests answer the boon
+  offer a win holds back before they assert that the floor moved.
+- **The headless envelope is not a player's envelope, and now says so.** SPEC §6.10's 25–40%
+  first-attempt faint rate describes a player who reads a telegraph and braces. `builtinDecider` puts
+  `guard: false` in every order — bracing is the player's call now — so the simulation's rate sits
+  above that band by construction and rises with activity: measured at this gate over 5 seeds × 60
+  days, trickle 38%, casual 45%, habit 65%, optimizer 86%. `tests/delve-economy.test.ts` widened its
+  bound to that measurement with the numbers in the comment; 7f re-tunes it against the skill economy.
+- **Goldens.** All five run hashes re-recorded (`837106532b87b6aa`, `7fbf913c7da7c523`,
+  `317ae9b8898d8b8b`, `5491625f617eb6e9`, `fd1fa46095a964c5`), with the reason in the header of
+  `tests/delve-golden.test.ts`: the model moved, and every replay now ends fainted because nothing in
+  it braces. The `delve-policy` and `delve-cards` screenshots are deleted with their screens, and
+  `today-mobile`, `today-desktop` and `delve-run` were re-recorded because the away sheet and the
+  Autopilot panel are gone out of them.
+- **The browser helpers follow the engine.** `answerChoices` (`e2e/delve.spec.ts:48`) drains every offer
+  a run raises — including the boon pick a finished fight holds back — and waits on a DOM fingerprint
+  rather than a locator, so a panel that has just unmounted cannot hang the read. `advance`
+  (`e2e/delve.spec.ts:104`) calls it before _and_ after the room, which is what the three failing run
+  tests were missing. The v2 fixture in `e2e/migration.spec.ts:130` walks until the run has banked
+  Embers instead of until it has taken two steps, because in the hand-played model a step is one room
+  and a floor reward only exists once the row is cleared.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 784/784 across 72 files**
+  (10,000-seed run fuzz and 10,000-matchup combat fuzz included; two suites deleted with the feature,
+  one added); `npm run sim:golden` prints the five re-recorded digests; `npx playwright test` **verified
+  65/65** in Chromium against the production build, with `e2e/offline.spec.ts` left at its parked,
+  uncommitted state (the offline-strip diagnosis is not part of this gate).
+- **Not verified / still open:** no browser hand has played a whole run through to a clear — the e2e
+  still answers every round with the basic attack and retreats rather than finishing, which is 7b-7's
+  exit condition, and the turn panel has no golden of its own yet. Skills, Guard and Item stay proven
+  by unit tests and the price identity rather than by clicks. The interim pacing bands remain the
+  largest known gap to the redesign and belong to 7c/7f. `docs/FINAL_REPORT.md` still names Autopilot
+  once, in its Gate 4 narrative; that copy is 7b-7's docs pass.

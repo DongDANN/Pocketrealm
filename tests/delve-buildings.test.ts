@@ -11,10 +11,10 @@ import {
   economyMods,
   newRun,
   stepRun,
-  type AutopilotPolicy,
   type DelveMeta,
   type RoomDef,
 } from '../src/core/delve';
+import { mkCtx } from './delve-helpers';
 import {
   BUILDINGS,
   BUILDING_POWER_CAP,
@@ -191,46 +191,14 @@ describe('building effects', () => {
     const noLook = newRun(3, 1, 5, metaWith({}));
     noLook.floorPlan = plan;
     noLook.row = 1;
-    const campPolicy: AutopilotPolicy = {
-      mode: 'camp',
-      tagPriority: ['guard'],
-      retreatHpPercent: 0,
-      route: 'balanced',
-    };
-    const out0 = stepRun(noLook, {
-      now: 0,
-      oil: 10,
-      oilCapacity: 100,
-      signals: {
-        checkedInToday: false,
-        envelopesWithinAllowance: 0,
-        contributedToGoalLast7d: false,
-        reviewedLast7d: false,
-      },
-      meta: metaWith({}),
-      policy: campPolicy,
-      today: '2026-10-25',
-    });
+    const out0 = stepRun(noLook, mkCtx(metaWith({})));
     expect(out0.run.pendingChoice?.kind).toBe('fork');
     for (const o of out0.run.pendingChoice!.options) expect(o.detail ?? '').not.toContain('→');
 
     const withLook = newRun(3, 1, 5, metaWith({ buildingLevels: { observatory: 1 } }));
     withLook.floorPlan = plan;
     withLook.row = 1;
-    const out1 = stepRun(withLook, {
-      now: 0,
-      oil: 10,
-      oilCapacity: 100,
-      signals: {
-        checkedInToday: false,
-        envelopesWithinAllowance: 0,
-        contributedToGoalLast7d: false,
-        reviewedLast7d: false,
-      },
-      meta: metaWith({ buildingLevels: { observatory: 1 } }),
-      policy: campPolicy,
-      today: '2026-10-25',
-    });
+    const out1 = stepRun(withLook, mkCtx(metaWith({ buildingLevels: { observatory: 1 } })));
     expect(out1.run.pendingChoice?.kind).toBe('fork');
     for (const o of out1.run.pendingChoice!.options) expect(o.detail).toContain('→ Rest');
   });

@@ -165,10 +165,10 @@ describe('Delve XP daily cap', () => {
 describe('sim:delve persona pacing (§6.10)', () => {
   const SEEDS = 5;
   const DAYS = 60;
-  // Measured at 7b-4 with oil buying the run: Trickle gets one Rootfall run a day and first clears
-  // H1 on day 27; the Optimizer (≈6 runs a day) banks 3.2× Trickle's Embers. DELVE_REDESIGN §6
-  // states the destination bands (Trickle 2–3 weeks, Optimizer ≤2.5×) for the skill economy that
-  // arrives in 7c; 7f re-tunes these interim bounds against it.
+  // Measured at 7b-6, after the cut: Trickle gets one Rootfall run a day and first clears H1 on day
+  // 21; the Optimizer (≈5 runs a day) banks 3.0× Trickle's Embers. DELVE_REDESIGN §6 states the
+  // destination bands (Trickle 2–3 weeks, Optimizer ≤2.5×) for the skill economy that arrives in 7c;
+  // 7f re-tunes these interim bounds against it.
   const TRICKLE_H1 = { min: 18, max: 32 };
   const OPTIMIZER_EMBER_RATIO = 3.5;
 
@@ -240,12 +240,17 @@ describe('sim:delve persona pacing (§6.10)', () => {
     expect(o / t).toBeLessThanOrEqual(OPTIMIZER_EMBER_RATIO);
   }, 180_000);
 
-  it('keeps first-attempt faint rates near the 25-40% band and paces run counts', () => {
+  it('keeps first-attempt faint rates inside the headless envelope and paces run counts', () => {
     const stats: Record<string, PersonaStats> = {};
     for (const key of Object.keys(PERSONAS)) stats[key] = average(key as keyof typeof PERSONAS);
-    // SPEC §6.10: "faint rate ... about 25 to 40% on a Hollow's first clear attempts".
-    // Tuned values with builds (5 seeds x 60 days): trickle 30%, casual 34%, habit 32%, optimizer 29%.
-    // The band below allows the measured seed noise (±10 points on small attempt counts).
+    // SPEC §6.10's "about 25 to 40% on a Hollow's first clear attempts" describes a player who reads
+    // the telegraph and braces. The cut leaves the headless suites unable to do that: `builtinDecider`
+    // puts `guard: false` in every order, because reading a mechanic and softening the blow is now the
+    // player's call — so its faint rate sits above that band by construction, and rises with activity:
+    // measured at 7b-6 (5 seeds x 60 days) trickle 38%, casual 45%, habit 65%, optimizer 86%. The
+    // bounds below are those rates plus the seed noise of small attempt counts; 7f re-tunes this
+    // envelope with the skill economy that teaches bracing.
+    const FIRST_ATTEMPT = { min: 18, max: 92 };
     const firstAttempt = (s: PersonaStats) => {
       const fa = s.firstAttempts[1];
       if (!fa || fa.attempts === 0) return 0;
@@ -253,8 +258,12 @@ describe('sim:delve persona pacing (§6.10)', () => {
     };
     for (const key of Object.keys(stats)) {
       const s = stats[key]!;
-      expect(firstAttempt(s), `${key} first-attempt faint rate`).toBeGreaterThanOrEqual(18);
-      expect(firstAttempt(s), `${key} first-attempt faint rate`).toBeLessThanOrEqual(45);
+      expect(firstAttempt(s), `${key} first-attempt faint rate`).toBeGreaterThanOrEqual(
+        FIRST_ATTEMPT.min,
+      );
+      expect(firstAttempt(s), `${key} first-attempt faint rate`).toBeLessThanOrEqual(
+        FIRST_ATTEMPT.max,
+      );
       expect(s.clears, `${key} clears`).toBeGreaterThan(0);
     }
     expect(stats.optimizer!.runs).toBeGreaterThan(stats.trickle!.runs);

@@ -2550,40 +2550,6 @@ a {
   gap: 8px;
 }
 
-.progress-strip {
-  display: flex;
-  gap: 4px;
-}
-
-.progress-strip > span {
-  width: 18px;
-  height: 8px;
-  background: var(--amber);
-  animation: strip-blink 1s steps(2, end) infinite;
-}
-
-.progress-strip > span:nth-child(2) {
-  animation-delay: 0.16s;
-}
-
-.progress-strip > span:nth-child(3) {
-  animation-delay: 0.32s;
-}
-
-@keyframes strip-blink {
-  0%,
-  100% {
-    opacity: 0.25;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.catchup-panel {
-  border-color: var(--amber-deep);
-}
-
 .ended-panel {
   border-color: var(--moss);
 }
@@ -2592,32 +2558,6 @@ a {
   width: 100%;
   min-height: 44px;
   accent-color: var(--amber);
-}
-
-.priority-list,
-.choice-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.priority-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px;
-  background: var(--ink-700);
-  border: 2px solid var(--ink-400);
-}
-
-.priority-slot {
-  display: grid;
-  place-items: center;
-  min-width: 26px;
-  height: 26px;
-  border: 2px solid var(--amber-deep);
-  background: var(--ink-800);
 }
 
 .link-grid {

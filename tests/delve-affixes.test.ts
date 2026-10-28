@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AFFIXES,
   affixById,
+  builtinDecider,
   computeModifiers,
   emptyMeta,
   generateFloor,
@@ -88,24 +89,64 @@ describe('affixes in combat', () => {
   const mods = () => computeModifiers(runWith({}), {}, zeroBuffs());
 
   it('armored enemies take less damage per hit', () => {
-    const plain = runCombat(runWith({}), { enemies: ['tollbug'] }, mods(), 1);
+    const plain = runCombat(
+      runWith({}),
+      { enemies: ['tollbug'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     const armored = runCombat(
       runWith({}),
       { enemies: ['tollbug'], affixes: ['armored'] },
       mods(),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(firstHitDamage(armored)).toBeLessThan(firstHitDamage(plain));
   });
 
   it('warded enemies start shielded and absorb the first hits', () => {
-    const r = runCombat(runWith({}), { enemies: ['tollbug'], affixes: ['warded'] }, mods(), 1);
+    const r = runCombat(
+      runWith({}),
+      { enemies: ['tollbug'], affixes: ['warded'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     expect(r.log.some((l) => l.text.includes("'s shield absorbs"))).toBe(true);
   });
 
   it('swift enemies act before the companion', () => {
-    const plain = runCombat(runWith({}), { enemies: ['mossbite'] }, mods(), 1);
-    const swift = runCombat(runWith({}), { enemies: ['mossbite'], affixes: ['swift'] }, mods(), 1);
+    const plain = runCombat(
+      runWith({}),
+      { enemies: ['mossbite'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
+    const swift = runCombat(
+      runWith({}),
+      { enemies: ['mossbite'], affixes: ['swift'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     const firstAction = (r: CombatResult) =>
       r.log.find((l) => /^(You|Mossbite)/.test(l.text))!.text;
     expect(firstAction(plain)).toMatch(/^You/);
@@ -113,12 +154,30 @@ describe('affixes in combat', () => {
   });
 
   it('vampiric enemies heal from the damage they deal', () => {
-    const r = runCombat(runWith({}), { enemies: ['tollbug'], affixes: ['vampiric'] }, mods(), 1);
+    const r = runCombat(
+      runWith({}),
+      { enemies: ['tollbug'], affixes: ['vampiric'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     expect(r.log.some((l) => l.text.includes('drains'))).toBe(true);
   });
 
   it('enraged enemies hit harder below 30% HP', () => {
-    const r = runCombat(runWith({}), { enemies: ['tollbug'], affixes: ['enraged'] }, mods(), 1);
+    const r = runCombat(
+      runWith({}),
+      { enemies: ['tollbug'], affixes: ['enraged'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     const hits = r.log
       .filter((l) => /^Tollbug hits/.test(l.text))
       .map((l) => Number(l.text.match(/for (\d+)/)![1]));
@@ -126,7 +185,16 @@ describe('affixes in combat', () => {
   });
 
   it('thorned enemies cut the attacker', () => {
-    const r = runCombat(runWith({}), { enemies: ['tollbug'], affixes: ['thorned'] }, mods(), 1);
+    const r = runCombat(
+      runWith({}),
+      { enemies: ['tollbug'], affixes: ['thorned'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     expect(r.log.some((l) => l.text.includes('thorns cut you'))).toBe(true);
   });
 
@@ -137,6 +205,10 @@ describe('affixes in combat', () => {
       { enemies: ['tollbug'], affixes: ['splitting'] },
       computeModifiers(run, {}, zeroBuffs()),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(r.won).toBe(true);
     expect(r.log.some((l) => l.text.includes('splits into'))).toBe(true);
@@ -144,12 +216,25 @@ describe('affixes in combat', () => {
   });
 
   it('frenzied enemies strike twice per round', () => {
-    const plain = runCombat(runWith({}), { enemies: ['mossbite'] }, mods(), 1);
+    const plain = runCombat(
+      runWith({}),
+      { enemies: ['mossbite'] },
+      mods(),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     const frenzied = runCombat(
       runWith({}),
       { enemies: ['mossbite'], affixes: ['frenzied'] },
       mods(),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(plain.log.some((l) => l.text.includes('strikes again'))).toBe(false);
     expect(frenzied.log.some((l) => l.text.includes('strikes again'))).toBe(true);

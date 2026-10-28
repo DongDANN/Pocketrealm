@@ -52,13 +52,13 @@ interface Opened {
 function open(enemies: string[], seed: number): Opened {
   const run = roomWith(enemies, { runId: `d1-${seed.toString(16)}-1` });
   const meta = emptyMeta();
-  const entry = stepRun(run, mkCtx(meta, { play: true }));
+  const entry = stepRun(run, mkCtx(meta));
   expect(entry.pause).toBeDefined();
   return { run, meta, entry };
 }
 
 function answer(opened: Opened, from: StepOutcome, order: TurnOrder): StepOutcome {
-  return stepRun(from.run, mkCtx(opened.meta, { play: true, order }));
+  return stepRun(from.run, mkCtx(opened.meta, { order }));
 }
 
 function playerHits(pause: CombatPause): HitRecord[] {
@@ -194,7 +194,7 @@ describe('what the menu says about each option', () => {
       consumables: ['shield-charm', 'fire-oil'],
       consumablesUsed: { 'shield-charm': true },
     });
-    const entry = stepRun(run, mkCtx(meta, { play: true }));
+    const entry = stepRun(run, mkCtx(meta));
     const menu = turnMenu(run, meta, NO_SIGNALS, entry.pause!);
 
     expect(menu.items.map((item) => item.id)).toEqual(['fire-oil']);

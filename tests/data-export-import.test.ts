@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { applySteps, emptyMeta, newRun, type RunState } from '../src/core/delve';
+import { emptyMeta, newRun, resolveChoice, stepRun, type RunState } from '../src/core/delve';
 import type { Clock, Envelope } from '../src/core/types';
 import { DB_TABLES, SCHEMA_VERSION, type PocketDb } from '../src/data/db';
 import { commitBatch } from '../src/data/delveStore';
@@ -63,12 +63,25 @@ async function seed(db: PocketDb, options: { txnId?: string; amount?: number } =
 
   const meta = emptyMeta();
   const run = newRun(21, 1, 4, meta);
-  const stepped = applySteps(run, mkCtx(meta, { oil: 100 }), 1);
+  // Walk until the run has entered its first room, so the fixture stores a real step.
+  let stepped = run;
+  let steppedMeta = meta;
+  for (let i = 0; i < 50 && stepped.stepIndex === 0; i++) {
+    if (stepped.pendingChoice) {
+      const out = resolveChoice(stepped, mkCtx(steppedMeta), stepped.pendingChoice.options[0]!.id);
+      stepped = out.run;
+      steppedMeta = out.meta;
+      continue;
+    }
+    const out = stepRun(stepped, mkCtx(steppedMeta));
+    stepped = out.run;
+    steppedMeta = out.meta;
+  }
   await commitBatch(db, {
-    run: stepped.run,
-    meta: stepped.meta,
+    run: stepped,
+    meta: steppedMeta,
     oil: 100,
-    ledger: stepped.ledger,
+    ledger: [],
     today: '2026-10-04',
     now: NOW,
   });
@@ -345,10 +358,7 @@ describe('importing a book written before the turn loop', () => {
   it('settles its active run and pays the cards and the oil back', async () => {
     const db = testDb('import-v2-settle');
     const state: RunState = {
-      ...newRun(0xa11ce, 1, 5, {
-        ...emptyMeta(),
-        cards: ['card-steady', 'card-ember', 'card-scout'],
-      }),
+      ...newRun(0xa11ce, 1, 5, emptyMeta()),
       stepIndex: 5,
       embersEarned: 34,
     };

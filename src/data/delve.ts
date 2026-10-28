@@ -4,12 +4,11 @@
  *
  *  - the oil wallet is reconciled against the reward ledger by difference, so habits logged while
  *    the Delve was closed arrive exactly once and a replay can never mint a second drop;
- *  - a run starts at step zero, advances one step per call, and resolves a choice without moving
- *    the step index (the store has a guarded write for each case);
+ *  - a run starts at step zero, advances one room per call, and resolves a choice without moving
+ *    the step index (the store has a guarded write for each case). A fight room pauses for the
+ *    player's order and is rebuilt by replaying the orders stored with the run;
  *  - a Daily Challenge settles its Embers, Sparks and personal best in the same batch that ends it,
- *    and never touches permanent counters, materials, or Hollow clears;
- *  - catch-up runs in a worker, then lands as a batch; a dry lamp consumes the elapsed clock
- *    instead of banking it forever, and a pending choice pauses time until it is answered.
+ *    and never touches permanent counters, materials, or Hollow clears.
  *
  * Every read here is local, every write is one transaction, and no function reads the wall clock.
  */
@@ -21,8 +20,6 @@ import {
   buildingMilestones,
   buyForgeNode,
   buyTreeNode,
-  cardUnlocked,
-  catchUpStepCount,
   craftConsumable,
   emptyMeta,
   equipConsumable,
@@ -35,22 +32,17 @@ import {
   respecBuild,
   resolveChoice,
   retreatRun,
-  runCatchUpJob,
   RUN_COST,
   stepRun,
   unequipConsumable,
   unlockBuilding,
   upgradeBuilding,
-  type AutopilotPolicy,
   type BudgetSignals,
   type BuildId,
-  type CatchUpJobRequest,
-  type CatchUpJobResponse,
   type CombatPause,
   type DelveMeta,
   type HollowId,
   type MilestoneInput,
-  type RunLogEntry,
   type RunResult,
   type RunState,
   type StepContext,
@@ -71,7 +63,6 @@ import {
   saveMetaWallet,
   type DelveBatch,
 } from './delveStore';
-import { runCatchUpRemote, type CatchUpProgress, type CatchUpRunner } from './delveWorker';
 import { loadFacts } from './factsStore';
 import { ledgerEvents, ledgerTotals } from './ledger';
 import { questSeed } from './onboard';
@@ -183,7 +174,6 @@ export function normalizeMeta(raw?: unknown): DelveMeta {
     builds: buildStates(m.builds),
     knownWeaknesses: uniqueText(m.knownWeaknesses) as DelveMeta['knownWeaknesses'],
     bossKnowledge: uniqueText(m.bossKnowledge),
-    cards: uniqueText(m.cards).slice(0, 3),
     bestFloor: hollowNumbers(m.bestFloor),
     forge: numberRecord(m.forge),
     runsStarted: count(m.runsStarted),
@@ -380,19 +370,13 @@ function refusedReason(run: RunState): string {
 
 function context(
   sync: DelveSync,
-  policy: AutopilotPolicy,
-  options: { today: LocalDate; now: number; play?: boolean; order?: TurnOrder },
-  oil = sync.oil,
+  options: { today: LocalDate; now: number; order?: TurnOrder },
 ): StepContext {
   return {
     now: options.now,
-    oil,
-    oilCapacity: sync.capacity,
     signals: sync.signals,
     meta: sync.meta,
-    policy,
     today: options.today,
-    ...(options.play ? { play: true } : {}),
     ...(options.order !== undefined ? { order: options.order } : {}),
   };
 }
@@ -612,13 +596,7 @@ export async function startDailyDelve(
 }
 
 export interface StepDelveOptions extends DelveActionOptions {
-  policy: AutopilotPolicy;
-  /**
-   * Human play: a fight room opens and waits for orders instead of resolving itself. Absent on the
-   * auto-played path, where the policy still answers for the companion.
-   */
-  play?: boolean;
-  /** The order for the round a hand-played run is waiting on. Refused unless the room is open. */
+  /** The order for the round a run is waiting on. Refused unless the room is open. */
   order?: TurnOrder;
 }
 
@@ -650,7 +628,7 @@ export async function stepDelve(db: PocketDb, options: StepDelveOptions): Promis
       granted: 0,
     };
   }
-  const out = stepRun(run, context(sync, options.policy, options));
+  const out = stepRun(run, context(sync, options));
   const moved = out.run.stepIndex > run.stepIndex;
   // Camp mode opens a fork before stepping into the room. That state must be stored, but it is
   // not a step: no oil, no step clock, and the guarded same-index write path.
@@ -773,7 +751,7 @@ export async function chooseDelve(
       granted: 0,
     };
   }
-  const out = resolveChoice(run, context(sync, options.policy, options), options.optionId);
+  const out = resolveChoice(run, context(sync, options), options.optionId);
   const changed = out.run !== run || out.meta !== sync.meta;
   if (!changed) {
     return {
@@ -898,195 +876,6 @@ export async function retreatDelve(
     ended: true,
     daily,
     granted: commit.granted,
-  };
-}
-
-/* --------------------------------------------------------------------------------------------
- * Catch-up
- * ------------------------------------------------------------------------------------------ */
-
-export interface CatchUpReport extends DelveWallet {
-  /** True when at least one room was simulated. */
-  ran: boolean;
-  steps: number;
-  rooms: number;
-  choices: number;
-  fromFloor: number;
-  toFloor: number;
-  ended: boolean;
-  result: RunResult | null;
-  /** A camp fork the simulation stopped on; the player answers it on the run screen. */
-  pending: boolean;
-  daily?: DailyFinish;
-  /** New log lines only, so the screen can summarize what happened while away. */
-  log: RunLogEntry[];
-  chunks: number;
-  embersBanked: number;
-  materials: DelveMeta['materials'];
-  /** Glint change; can be negative when the Autopilot bought something. */
-  glint: number;
-  granted: number;
-}
-
-export interface CatchUpOptions extends DelveActionOptions {
-  policy: AutopilotPolicy;
-  onProgress?: CatchUpProgress;
-}
-
-function idleReport(walletState: DelveWallet): CatchUpReport {
-  return {
-    ...walletState,
-    ran: false,
-    steps: 0,
-    rooms: 0,
-    choices: 0,
-    fromFloor: 0,
-    toFloor: 0,
-    ended: false,
-    result: null,
-    pending: false,
-    log: [],
-    chunks: 0,
-    embersBanked: 0,
-    materials: { ore: 0, herb: 0, echo: 0 },
-    glint: 0,
-    granted: 0,
-  };
-}
-
-async function consumeElapsed(
-  db: PocketDb,
-  sync: DelveSync,
-  options: DelveActionOptions,
-): Promise<DelveWallet> {
-  const meta = withClock(sync.meta, options.now);
-  const saved = await saveMetaWallet(db, {
-    meta,
-    oil: sync.oil,
-    oilCapacity: sync.capacity,
-    oilGranted: sync.oilGranted,
-    now: options.now,
-  });
-  return {
-    meta: saved.meta,
-    oil: saved.oil,
-    capacity: sync.capacity,
-    oilGranted: saved.oilGranted ?? sync.oilGranted,
-  };
-}
-
-/**
- * Run offline progress. The worker simulates; this function settles the batch and writes it. A
- * pending choice pauses the clock, a dry lamp consumes time without stepping, and a clock that
- * moved backwards never lowers `maxSeenAt`.
- */
-export async function applyCatchUp(
-  db: PocketDb,
-  options: CatchUpOptions,
-  runner: CatchUpRunner = runCatchUpRemote,
-): Promise<CatchUpReport> {
-  const sync = await syncDelveWallet(db, options);
-  const active = await loadActiveRun(db);
-  if (!active || active.state.result !== 'active' || active.state.pendingChoice !== null) {
-    return idleReport(sync);
-  }
-  const run = active.state;
-
-  // A run from a build before the clock fields existed must not suddenly claim a 12 h backlog.
-  if (sync.meta.lastStepAt <= 0) {
-    return idleReport(await consumeElapsed(db, sync, options));
-  }
-
-  const maxSteps = catchUpStepCount(sync.meta.lastStepAt, options.now);
-  if (maxSteps <= 0) return idleReport(sync);
-
-  const request: CatchUpJobRequest = {
-    run,
-    ctx: context(sync, options.policy, options),
-    maxSteps,
-    chunkSize: 64,
-  };
-  let response: CatchUpJobResponse;
-  try {
-    response = await runner(request, options.onProgress);
-  } catch {
-    response = runCatchUpJob(request, options.onProgress);
-  }
-  const result = response.result;
-
-  let meta = withClock(result.meta, options.now);
-  let ledger = result.ledger;
-  let daily: DailyFinish | undefined;
-  if (result.run.result !== 'active' && result.run.daily) {
-    const settled = settleDaily(meta, result.run, options.today);
-    meta = settled.meta;
-    ledger = [...ledger, ...settled.ledger];
-    daily = settled.daily;
-  }
-  const oil = sync.oil;
-  const batch: DelveBatch = {
-    run: result.run,
-    meta,
-    oil,
-    oilCapacity: sync.capacity,
-    oilGranted: sync.oilGranted,
-    ledger,
-    today: options.today,
-    now: options.now,
-  };
-
-  const moved = result.applied > 0;
-  const openedChoice =
-    result.run.pendingChoice !== null &&
-    run.pendingChoice === null &&
-    result.run.stepIndex === run.stepIndex;
-  const endedInPlace =
-    result.applied === 0 &&
-    result.run.stepIndex === run.stepIndex &&
-    result.run.result !== 'active' &&
-    run.result === 'active';
-
-  let granted: number;
-  if (moved || openedChoice || endedInPlace) {
-    const commit = moved ? await commitBatch(db, batch) : await commitChoice(db, batch);
-    if (!commit.applied) {
-      // Something else already stored a newer state; trust the store over this simulation.
-      const fresh = await syncDelveWallet(db, options);
-      return idleReport(fresh);
-    }
-    granted = commit.granted;
-  } else {
-    // The engine could not move (dry lamp with no choice): spend the elapsed clock, not the run.
-    const consumed = await consumeElapsed(db, sync, options);
-    return idleReport(consumed);
-  }
-
-  const newLog = result.run.log.slice(run.log.length);
-  return {
-    meta,
-    oil,
-    capacity: sync.capacity,
-    oilGranted: sync.oilGranted,
-    ran: result.applied > 0,
-    steps: result.applied,
-    rooms: Math.max(0, result.run.roomsVisited.length - run.roomsVisited.length),
-    choices: newLog.filter((entry) => entry.type === 'choice').length,
-    fromFloor: run.floor,
-    toFloor: result.run.floor,
-    ended: result.run.result !== 'active',
-    result: result.run.result,
-    pending: result.run.pendingChoice !== null,
-    daily,
-    log: newLog,
-    chunks: response.progress.length,
-    embersBanked: Math.max(0, meta.embers - sync.meta.embers),
-    materials: {
-      ore: Math.max(0, meta.materials.ore - sync.meta.materials.ore),
-      herb: Math.max(0, meta.materials.herb - sync.meta.materials.herb),
-      echo: Math.max(0, meta.materials.echo - sync.meta.materials.echo),
-    },
-    glint: result.run.glint - run.glint,
-    granted,
   };
 }
 
@@ -1228,31 +1017,6 @@ export function upgradeRealmBuilding(
   return mutateMeta(db, options, (meta) => {
     const out = upgradeBuilding(meta, options.buildingId);
     return { ok: out.ok, meta: out.meta, reason: out.reason };
-  });
-}
-
-export interface CardsOptions extends DelveActionOptions {
-  cardIds: string[];
-}
-
-/** Up to three Habit Cards, unique, and only those this install has unlocked. */
-export async function setHabitCards(
-  db: PocketDb,
-  options: CardsOptions,
-): Promise<MetaActionResult> {
-  const level = await companionLevelOf(db);
-  return mutateMeta(db, options, (meta) => {
-    const ids = [...new Set(options.cardIds)];
-    if (ids.length !== options.cardIds.length) {
-      return { ok: false, meta, reason: 'A card can only be equipped once.' };
-    }
-    if (ids.length > 3) return { ok: false, meta, reason: 'Only three cards fit in a loadout.' };
-    for (const id of ids) {
-      if (!cardUnlocked(id, meta, level)) {
-        return { ok: false, meta, reason: 'That card is not unlocked yet.' };
-      }
-    }
-    return { ok: true, meta: { ...meta, cards: ids } };
   });
 }
 

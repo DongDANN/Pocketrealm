@@ -23,7 +23,6 @@ describe('Breaker meta', () => {
     const meta = buildMaxMeta();
     expect(buildingPower(meta.buildingLevels)).toBe(BUILDING_POWER_CAP);
     expect(Object.keys(meta.buildingLevels).length).toBe(BUILDINGS.length);
-    expect(meta.cards).toHaveLength(3);
     expect(Object.keys(meta.mastery).length).toBe(CODEX_SPECIES.length);
     expect(meta.equippedConsumables.length).toBeGreaterThan(0);
     expect(meta.clearedHollows).toEqual([1, 2, 3]);

@@ -120,7 +120,6 @@ export interface DelveRows {
 function withV3Defaults(stored: DelveMeta): DelveMeta {
   return {
     ...stored,
-    cards: stored.cards ?? [],
     skills: stored.skills ?? {},
     knownSkills: stored.knownSkills ?? [],
     equippedSkills: stored.equippedSkills ?? [],
@@ -131,7 +130,6 @@ function withV3Defaults(stored: DelveMeta): DelveMeta {
     capsuleTagStreak: stored.capsuleTagStreak ?? 0,
   };
 }
-
 /**
  * Names the reason in the run's own log, after the line the engine writes while banking, so history
  * ends on "the update did this" rather than on a retreat the player never pressed.
@@ -206,11 +204,12 @@ export function upgradeDelveRowsToV3(rows: DelveRows, on: LocalDate): DelveRows 
     });
   }
 
-  const cards = value.cards ?? [];
+  // A card the player can no longer equip becomes dust, and the dropped field leaves with the v3
+  // shape: `DelveMeta` no longer declares it, so nothing downstream can read it by accident.
+  const { cards: cardsAtV2, ...rest } = value as DelveMeta & { cards?: string[] };
   value = {
-    ...value,
-    cards: [],
-    dust: value.dust + cards.length * CARD_DUST_VALUE,
+    ...rest,
+    dust: rest.dust + (cardsAtV2?.length ?? 0) * CARD_DUST_VALUE,
   };
 
   const meta = [...rows.meta];

@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   BOSSES,
+  builtinDecider,
   computeModifiers,
   emptyMeta,
   newRun,
   runCombat,
-  stepRun,
-  type AutopilotPolicy,
   type DelveMeta,
   type RunState,
+  type TurnOrder,
+  type TurnState,
 } from '../src/core/delve';
-import { mkCtx } from './delve-helpers';
+import { playOne, startRun } from './delve-helpers';
 
 function zeroBuffs() {
   return { wardHp: 0, luckBonus: 0 };
@@ -47,6 +48,10 @@ describe('boss phases in combat', () => {
       { enemies: ['thorncrown'] },
       computeModifiers(run, {}, zeroBuffs()),
       6,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(r.log.filter((l) => l.text.includes('shifts stance')).length).toBe(2);
   });
@@ -54,7 +59,16 @@ describe('boss phases in combat', () => {
   it('reveals phase names and the mechanic once studied', () => {
     const run = runWith({});
     const mods = computeModifiers(run, {}, zeroBuffs());
-    const r = runCombat(run, { enemies: ['thorncrown'] }, mods, 6, [], ['thorncrown']);
+    const r = runCombat(
+      run,
+      { enemies: ['thorncrown'] },
+      mods,
+      6,
+      [],
+      ['thorncrown'],
+      {},
+      builtinDecider,
+    );
     expect(r.log.some((l) => l.text.includes('enters Bramble Armor'))).toBe(true);
     expect(r.log.some((l) => l.text.includes('enters Thorn Frenzy'))).toBe(true);
     expect(r.log.some((l) => l.text.includes('telegraphs: next round, Thorn Barrage'))).toBe(true);
@@ -67,16 +81,31 @@ describe('boss phases in combat', () => {
       { enemies: ['thorncrown'] },
       computeModifiers(run, {}, zeroBuffs()),
       6,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(r.log.some((l) => l.text.includes('telegraphs: a heavy attack'))).toBe(true);
     expect(r.log.some((l) => l.text.includes('telegraphs: next round, Thorn Barrage'))).toBe(false);
   });
 
   it('guard skills soften the mechanic', () => {
-    const base = runWith({ cards: ['rainy-day'] });
+    const base = runWith({});
     const run = { ...base, unit: { ...base.unit, hp: 100 } };
     const mods = { ...computeModifiers(run, {}, zeroBuffs()), maxHp: 900 };
-    const r = runCombat(run, { enemies: ['thorncrown'] }, mods, 6);
+    // Raising the guard is the player's call, so this fight is played with the order a player gives
+    // against a telegraph: cast the build's guard-role skill whenever it is ready.
+    const castGuard = (state: TurnState): TurnOrder => {
+      const guard = state.actives.find(
+        (sk) =>
+          sk.role === 'guard' &&
+          (state.cooldowns[sk.id] ?? 0) <= 0 &&
+          state.energy >= (sk.energyCost ?? 1),
+      );
+      return { skillId: guard?.id ?? null, targetIndex: 0, guard: false };
+    };
+    const r = runCombat(run, { enemies: ['thorncrown'] }, mods, 6, [], [], {}, castGuard);
     expect(r.log.some((l) => l.text.includes('You brace your guard'))).toBe(true);
     expect(r.log.some((l) => l.text.includes('Your guard softens the blow'))).toBe(true);
     const takes = r.log
@@ -95,6 +124,10 @@ describe('boss phases in combat', () => {
         { enemies: ['thorncrown'] },
         computeModifiers(run, {}, zeroBuffs()),
         6,
+        [],
+        [],
+        {},
+        builtinDecider,
       );
       if (r.log.some((l) => l.text.includes('interrupts the telegraph'))) found = true;
     }
@@ -110,6 +143,10 @@ describe('boss phases in combat', () => {
         { enemies: ['thorncrown'] },
         computeModifiers(run, {}, zeroBuffs()),
         6,
+        [],
+        [],
+        {},
+        builtinDecider,
       );
       if (r.log.some((l) => l.text.includes('mechanic is interrupted'))) found = true;
     }
@@ -120,31 +157,20 @@ describe('boss phases in combat', () => {
 describe('Boss Study', () => {
   it('fainting to a boss reveals weakness and tells, and never changes boss stats', () => {
     const before = BOSSES.map((b) => ({ ...b, phases: b.phases?.map((p) => ({ ...p })) }));
-    const policy: AutopilotPolicy = {
-      mode: 'autopilot',
-      tagPriority: ['guard', 'vigor', 'fury', 'fortune', 'thrift'],
-      retreatHpPercent: 0,
-      route: 'balanced',
-    };
     let studied: DelveMeta | undefined;
     for (let seed = 1; seed <= 200 && !studied; seed++) {
-      let meta = emptyMeta();
-      let run = newRun(seed, 1, 4, meta);
+      let state = startRun(seed, 1, 4);
       let guard = 0;
-      while (run.result === 'active' && guard < 1000) {
+      while (state.run.result === 'active' && guard < 2000) {
+        state = playOne(state);
         guard += 1;
-        const before = run.stepIndex;
-        const out = stepRun(run, mkCtx(meta, { policy }));
-        run = out.run;
-        meta = out.meta;
-        if (run.stepIndex === before && !out.ended) break;
-        if (
-          run.result === 'fainted' &&
-          run.roomsVisited.some((id) => id.startsWith('f6')) &&
-          meta.bossKnowledge.length > 0
-        ) {
-          studied = meta;
-        }
+      }
+      if (
+        state.run.result === 'fainted' &&
+        state.run.roomsVisited.some((id) => id.startsWith('f6')) &&
+        state.meta.bossKnowledge.length > 0
+      ) {
+        studied = state.meta;
       }
     }
     expect(studied).toBeDefined();

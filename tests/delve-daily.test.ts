@@ -5,34 +5,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { emptyMeta, stepRun, type BoonTag, type DelveMeta } from '../src/core/delve';
+import { emptyMeta, stepRun, type DelveMeta } from '../src/core/delve';
 import { dailyHollow, dailySeed, finishDailyRun, newDailyRun } from '../src/core/delve/daily';
+import { mkCtx } from './delve-helpers';
 
 function metaWith(over: Partial<DelveMeta>): DelveMeta {
   return { ...emptyMeta(), ...over };
 }
-
-const PRIORITY: BoonTag[] = ['guard', 'vigor', 'fury', 'fortune', 'thrift'];
-
-const ctx = (meta: DelveMeta, oil: number) => ({
-  now: 0,
-  oil,
-  oilCapacity: 100,
-  signals: {
-    checkedInToday: false,
-    envelopesWithinAllowance: 0,
-    contributedToGoalLast7d: false,
-    reviewedLast7d: false,
-  },
-  meta,
-  policy: {
-    mode: 'autopilot' as const,
-    tagPriority: PRIORITY,
-    retreatHpPercent: 0,
-    route: 'balanced' as const,
-  },
-  today: '2026-10-25',
-});
 
 describe('daily seed', () => {
   it('is deterministic per date and differs across dates', () => {
@@ -52,7 +31,6 @@ describe('newDailyRun', () => {
   it('uses a fixed loadout independent of meta progression', () => {
     const meta = metaWith({
       forge: { maxhp: 5, atk: 5, glint: 5 },
-      cards: ['rainy-day'],
       equippedConsumables: ['fire-oil'],
       buildingLevels: { treasury: 2, smithy: 2 },
       clearedHollows: [1, 2],
@@ -64,7 +42,6 @@ describe('newDailyRun', () => {
     expect(out.run.companionLevel).toBe(12);
     expect(out.run.buildId).toBe('warden');
     expect(out.run.boons).toEqual([]);
-    expect(out.run.cards).toEqual([]);
     expect(out.run.consumables).toEqual([]);
     expect(out.run.buildings).toEqual({});
     expect(out.run.heat).toBe(0);
@@ -92,7 +69,7 @@ describe('daily steps and rewards', () => {
   it('costs no oil and still progresses', () => {
     const start = newDailyRun('2026-10-25', metaWith({}));
     if ('error' in start) throw new Error('expected run');
-    const out = stepRun(start.run, ctx(start.meta, 0));
+    const out = stepRun(start.run, mkCtx(start.meta));
     expect(out.run.result).toBe('active');
     expect(out.run.roomsVisited.length).toBe(1);
   });

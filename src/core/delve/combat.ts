@@ -48,7 +48,6 @@ import {
   type HitRecord,
   type IncomingInput,
 } from './damage';
-import { cardById, evaluateCards, resolveCardAction, type CardDef } from './data/habitCards';
 import { masteryLevel } from './mastery';
 import {
   STUN_BOSS_RESIST,
@@ -290,8 +289,8 @@ export interface CombatResult {
   consumablesUsed: Record<string, boolean>;
   log: RunLogEntry[];
   /**
-   * The player's orders for this room, in the order they were acted on. Empty on the auto-resolved
-   * path, which has no player in it.
+   * The player's orders for this room, in the order they were acted on. A paused room returns the
+   * orders it has so far, which is what the run persists and replays.
    */
   orders: TurnOrder[];
   /**
@@ -491,11 +490,10 @@ export function attackInputFor(
 /**
  * Run one deterministic battle.
  *
- * Without `decide` the companion acts as it always has — ready skills most expensive first, else a
- * basic swing, Habit Cards on top when the run carries a deck. That path is what Autopilot and the
- * headless suites use, and it is the part Gate 7b-6 deletes. With `decide`, the same loop asks for an
- * order on every companion action and nothing fires that the order did not name (§4 A.1): energy,
- * cooldowns, rolls, statuses, phases, enemy turns, the `ROUND_CAP` and the log are untouched.
+ * Every companion action is an order: the loop asks `decide` for one each time and nothing fires
+ * that the order did not name (§4 A.1) — energy, cooldowns, rolls, statuses, phases, enemy turns,
+ * the `ROUND_CAP` and the log are untouched. A `null` order pauses the room and hands it back; the
+ * caller asks the player and replays the stored orders to get here again.
  */
 export function runCombat(
   run: RunState,
@@ -505,7 +503,7 @@ export function runCombat(
   knownWeaknesses: readonly Element[] = [],
   studiedBosses: readonly string[] = [],
   mastery: Record<string, number> = {},
-  decide?: TurnDecider,
+  decide: TurnDecider,
 ): CombatResult {
   const rng = combatRng(run.runId, run.stepIndex);
   const log: RunLogEntry[] = [];
@@ -683,7 +681,7 @@ export function runCombat(
     energy,
     hp,
     maxHp,
-    // Copies, not the live maps: a policy that keeps the menu it was handed must not watch the fight
+    // Copies, not the live maps: a decider that keeps the menu it was handed must not watch the fight
     // rewrite it after the fact.
     cooldowns: { ...cooldowns },
     actives,
@@ -789,54 +787,18 @@ export function runCombat(
           logLine('You are stunned and lose your turn.');
           continue;
         }
-        let chosen: SkillDef | undefined;
-        let target: EnemyState | undefined;
-        if (decide) {
-          const state = menuState();
-          const order = decide(state);
-          const acted = order === null ? null : honour(order);
-          if (!order || !acted) return pausedAt();
-          ordersTaken.push(order);
-          if (acted.brace) {
-            bracedRound = round;
-            logLine('You brace, and take half of what lands this round.');
-            continue;
-          }
-          chosen = acted.skill;
-          target = acted.target;
-        } else {
-          const equipped = (run.cards ?? [])
-            .map((id) => cardById(id))
-            .filter((c): c is CardDef => c !== undefined)
-            .slice(0, 3);
-          let attackMarked = false;
-          if (equipped.length > 0) {
-            const state = menuState();
-            const decision = evaluateCards(equipped, state);
-            const skippedTxt = decision.skipped.map((s) => `${s.name} (${s.reason})`).join(', ');
-            if (decision.fired) {
-              logLine(
-                `Cards: fired ${decision.fired.name}${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`,
-              );
-              const res = resolveCardAction(decision.fired.action, state);
-              chosen = res.skill;
-              attackMarked = !!res.attackMarked;
-            } else {
-              logLine(`Cards: none fired${skippedTxt ? `; skipped ${skippedTxt}` : ''}.`);
-            }
-          } else {
-            const ready = actives.filter(
-              (s) => (cooldowns[s.id] ?? 0) <= 0 && energy >= (s.energyCost ?? 1),
-            );
-            for (const s of ready) {
-              if (!chosen || (s.energyCost ?? 1) > (chosen.energyCost ?? 1)) chosen = s;
-            }
-          }
-          target = attackMarked
-            ? (enemies.find((e) => e.hp > 0 && hasStatus(e.statuses, 'mark')) ??
-              enemies.find((e) => e.hp > 0)!)
-            : enemies.find((e) => e.hp > 0)!;
+        const state = menuState();
+        const order = decide(state);
+        const acted = order === null ? null : honour(order);
+        if (!order || !acted) return pausedAt();
+        ordersTaken.push(order);
+        if (acted.brace) {
+          bracedRound = round;
+          logLine('You brace, and take half of what lands this round.');
+          continue;
         }
+        const chosen = acted.skill;
+        const target = acted.target;
         const fx = chosen?.fx;
         const bonusCrit = fx && !isPassiveFx(fx) ? (fx.bonusCrit ?? 0) : 0;
         if (chosen) {

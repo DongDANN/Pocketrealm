@@ -226,11 +226,13 @@ export function Today() {
             <span className="delve-strip-head">
               <PixelText
                 text={
-                  delve.catchingUp
-                    ? 'Walking the Hollows…'
-                    : delve.snapshot.active
-                      ? `${delve.snapshot.active.pendingChoice ? 'Waiting at a choice' : `Floor ${delve.snapshot.active.floor} · step ${delve.snapshot.active.stepIndex}`}`
-                      : 'No run out. The camp is open.'
+                  delve.snapshot.active
+                    ? delve.snapshot.active.pendingTurn
+                      ? 'A room waits on your order'
+                      : delve.snapshot.active.pendingChoice
+                        ? 'Waiting at a choice'
+                        : `Floor ${delve.snapshot.active.floor} · step ${delve.snapshot.active.stepIndex}`
+                    : 'No run out. The camp is open.'
                 }
                 color={C.paper0}
                 pixelScale={2}
@@ -239,9 +241,7 @@ export function Today() {
             </span>
             <span className="delve-strip-meta">
               <PixelText
-                text={`${delve.snapshot.oil} oil · ${delve.snapshot.meta.embers} Embers${
-                  delve.catchUp ? ' · news waiting' : ''
-                }`}
+                text={`${delve.snapshot.oil} oil · ${delve.snapshot.meta.embers} Embers`}
                 color={C.paper3}
                 pixelScale={2}
               />

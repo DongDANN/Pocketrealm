@@ -363,7 +363,7 @@ describe('v3 settles a run the update leaves behind', () => {
 
     const meta = await db.delveMeta.get('meta');
     expect(meta?.value.dust).toBe(15); // three cards, five dust each
-    expect(meta?.value.cards).toEqual([]);
+    expect('cards' in (meta!.value as unknown as Record<string, unknown>)).toBe(false);
     // One capsule per non-Daily run that was taken away, at its Hollow's ceiling: Rootfall reaches
     // Rare, the second Hollow reaches Epic. The Daily cost no oil, so it grants nothing.
     expect(meta?.value.capsules).toEqual({ rare: 1, epic: 1 });

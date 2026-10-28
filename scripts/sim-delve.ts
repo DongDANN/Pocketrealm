@@ -2,9 +2,11 @@
  * sim:delve — headless persona simulation using the real Delve core.
  *
  * Personas: Trickle (free oil only), Casual (~3 logs/day), Habit (~6 logs + check-in +
- * weekly review), Optimizer (max oil every day). Each persona runs a deterministic Autopilot
- * and spends Embers on a fixed Forge priority. Prints runs/day, floors cleared, Embers/day,
- * time to clear each Hollow, and faint rates — the §6.10 tuning targets.
+ * weekly review), Optimizer (max oil every day). Oil buys a run, so a persona's budget decides how
+ * often it descends. Each descent is played by a deterministic headless player: rooms are answered
+ * by a fixed route preference, fights by the built-in decider. Personas spend Embers on a fixed
+ * Forge priority. Prints runs/day, floors cleared, Embers/day, time to clear each Hollow, and faint
+ * rates — the §6.10 tuning targets.
  *
  * Usage: npm run sim:delve [-- --days 60] [--persona trickle|casual|habit|optimizer|all]
  */
@@ -13,7 +15,6 @@ import {
   BOSSES,
   BUILDINGS,
   BUILDS,
-  CARDS,
   CODEX_SPECIES,
   CONSUMABLES,
   ELEMENTS,
@@ -22,7 +23,7 @@ import {
   FORGE_NODES,
   buyForgeNode,
   buyTreeNode,
-  cardUnlocked,
+  builtinDecider,
   buildingMilestones,
   craftConsumable,
   emptyMeta,
@@ -30,16 +31,18 @@ import {
   gainMastery,
   newRun,
   oilCapacity,
+  resolveChoice,
   RUN_COST,
   stepRun,
   unlockBuilding,
   upgradeBuilding,
-  type AutopilotPolicy,
-  type BoonTag,
   type BudgetSignals,
+  type CombatPause,
   type DelveMeta,
+  type RoomKind,
   type RunState,
   type StepContext,
+  type StepOutcome,
 } from '../src/core/delve';
 import { levelForXp } from '../src/core/rewards';
 
@@ -118,13 +121,93 @@ function dailyOil(def: PersonaDef, day: number): number {
   return Math.min(120, oil);
 }
 
-const POLICY: AutopilotPolicy = {
-  mode: 'autopilot',
-  tagPriority: ['guard', 'vigor', 'fury', 'fortune', 'thrift'],
-  retreatHpPercent: 50,
-  route: 'balanced',
-  bossGate: { 1: 3, 2: 6, 3: 8 },
+/** The three route tastes a simulated player can hold at a fork (§10's route options). */
+export type RouteId = 'safe' | 'balanced' | 'greedy';
+
+const ROUTE_KINDS: Record<RouteId, RoomKind[]> = {
+  safe: ['rest', 'treasure', 'shop', 'event', 'skirmish', 'elite', 'boss'],
+  balanced: ['treasure', 'event', 'rest', 'skirmish', 'shop', 'elite', 'boss'],
+  greedy: ['elite', 'skirmish', 'treasure', 'event', 'shop', 'rest', 'boss'],
 };
+
+function hpPercent(run: RunState): number {
+  return run.unit.maxHp > 0 ? (run.unit.hp / run.unit.maxHp) * 100 : 0;
+}
+
+function optionCost(label: string): number {
+  return Number(label.match(/— (\d+)g/)?.[1] ?? 0);
+}
+
+/**
+ * The headless player's answer to any pending choice. A simulated player only retreats from a rest
+ * room when its HP is low; the Breaker never retreats, so the balance sweep sees every fight.
+ */
+function chooseOption(run: RunState, route: RouteId, allowRetreat: boolean): string {
+  const choice = run.pendingChoice!;
+  const ids = choice.options.map((o) => o.id);
+  if (choice.kind === 'fork') {
+    const row = run.floorPlan.rows[run.row] ?? [];
+    for (const kind of ROUTE_KINDS[route]) {
+      const room = row.find((r) => r.kind === kind && ids.includes(r.id));
+      if (room) return room.id;
+    }
+    return ids[0]!;
+  }
+  if (choice.kind === 'rest') {
+    if (allowRetreat && hpPercent(run) <= 35) return 'retreat';
+    return ids.includes('rest') ? 'rest' : ids[0]!;
+  }
+  if (choice.kind === 'shop') {
+    const want = hpPercent(run) < 55 ? 'heal' : 'boon';
+    const option = choice.options.find((o) => o.id === want);
+    if (option && optionCost(option.label) <= run.glint) return want;
+    return ids.includes('leave') ? 'leave' : ids[0]!;
+  }
+  return ids.find((id) => id !== 'reroll') ?? ids[0]!;
+}
+
+interface PlayTurn {
+  run: RunState;
+  meta: DelveMeta;
+  step: StepContext;
+  pause: CombatPause | null;
+  ledger: StepOutcome['ledger'];
+  ended: boolean;
+}
+
+/** One turn of a descent: answer the choice on the table, or take one fight round. */
+function playTurn(
+  run: RunState,
+  meta: DelveMeta,
+  now: number,
+  signals: BudgetSignals,
+  today: string,
+  route: RouteId,
+  allowRetreat: boolean,
+  pause: CombatPause | null,
+): PlayTurn {
+  const step: StepContext = { now, signals, meta, today };
+  if (run.pendingChoice) {
+    const out = resolveChoice(run, step, chooseOption(run, route, allowRetreat));
+    return {
+      run: out.run,
+      meta: out.meta,
+      step,
+      pause: null,
+      ledger: out.ledger,
+      ended: out.ended,
+    };
+  }
+  const out = stepRun(run, { ...step, order: pause ? builtinDecider(pause.state) : undefined });
+  return {
+    run: out.run,
+    meta: out.meta,
+    step,
+    pause: out.pause ?? null,
+    ledger: out.ledger,
+    ended: out.ended,
+  };
+}
 
 const FORGE_PRIORITY = ['maxhp', 'atk', 'def', 'luck', 'glint', 'embers', 'oilcap'];
 
@@ -177,8 +260,17 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
     let delveXpToday = 0; // Delve XP shares one 30/day cap.
     const today = `2026-${String(Math.floor((day - 1) / 28) + 1).padStart(2, '0')}-${String(((day - 1) % 28) + 1).padStart(2, '0')}`;
 
+    let pause: CombatPause | null = null;
     let guard = 0;
-    while (guard < 500) {
+    // A headless player that repeats one state is not simulating a day, it is stuck. Naming the room
+    // and the offer it cannot get past is the difference between a report and a silent 20,000 burn.
+    const sigOf = (r: RunState | null): string =>
+      r === null
+        ? 'none'
+        : `${r.stepIndex}|${r.orders.length}|${r.pendingChoice?.kind ?? '-'}|${r.glint}|${r.unit.hp}|${r.result}`;
+    let prevSig = sigOf(run);
+    let stall = 0;
+    while (guard < 20_000) {
       guard += 1;
       if (!run) {
         const level = levelForXp(xp).level;
@@ -194,22 +286,30 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
         oil -= RUN_COST[hollow];
         run = newRun(userSeed, hollow, level, meta);
         meta = { ...meta, runsStarted: meta.runsStarted + 1 };
+        pause = null;
         stats.runs += 1;
       }
-      const ctx: StepContext = {
-        now,
-        oil,
-        oilCapacity: oilCapacity(meta, def.signals(day).reviewedLast7d),
-        signals: def.signals(day),
-        meta,
-        policy: POLICY,
-        today,
-      };
-      const out = stepRun(run, ctx);
-      run = out.run;
-      meta = out.meta;
+      const turn = playTurn(run, meta, now, def.signals(day), today, 'balanced', true, pause);
+      const nextSig = sigOf(turn.run);
+      if (nextSig === prevSig) {
+        stall += 1;
+        if (stall > 40)
+          throw new Error(
+            `headless player stalled on day ${day} at ${nextSig}: ` +
+              `choice=${run.pendingChoice?.kind ?? '-'} ` +
+              `options=${(run.pendingChoice?.options ?? []).map((o) => o.id).join(',')} ` +
+              `pendingTurn=${!!run.pendingTurn} hp=${run.unit.hp}/${run.unit.maxHp} ` +
+              `glint=${run.glint} guard=${guard}`,
+          );
+      } else {
+        stall = 0;
+        prevSig = nextSig;
+      }
+      run = turn.run;
+      meta = turn.meta;
+      pause = turn.pause;
       now += 30_000;
-      for (const e of out.ledger) {
+      for (const e of turn.ledger) {
         if (delveXpToday + e.xp <= 30) {
           delveXpToday += e.xp;
           xp += e.xp;
@@ -232,9 +332,10 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
         stats.totalFloors += run.floor - 1 + (run.result === 'cleared' ? 1 : 0);
         meta = autoBuy(meta);
         run = null;
+        pause = null;
       }
     }
-    now += DAY_MS - 30_000 * Math.min(guard, 500);
+    now += DAY_MS - 30_000 * Math.min(guard, 20_000);
   }
   stats.embers = meta.embers;
   return stats;
@@ -262,8 +363,8 @@ function report(def: PersonaDef, s: PersonaStats): void {
   );
 }
 
-/** The Breaker sweeps each build with these routes, never retreating on HP. */
-export const BREAKER_ROUTES: readonly AutopilotPolicy['route'][] = ['safe', 'balanced', 'greedy'];
+/** The Breaker sweeps each build with these route tastes, never retreating on HP. */
+export const BREAKER_ROUTES: readonly RouteId[] = ['safe', 'balanced', 'greedy'];
 /** The max sweep runs at the level ceiling, so a degenerate build has nowhere to hide. */
 export const BREAKER_LEVEL = 20;
 /** The rush probe enters the deepest Hollow the moment its gate opens (level 5), with nothing. */
@@ -271,8 +372,8 @@ export const BREAKER_RUSH_LEVEL = 5;
 
 /**
  * A maximally kitted meta: every Forge node, every talent node on every build, buildings at the
- * +10% cap, full codex mastery, three unlocked Habit Cards, and a crafted consumable loadout. Used
- * only by the Breaker probe, so a degenerate build has nowhere to hide.
+ * +10% cap, full codex mastery, and a crafted consumable loadout. Used only by the Breaker probe,
+ * so a degenerate build has nowhere to hide.
  */
 export function buildMaxMeta(): DelveMeta {
   let meta: DelveMeta = {
@@ -315,12 +416,6 @@ export function buildMaxMeta(): DelveMeta {
     meta,
     CODEX_SPECIES.flatMap((id) => Array.from({ length: 11 }, () => id)),
   );
-  meta = {
-    ...meta,
-    cards: CARDS.filter((c) => cardUnlocked(c.id, meta, BREAKER_LEVEL))
-      .slice(0, 3)
-      .map((c) => c.id),
-  };
   for (const c of CONSUMABLES) {
     const r = craftConsumable(meta, c.id);
     if (r.ok) meta = r.meta;
@@ -334,7 +429,7 @@ export function buildMaxMeta(): DelveMeta {
 
 export interface BreakerResult {
   buildId: string;
-  route: AutopilotPolicy['route'];
+  route: RouteId;
   heat: number;
   level: number;
   /** Floors the hollow needs to clear (10 in Hollow 3). */
@@ -371,29 +466,25 @@ export function runBreaker(
       for (const userSeed of seeds) {
         let meta = maxed ? buildMaxMeta() : emptyMeta();
         let now = 1_700_000_000_000;
-        const policy: AutopilotPolicy = {
-          mode: 'autopilot',
-          tagPriority: ['fury', 'guard', 'vigor', 'fortune', 'thrift'] as BoonTag[],
-          retreatHpPercent: 0,
-          route,
-        };
         let run: RunState = newRun(userSeed, 3, level, meta, build.id, HEAT_MAX);
         meta = { ...meta, runsStarted: meta.runsStarted + 1 };
+        let pause: CombatPause | null = null;
         let guard = 0;
-        while (run.result === 'active' && guard < 2000) {
+        while (run.result === 'active' && guard < 20_000) {
           guard += 1;
-          const ctx: StepContext = {
-            now,
-            oil: 0,
-            oilCapacity: oilCapacity(meta, false),
-            signals: PERSONAS.trickle.signals(1),
+          const turn = playTurn(
+            run,
             meta,
-            policy,
-            today: '2026-10-01',
-          };
-          const step = stepRun(run, ctx);
-          run = step.run;
-          meta = step.meta;
+            now,
+            PERSONAS.trickle.signals(1),
+            '2026-10-01',
+            route,
+            false,
+            pause,
+          );
+          run = turn.run;
+          meta = turn.meta;
+          pause = turn.pause;
           now += 30_000;
           steps += 1;
           if (run.floor > deepestFloor) deepestFloor = run.floor;
@@ -434,7 +525,7 @@ if (isCli) {
   const SEEDS = 5;
 
   console.log(
-    `sim:delve — ${days} simulated days, deterministic Autopilot (${POLICY.route}, retreat ≤${POLICY.retreatHpPercent}% HP), ${SEEDS} seeds averaged`,
+    `sim:delve — ${days} simulated days, deterministic headless player (balanced route, retreat ≤35% HP), ${SEEDS} seeds averaged`,
   );
   console.log('');
 

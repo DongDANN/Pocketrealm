@@ -24,9 +24,37 @@ async function openScreen(page: Page, path: string, title: string): Promise<void
   await expect(page.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
 }
 
-async function answerIfWaiting(page: Page): Promise<void> {
-  const choice = page.locator('.pending-choice .delve-choice').first();
-  if (await choice.isVisible().catch(() => false)) await choice.click();
+/**
+ * A fingerprint of the offer on screen, or '' when nothing is waiting for an answer. Read straight
+ * off the DOM: a locator would wait for the panel that has just unmounted, and the answer that
+ * clears an offer is exactly the moment it disappears.
+ */
+async function offerFingerprint(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const box = document.querySelector('.pending-choice');
+    if (!box) return '';
+    const labels = Array.from(box.querySelectorAll('[aria-label]')).map((node) =>
+      (node.getAttribute('aria-label') ?? '').slice(0, 24),
+    );
+    return `${box.querySelectorAll('.delve-choice').length} ${labels.join('|')}`;
+  });
+}
+
+/**
+ * Answer every offer the run puts up, until it stops asking. One answer is not enough: a win holds
+ * its boon pick until the player takes it, so the room's settlement raises a question of its own
+ * after the last round, and a step that lands in an event asks before it moves.
+ */
+async function answerChoices(page: Page): Promise<void> {
+  for (let offer = 0; offer < 6; offer += 1) {
+    const before = await offerFingerprint(page);
+    if (before === '') return;
+    await page.locator('.pending-choice .delve-choice').first().click();
+    await expect
+      .poll(() => offerFingerprint(page), `the answer to "${before}" to land`)
+      .not.toBe(before);
+  }
+  expect(await offerFingerprint(page), 'the run keeps raising offers').toBe('');
 }
 
 async function stepsTaken(page: Page): Promise<number> {
@@ -100,8 +128,9 @@ async function advance(page: Page): Promise<void> {
       return Number.isFinite(now) && now > before ? 'moved' : 'waiting';
     }, 'the step to land')
     .not.toBe('waiting');
-  await answerIfWaiting(page);
+  await answerChoices(page);
   await resolveTurn(page);
+  await answerChoices(page);
 }
 
 async function oil(page: Page): Promise<number> {
@@ -313,6 +342,7 @@ test('a reload reopens the room the run is waiting in, at the same round', async
   // And the reopened room is still playable to its end.
   await resolveTurn(page);
   await expect(page.locator('.turn-panel')).toHaveCount(0);
+  await answerChoices(page);
   await expect(page.getByRole('button', { name: 'Open the next room' })).toBeEnabled();
   expect(errors).toEqual([]);
 });
@@ -323,10 +353,8 @@ test('every camp and ritual screen paints from a real book', async ({ page }) =>
 
   const routes: [string, string][] = [
     ['/delve', 'The Delve'],
-    ['/delve/policy', 'Autopilot'],
     ['/delve/forge', 'Forge'],
     ['/delve/workshop', 'Workshop'],
-    ['/delve/cards', 'Habit Cards'],
     ['/delve/codex', 'Codex'],
     ['/delve/history', 'Run history'],
     ['/quests', 'Quests'],
@@ -351,37 +379,6 @@ test('every camp and ritual screen paints from a real book', async ({ page }) =>
   // The chart is bitmap bars for the eye and a real data table for assistive tech.
   await expect(page.getByRole('table').first()).toBeAttached();
   await expect(page.locator('.pixel-bar-row').first()).toBeVisible();
-  expect(errors).toEqual([]);
-});
-
-test('the camp panels take a decision and keep it', async ({ page }) => {
-  const errors = watchErrors(page);
-  await completeOnboarding(page, { income: '25000' });
-
-  await openScreen(page, '/delve/policy', 'Autopilot');
-  await page.getByRole('button', { name: /Camp at choices/ }).click();
-  await page.getByRole('button', { name: 'Save policy' }).click();
-  await expect
-    .poll(() => visibleText(page, '.toast-host'), 'the save toast')
-    .toContain('policy saved');
-
-  await openScreen(page, '/delve/policy', 'Autopilot');
-  await expect(page.getByRole('button', { name: /Camp at choices/ })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
-
-  await openScreen(page, '/delve/forge', 'Forge');
-  expect(await visibleText(page, 'main')).toContain('Ember');
-
-  await openScreen(page, '/delve/workshop', 'Workshop');
-  expect(await visibleText(page, 'main')).toContain('Loadout');
-
-  await openScreen(page, '/delve/cards', 'Habit Cards');
-  expect(await visibleText(page, 'main')).toContain('Save loadout');
-
-  await openScreen(page, '/delve/codex', 'Codex');
-  expect(await visibleText(page, 'main')).toContain('Rootfall Warren');
   expect(errors).toEqual([]);
 });
 

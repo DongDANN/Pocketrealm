@@ -13,6 +13,7 @@ import {
   BOSSES,
   ELITES,
   ENEMIES,
+  builtinDecider,
   computeModifiers,
   emptyMeta,
   enemyById,
@@ -296,7 +297,10 @@ describe('the intent matches the fight the engine actually runs', () => {
   function fight(species: string, kind: string, seed: number) {
     const run = newRun(seed, 1, 1, emptyMeta());
     const mods = computeModifiers(run, {}, { wardHp: 0, luckBonus: 0 });
-    return { run, res: runCombat(run, { kind, enemies: [species] }, mods, 1) };
+    return {
+      run,
+      res: runCombat(run, { kind, enemies: [species] }, mods, 1, [], [], {}, builtinDecider),
+    };
   }
 
   it('predicts an opening strike to the hit point', () => {

@@ -170,91 +170,6 @@ export function Delve() {
     setConfirmRetreat(false);
   };
 
-  const catchUpPanel = delve.catchUp && (
-    <PixelPanel className="delve-panel catchup-panel" aria-labelledby="catchup-title">
-      <div className="panel-head">
-        <h2 id="catchup-title" className="panel-title">
-          <PixelText text="While you were away" color={C.paper0} pixelScale={3} />
-        </h2>
-        <PixelButton variant="secondary" onClick={delve.dismissCatchUp}>
-          <PixelText text="Dismiss" color={C.paper0} pixelScale={2} />
-        </PixelButton>
-      </div>
-      {delve.catchUp.ran ? (
-        <p>
-          <PixelText
-            text={`${delve.catchUp.steps} steps · ${delve.catchUp.rooms} rooms · ${delve.catchUp.choices} choices answered.`}
-            color={C.paper2}
-            pixelScale={2}
-            wrap={36}
-          />
-        </p>
-      ) : (
-        <p>
-          <PixelText
-            text="The run stopped at a choice and waited for you. The clock is paused."
-            color={C.paper2}
-            pixelScale={2}
-            wrap={36}
-          />
-        </p>
-      )}
-      <div className="stat-grid">
-        <span>
-          <PixelText
-            text={`Floor ${delve.catchUp.fromFloor} → ${delve.catchUp.toFloor}`}
-            color={C.paper1}
-            pixelScale={2}
-          />
-        </span>
-        <span>
-          <PixelText
-            text={`+${delve.catchUp.embersBanked} Embers`}
-            color={C.amber2}
-            pixelScale={2}
-          />
-        </span>
-        <span>
-          <PixelText
-            text={`Ore ${delve.catchUp.materials.ore} · Herb ${delve.catchUp.materials.herb} · Echo ${delve.catchUp.materials.echo}`}
-            color={C.paper2}
-            pixelScale={2}
-          />
-        </span>
-        <span>
-          <PixelText
-            text={`Glint ${delve.catchUp.glint >= 0 ? '+' : ''}${delve.catchUp.glint}`}
-            color={delve.catchUp.glint < 0 ? C.ember1 : C.cyan2}
-            pixelScale={2}
-          />
-        </span>
-      </div>
-      {delve.catchUp.ended && (
-        <p className="panel-note">
-          <PixelText
-            text={`The run ended while you were away: ${resultLabel(delve.catchUp.result ?? 'retreated')}.`}
-            color={C.amber2}
-            pixelScale={2}
-            wrap={36}
-          />
-        </p>
-      )}
-      {delve.catchUp.log
-        .filter((entry) => entry.type === 'choice')
-        .slice(-4)
-        .map((entry) => (
-          <p key={`${entry.step}-${entry.text}`} className="panel-note">
-            <PixelText text={entry.text} color={C.paper3} pixelScale={2} wrap={38} />
-          </p>
-        ))}
-      <div className="screen-actions">
-        <Link className="text-link" to="/delve/history">
-          <PixelText text="See past runs" color={C.amber2} pixelScale={2} />
-        </Link>
-      </div>
-    </PixelPanel>
-  );
-
   const endedPanel = !active && delve.lastEnded && (
     <PixelPanel className="delve-panel ended-panel" aria-labelledby="ended-title">
       <div className="panel-head">
@@ -309,26 +224,6 @@ export function Delve() {
     <main className="shell app-shell">
       <AppHeader title="The Delve" backTo="/" />
 
-      {delve.catchingUp && (
-        <PixelPanel className="delve-panel catchup-panel" role="status">
-          <PixelText text="Walking the Hollows…" color={C.paper1} pixelScale={2} />
-          <p className="panel-note">
-            <PixelText
-              text={
-                delve.catchUpProgress
-                  ? `${delve.catchUpProgress.applied} rooms simulated · floor ${delve.catchUpProgress.floor}`
-                  : 'The Autopilot is reading the map.'
-              }
-              color={C.paper3}
-              pixelScale={2}
-              wrap={34}
-            />
-          </p>
-          <ProgressStrip />
-        </PixelPanel>
-      )}
-
-      {catchUpPanel}
       {endedPanel}
 
       <PixelPanel className="delve-panel" tone="paper" aria-labelledby="wallet-title">
@@ -698,13 +593,6 @@ export function Delve() {
                   </div>
                 </div>
               )}
-              <Link className="text-link" to="/delve/policy">
-                <PixelText
-                  text={`Autopilot: ${delve.policy.mode === 'camp' ? 'camp at choices' : `retreat at ${delve.policy.retreatHpPercent}%`} →`}
-                  color={C.amber2}
-                  pixelScale={2}
-                />
-              </Link>
             </div>
           </PixelPanel>
 
@@ -1073,15 +961,6 @@ export function Delve() {
               wrap={28}
             />
           </Link>
-          <Link className="camp-link" to="/delve/cards">
-            <PixelText text="Habit Cards" color={C.amber2} pixelScale={2} />
-            <PixelText
-              text="Decide which skill fires, in what order."
-              color={C.paper3}
-              pixelScale={2}
-              wrap={28}
-            />
-          </Link>
           <Link className="camp-link" to="/delve/codex">
             <PixelText text="Codex" color={C.amber2} pixelScale={2} />
             <PixelText
@@ -1320,16 +1199,6 @@ function TargetOptions({
           )}
         </button>
       ))}
-    </div>
-  );
-}
-
-function ProgressStrip() {
-  return (
-    <div className="progress-strip" aria-hidden="true">
-      <span />
-      <span />
-      <span />
     </div>
   );
 }

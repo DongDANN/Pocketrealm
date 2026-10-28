@@ -6,8 +6,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { computeModifiers, emptyMeta, newRun, runCombat, stepRun } from '../src/core/delve';
+import { builtinDecider, computeModifiers, emptyMeta, newRun, runCombat } from '../src/core/delve';
 import type { RunState } from '../src/core/delve';
+import { NO_SIGNALS, playOne, type PlayState } from './delve-helpers';
 
 const BUFFS = { wardHp: 0, luckBonus: 0 };
 
@@ -23,6 +24,10 @@ describe('Fire Oil', () => {
       { enemies: ['tollbug'] },
       computeModifiers(runWith({}), {}, BUFFS),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(res.consumablesUsed['fire-oil']).toBe(true);
     expect(res.log.some((l) => l.text.includes('Fire Oil'))).toBe(true);
@@ -33,6 +38,10 @@ describe('Fire Oil', () => {
       { enemies: ['tollbug'] },
       computeModifiers(runWith({}), {}, BUFFS),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(second.log.some((l) => l.text.includes('Fire Oil'))).toBe(false);
     expect(second.log.some((l) => l.text.includes('burns for'))).toBe(false);
@@ -46,6 +55,10 @@ describe('Shield Charm', () => {
       { enemies: ['tollbug'] },
       computeModifiers(runWith({}), {}, BUFFS),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(res.consumablesUsed['shield-charm']).toBe(true);
     expect(res.log.some((l) => l.text.includes('Shield Charm: +8 Shield.'))).toBe(true);
@@ -55,6 +68,10 @@ describe('Shield Charm', () => {
       { enemies: ['tollbug'] },
       computeModifiers(runWith({}), {}, BUFFS),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(second.log.some((l) => l.text.includes('Shield Charm'))).toBe(false);
   });
@@ -69,6 +86,10 @@ describe('Healing Draught', () => {
       { enemies: ['tollbug'] },
       computeModifiers(runWith({}), {}, BUFFS),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(res.consumablesUsed['healing-draught']).toBe(true);
     expect(res.log.some((l) => l.text.includes('Healing Draught'))).toBe(true);
@@ -86,6 +107,10 @@ describe('Healing Draught', () => {
       { enemies: ['tollbug'] },
       computeModifiers(runWith({}), {}, BUFFS),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(res.log.some((l) => l.text.includes('Healing Draught'))).toBe(false);
   });
@@ -100,6 +125,10 @@ describe('Smoke Scroll', () => {
       { enemies: ['tollbug'] },
       computeModifiers(runWith({}), {}, BUFFS),
       8,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(res.fled).toBe(true);
     expect(res.won).toBe(false);
@@ -117,6 +146,10 @@ describe('Smoke Scroll', () => {
       { kind: 'boss', enemies: ['thorncrown'] },
       computeModifiers(runWith({}), {}, BUFFS),
       6,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(res.fled).toBe(false);
     expect(res.won).toBe(false);
@@ -129,29 +162,19 @@ describe('Smoke Scroll', () => {
     run.consumables = ['smoke-scroll'];
     run.unit = { ...run.unit, hp: 3 };
     const meta = emptyMeta();
-    const out = stepRun(run, {
-      now: 0,
-      oil: 10,
-      oilCapacity: 100,
-      signals: {
-        checkedInToday: false,
-        envelopesWithinAllowance: 0,
-        contributedToGoalLast7d: false,
-        reviewedLast7d: false,
-      },
-      meta,
-      policy: {
-        mode: 'autopilot',
-        tagPriority: ['guard', 'vigor', 'fury', 'fortune', 'thrift'],
-        retreatHpPercent: 0,
-        route: 'balanced',
-      },
-      today: '2026-10-25',
-    });
-    expect(out.ended).toBe(false);
-    expect(out.run.result).toBe('active');
-    expect(out.run.consumablesUsed['smoke-scroll']).toBe(true);
-    expect(out.run.unit.hp).toBe(1);
-    expect(out.run.row).toBe(1);
+    let state: PlayState = { run, meta, pause: null, ledger: [], signals: NO_SIGNALS };
+    let guard = 0;
+    while (
+      state.run.result === 'active' &&
+      !state.run.consumablesUsed['smoke-scroll'] &&
+      guard < 200
+    ) {
+      state = playOne(state);
+      guard += 1;
+    }
+    expect(state.run.result).toBe('active');
+    expect(state.run.consumablesUsed['smoke-scroll']).toBe(true);
+    expect(state.run.unit.hp).toBe(1);
+    expect(state.run.row).toBe(1);
   });
 });

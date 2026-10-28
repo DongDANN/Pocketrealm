@@ -1,7 +1,7 @@
 /**
  * Seeded floor generation. Each floor is 3-5 rows by 2-3 columns; the first row is a single
  * skirmish room, the last row is the boss (final floor) or an exit room, and every room in a
- * row connects forward to every room in the next row (the fork the player or Autopilot picks).
+ * row connects forward to every room in the next row (the fork the player picks).
  * Fully determined by seed = hash(hollowId, floor, userSeed).
  */
 

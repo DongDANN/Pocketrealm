@@ -6,14 +6,8 @@
  */
 
 import { OIL_STORAGE_CAP } from '../rewards';
-import {
-  autopilotBoon,
-  autopilotEvent,
-  autopilotFork,
-  buildBoonOffer,
-  offerRng,
-} from './autopilot';
 import { BASE_MODIFIERS, computeModifiers, companionBase, runCombat } from './combat';
+import { buildBoonOffer, offerRng } from './offers';
 import { affixById } from './data/affixes';
 import { buildById, DEFAULT_BUILD } from './data/builds';
 import { MAX_BOON_LEVEL, RELICS, type BoonLike } from './data/boons';
@@ -83,7 +77,6 @@ export function emptyMeta(): DelveMeta {
     builds: {},
     knownWeaknesses: [],
     bossKnowledge: [],
-    cards: [],
     bestFloor: {},
     forge: {},
     runsStarted: 0,
@@ -135,7 +128,6 @@ export function newRun(
     companionLevel,
     buildId: build.id,
     tree: meta.builds[build.id]?.tree ?? [],
-    cards: (meta.cards ?? []).slice(0, 3),
     stepIndex: 0,
     floor: 1,
     row: 0,
@@ -343,10 +335,7 @@ function applyFusion(run: RunState, recipeId: string): RunState | null {
   return pushLog(next, 'choice', `Fused ${aName} + ${bName} → ${recipe.name}!`);
 }
 
-function grantBoonOffer(
-  run: RunState,
-  policy: StepContext['policy'],
-): { run: RunState; pending: boolean } {
+function grantBoonOffer(run: RunState): { run: RunState; pending: boolean } {
   if (run.boons.length >= BOON_CAP) {
     return { run: pushLog(run, 'info', 'Boon slots full; no offer.'), pending: false };
   }
@@ -355,37 +344,33 @@ function grantBoonOffer(
     3 + (run.relics.includes('relic-ledgerlace') ? 1 : 0),
   );
   const next = { ...run, offerStreak };
-  if (policy.mode === 'camp') {
-    return {
-      run: {
-        ...next,
-        pendingChoice: {
-          kind: 'boon',
-          options: [
-            ...offer.map((b) => ({
-              id: b.id,
-              label: boonOptionLabel(run, b),
-              detail: b.effect,
-            })),
-            ...(run.rerollsLeft > 0
-              ? [
-                  {
-                    id: 'reroll',
-                    label: `Reroll offer (${run.rerollsLeft} left)`,
-                    detail: 'Draw a fresh set of boons.',
-                  },
-                ]
-              : []),
-          ],
-          reason: 'Choose a boon.',
-          stepIndex: next.stepIndex,
-        },
+  return {
+    run: {
+      ...next,
+      pendingChoice: {
+        kind: 'boon',
+        options: [
+          ...offer.map((b) => ({
+            id: b.id,
+            label: boonOptionLabel(run, b),
+            detail: b.effect,
+          })),
+          ...(run.rerollsLeft > 0
+            ? [
+                {
+                  id: 'reroll',
+                  label: `Reroll offer (${run.rerollsLeft} left)`,
+                  detail: 'Draw a fresh set of boons.',
+                },
+              ]
+            : []),
+        ],
+        reason: 'Choose a boon.',
+        stepIndex: next.stepIndex,
       },
-      pending: true,
-    };
-  }
-  const pick = autopilotBoon(policy, offer);
-  return { run: pushLog(applyBoonPick(next, pick.boon), 'choice', pick.reason), pending: false };
+    },
+    pending: true,
+  };
 }
 
 interface AdvanceOutcome {
@@ -557,7 +542,11 @@ function shopItems(
     Math.max(1, Math.round(((base * (100 - discount)) / 100) * heatPrice));
   return [
     { id: 'heal', label: 'Poultice (heal 30%)', cost: price(40), detail: 'Heal 30% HP' },
-    { id: 'boon', label: 'Wandering boon', cost: price(80), detail: 'Gain a boon' },
+    // A full boon shelf cannot take another, so the seller does not offer one: a priced row the run
+    // can never claim is a button that does nothing.
+    ...(run.boons.length >= BOON_CAP
+      ? []
+      : [{ id: 'boon', label: 'Wandering boon', cost: price(80), detail: 'Gain a boon' }]),
     {
       id: 'maxhp',
       label: 'Heartroot (+10 max HP)',
@@ -567,57 +556,6 @@ function shopItems(
     { id: 'relic', label: 'Mystery relic', cost: price(120), detail: 'Gain a random relic' },
     { id: 'leave', label: 'Leave', cost: 0, detail: 'Nothing for now' },
   ];
-}
-
-function autopilotShop(
-  run: RunState,
-  forge: Record<string, number>,
-): { itemId: string; reason: string } {
-  const items = shopItems(run, forge);
-  const hpRatio = Math.round((run.unit.hp / maxHpOf(run)) * 100);
-  if (hpRatio < 70 && run.glint >= items[0]!.cost) {
-    return { itemId: 'heal', reason: `Autopilot: HP at ${hpRatio}%, buying a Poultice.` };
-  }
-  if (run.glint >= items[1]!.cost) {
-    return { itemId: 'boon', reason: 'Autopilot: spare Glint, buying a wandering boon.' };
-  }
-  return {
-    itemId: 'leave',
-    reason: 'Autopilot: nothing affordable worth buying; leaving the shop.',
-  };
-}
-
-function autopilotRest(
-  run: RunState,
-  policy: StepContext['policy'],
-): { choice: 'rest' | 'retreat' | 'fuse'; reason: string; recipeId?: string } {
-  const eligible = fusionRecipesFor(run);
-  if (policy.route === 'greedy' && eligible.length > 0) {
-    const f = eligible[0]!;
-    return {
-      choice: 'fuse',
-      recipeId: f.id,
-      reason: `Autopilot: greedy route fuses ${f.name} instead of resting.`,
-    };
-  }
-  const hpRatio = Math.round((run.unit.hp / maxHpOf(run)) * 100);
-  // The last-row Rest on the floor before the boss floor is the last safe place to turn back.
-  const nextIsBossFloor =
-    run.floor === HOLLOW_FLOORS[run.hollowId] - 1 && run.row === run.floorPlan.rows.length - 1;
-  const gate = policy.bossGate?.[run.hollowId];
-  if (nextIsBossFloor && gate !== undefined && run.companionLevel < gate) {
-    return {
-      choice: 'retreat',
-      reason: `Autopilot: level ${run.companionLevel} below the boss gate (${gate}), retreating to train.`,
-    };
-  }
-  if (hpRatio <= policy.retreatHpPercent) {
-    return {
-      choice: 'retreat',
-      reason: `Autopilot: HP at ${hpRatio}% (threshold ${policy.retreatHpPercent}%), retreating to bank Embers.`,
-    };
-  }
-  return { choice: 'rest', reason: `Autopilot: HP at ${hpRatio}%, resting.` };
 }
 
 function isFightRoom(room: RoomDef): boolean {
@@ -667,7 +605,7 @@ function fightRoom(
     stepMeta.knownWeaknesses ?? [],
     stepMeta.bossKnowledge ?? [],
     stepMeta.mastery ?? {},
-    ctx.play ? turnDecider(run.orders, ctx.order) : undefined,
+    turnDecider(run.orders, ctx.order),
   );
   if (result.pause) {
     // The room stores its decisions, not their outcome: no fight line, no kill and no consumable
@@ -775,7 +713,7 @@ function fightRoom(
         ended: adv.ended,
       };
     }
-    const offer = grantBoonOffer(next, ctx.policy);
+    const offer = grantBoonOffer(next);
     if (offer.pending) {
       return { run: offer.run, meta: stepMeta, ledger, ended: false };
     }
@@ -799,7 +737,6 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   // the run carries, takes the new one, and leaves the room line and the step index exactly where
   // the pause put them. Without an order it only rebuilds the menu, which is how a reload resumes.
   if (run.pendingTurn) {
-    if (!ctx.play) return empty;
     const room = currentRoom(run);
     if (!isFightRoom(room)) return empty;
     return fightRoom(run, room, ctx, []);
@@ -809,32 +746,27 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   let next = run;
   const ledger: StepOutcome['ledger'] = [];
 
-  // Row entry: resolve forks (inline under Autopilot, pending under camp).
+  // Row entry: a fork pauses and asks the player which way to go.
   if (needsFork(next)) {
     const row = next.floorPlan.rows[next.row]!;
-    if (ctx.policy.mode === 'camp') {
-      const look = lookaheadRows(ctx.meta);
-      const lookRow =
-        look > 0 && next.row + 1 < next.floorPlan.rows.length
-          ? next.floorPlan.rows[next.row + 1]
-          : undefined;
-      next = {
-        ...next,
-        pendingChoice: {
-          kind: 'fork',
-          options: forkOptions(
-            row,
-            lookRow?.map((r) => roomLabel(r)),
-          ),
-          reason: 'Choose a route.',
-          stepIndex: next.stepIndex,
-        },
-      };
-      return { run: next, meta: ctx.meta, ledger, ended: false };
-    }
-    const pick = autopilotFork(next, ctx.policy, row);
-    const col = row.findIndex((r) => r.id === pick.room.id);
-    next = pushLog({ ...next, path: withPath(next, col) }, 'choice', pick.reason);
+    const look = lookaheadRows(ctx.meta);
+    const lookRow =
+      look > 0 && next.row + 1 < next.floorPlan.rows.length
+        ? next.floorPlan.rows[next.row + 1]
+        : undefined;
+    next = {
+      ...next,
+      pendingChoice: {
+        kind: 'fork',
+        options: forkOptions(
+          row,
+          lookRow?.map((r) => roomLabel(r)),
+        ),
+        reason: 'Choose a route.',
+        stepIndex: next.stepIndex,
+      },
+    };
+    return { run: next, meta: ctx.meta, ledger, ended: false };
   }
 
   const room = currentRoom(next);
@@ -860,31 +792,26 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
         ended: adv.ended,
       };
     }
-    const offer = grantBoonOffer(next, ctx.policy);
+    const offer = grantBoonOffer(next);
     if (offer.pending) {
       return { run: offer.run, meta: ctx.meta, ledger, ended: false };
     }
     next = offer.run;
   } else if (room.kind === 'shop') {
-    if (ctx.policy.mode === 'camp') {
-      next = {
-        ...next,
-        pendingChoice: {
-          kind: 'shop',
-          options: shopItems(next, forge).map((i) => ({
-            id: i.id,
-            label: i.cost > 0 ? `${i.label} — ${i.cost}g` : i.label,
-            detail: i.detail,
-          })),
-          reason: 'Browse the shop.',
-          stepIndex: next.stepIndex,
-        },
-      };
-      return { run: next, meta: ctx.meta, ledger, ended: false };
-    }
-    const buy = autopilotShop(next, forge);
-    const applied = applyShopPurchase(next, buy.itemId, forge);
-    next = pushLog(applied.run, 'choice', buy.reason);
+    next = {
+      ...next,
+      pendingChoice: {
+        kind: 'shop',
+        options: shopItems(next, forge).map((i) => ({
+          id: i.id,
+          label: i.cost > 0 ? `${i.label} — ${i.cost}g` : i.label,
+          detail: i.detail,
+        })),
+        reason: 'Browse the shop.',
+        stepIndex: next.stepIndex,
+      },
+    };
+    return { run: next, meta: ctx.meta, ledger, ended: false };
   } else if (room.kind === 'event') {
     const events = eventsForHollow(next.hollowId);
     const event = events[room.optionSeed % events.length]!;
@@ -895,56 +822,34 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
         !(o.outcome.kind === 'glint' && o.outcome.amount < 0 && next.glint < -o.outcome.amount),
     );
     const fuses = fusionRecipesFor(next);
-    if (ctx.policy.mode === 'camp') {
-      next = {
-        ...next,
-        pendingChoice: {
-          kind: 'event',
-          options: [
-            ...affordable.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
-            ...fuses.map((f) => fuseOption(f)),
-          ],
-          reason: `${event.title} — ${event.text}`,
-          stepIndex: next.stepIndex,
-        },
-      };
-      return { run: next, meta: ctx.meta, ledger, ended: false };
-    }
-    const pick = autopilotEvent(next, ctx.policy, {
-      options: affordable.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
-    });
-    const option = event.options.find((o) => o.id === pick.optionId) ?? event.options[0]!;
-    const applied = applyEventOutcome(next, option.outcome, ctx);
-    next = pushLog(applied.run, 'choice', `${event.title} — ${pick.reason}`);
+    next = {
+      ...next,
+      pendingChoice: {
+        kind: 'event',
+        options: [
+          ...affordable.map((o) => ({ id: o.id, label: o.label, detail: o.detail })),
+          ...fuses.map((f) => fuseOption(f)),
+        ],
+        reason: `${event.title} — ${event.text}`,
+        stepIndex: next.stepIndex,
+      },
+    };
+    return { run: next, meta: ctx.meta, ledger, ended: false };
   } else if (room.kind === 'rest') {
-    if (ctx.policy.mode === 'camp') {
-      next = {
-        ...next,
-        pendingChoice: {
-          kind: 'rest',
-          options: [
-            { id: 'rest', label: 'Rest and recover', detail: 'Heal 40% HP' },
-            { id: 'retreat', label: 'Retreat to camp', detail: `Bank ${next.embersEarned} Embers` },
-            ...fusionRecipesFor(next).map((f) => fuseOption(f)),
-          ],
-          reason: 'A safe room. Catch your breath, or head home.',
-          stepIndex: next.stepIndex,
-        },
-      };
-      return { run: next, meta: ctx.meta, ledger, ended: false };
-    }
-    const rest = autopilotRest(next, ctx.policy);
-    if (rest.choice === 'retreat') {
-      const ended = endRun(pushLog(next, 'choice', rest.reason), ctx.meta, 'retreated', ctx.today);
-      return { run: ended.run, meta: ended.meta, ledger, ended: true };
-    }
-    if (rest.choice === 'fuse') {
-      const fused = applyFusion(next, rest.recipeId!);
-      next = fused ? pushLog(fused, 'info', rest.reason) : next;
-    } else {
-      const healPct = 40 + (next.relics.includes('relic-nightlight') ? 15 : 0);
-      next = pushLog(healHp(next, healPct), 'choice', rest.reason);
-    }
+    next = {
+      ...next,
+      pendingChoice: {
+        kind: 'rest',
+        options: [
+          { id: 'rest', label: 'Rest and recover', detail: 'Heal 40% HP' },
+          { id: 'retreat', label: 'Retreat to camp', detail: `Bank ${next.embersEarned} Embers` },
+          ...fusionRecipesFor(next).map((f) => fuseOption(f)),
+        ],
+        reason: 'A safe room. Catch your breath, or head home.',
+        stepIndex: next.stepIndex,
+      },
+    };
+    return { run: next, meta: ctx.meta, ledger, ended: false };
   }
 
   const adv = advanceAfterRoom(next, ctx);
@@ -988,11 +893,7 @@ function applyShopPurchase(
   return { run: next };
 }
 
-function applyEventOutcome(
-  run: RunState,
-  outcome: EventOutcome,
-  ctx: StepContext,
-): { run: RunState } {
+function applyEventOutcome(run: RunState, outcome: EventOutcome): { run: RunState } {
   let next = run;
   if (outcome.kind === 'heal') next = healHp(next, outcome.percent);
   else if (outcome.kind === 'damage') {
@@ -1003,7 +904,7 @@ function applyEventOutcome(
   else if (outcome.kind === 'embers')
     next = { ...next, embersEarned: next.embersEarned + outcome.amount };
   else if (outcome.kind === 'boon') {
-    const offer = grantBoonOffer(next, ctx.policy);
+    const offer = grantBoonOffer(next);
     return { run: offer.run };
   }
   return { run: next };
@@ -1094,9 +995,12 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
       const event = events[room.optionSeed % events.length]!;
       const option = event.options.find((o) => o.id === optionId);
       if (!option) return empty;
-      const applied = applyEventOutcome(next, option.outcome, ctx);
-      // A boon outcome can raise a follow-up offer; other outcomes resolve cleanly.
-      const nextPending = option.outcome.kind === 'boon' ? applied.run.pendingChoice : null;
+      const applied = applyEventOutcome(next, option.outcome);
+      // A boon outcome can raise a follow-up offer; other outcomes resolve cleanly. When the boon
+      // slots are full no offer opens, and the event still has to close — keeping the offer the
+      // player already answered would strand them in the room, tapping a button that does nothing.
+      const raised = applied.run.pendingChoice;
+      const nextPending = option.outcome.kind === 'boon' && raised?.kind === 'boon' ? raised : null;
       next = pushLog(
         { ...applied.run, pendingChoice: nextPending },
         'choice',

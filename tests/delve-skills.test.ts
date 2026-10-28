@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyStatus,
+  builtinDecider,
   computeModifiers,
   effectiveSpd,
   emptyMeta,
@@ -75,7 +76,16 @@ describe('skills in auto-battle', () => {
   it('casts both Warden actives with cooldown spacing in a long fight', () => {
     const run = drawRun('warden');
     const mods = { ...computeModifiers(run, {}, zeroBuffs()), maxHp: 900 };
-    const result = runCombat(run, { enemies: ['umbralmonarch'] }, mods, 1);
+    const result = runCombat(
+      run,
+      { enemies: ['umbralmonarch'] },
+      mods,
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     expect(result.drawn).toBe(true);
     const texts = result.log.map((l) => l.text);
     const bastions = texts.filter((t) => t.includes('use Bastion')).length;
@@ -88,7 +98,16 @@ describe('skills in auto-battle', () => {
   it('applies Burn from Spark Flare and lets it tick', () => {
     const run = drawRun('spark');
     const mods = { ...computeModifiers(run, {}, zeroBuffs()), maxHp: 900 };
-    const result = runCombat(run, { enemies: ['umbralmonarch'] }, mods, 1);
+    const result = runCombat(
+      run,
+      { enemies: ['umbralmonarch'] },
+      mods,
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     expect(result.log.some((l) => l.text.includes('use Flare'))).toBe(true);
     expect(result.log.some((l) => l.text.includes('burns for 3'))).toBe(true);
   });
@@ -99,8 +118,8 @@ describe('element weakness and resistance in combat', () => {
     const run = runWith({ buildId: 'spark', companionLevel: 8 });
     const mods = computeModifiers(run, {}, zeroBuffs());
     const room = { enemies: ['thorncrown'] };
-    const unknown = runCombat(run, room, mods, 6, []);
-    const known = runCombat(run, room, mods, 6, ['ember']);
+    const unknown = runCombat(run, room, mods, 6, [], [], {}, builtinDecider);
+    const known = runCombat(run, room, mods, 6, ['ember'], [], {}, builtinDecider);
     // Same RNG stream: compare the first Flare hit, which lands before anything diverges.
     const flareDamage = (l: RunLogEntry[]): number => {
       const line = l.find((x) => x.text.includes('use Flare'))!;
@@ -114,8 +133,8 @@ describe('element weakness and resistance in combat', () => {
     const run = runWith({ buildId: 'warden', companionLevel: 5 });
     const mods = computeModifiers(run, {}, zeroBuffs());
     const room = { enemies: ['tollbug'] }; // resists gale; gale knowledge is irrelevant
-    const a = runCombat(run, room, mods, 1, []);
-    const b = runCombat(run, room, mods, 1, ['gale']);
+    const a = runCombat(run, room, mods, 1, [], [], {}, builtinDecider);
+    const b = runCombat(run, room, mods, 1, ['gale'], [], {}, builtinDecider);
     expect(dealt(a.log)).toBe(dealt(b.log));
   });
 });
@@ -184,6 +203,10 @@ describe('passives', () => {
       { enemies: ['tollbug'] },
       computeModifiers(run, {}, zeroBuffs()),
       1,
+      [],
+      [],
+      {},
+      builtinDecider,
     );
     expect(result.log.some((l) => l.text.includes('Steadfast'))).toBe(true);
     expect(result.log.some((l) => l.text.includes('shield absorbs'))).toBe(true);

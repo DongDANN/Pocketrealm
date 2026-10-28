@@ -1,11 +1,11 @@
 /**
- * Habit Cards (SPEC §6.11 C): a priority-based combat rules engine for Autopilot. Up to three
- * equipped cards are evaluated top to bottom; the first card whose condition is true AND whose
- * action is available (cooldown, energy, valid target) fires, otherwise the companion falls back
- * to a basic attack. The combat log records which card fired and why others were skipped.
+ * The built-in headless policy. The player-facing Habit Cards feature is gone (DELVE_REDESIGN §5):
+ * there is no deck to edit and no screen that reaches this module. What remains is one fixed set of
+ * rules that turns a `TurnState` into a `TurnOrder`, so the fuzz, golden and simulation suites can
+ * play a run without a human and still go through the same decision seam the player uses.
  */
 
-import type { HollowId, TurnState } from '../types';
+import type { TurnOrder, TurnState } from '../types';
 import type { SkillDef } from './builds';
 import type { Element } from './elements';
 
@@ -29,20 +29,19 @@ export interface CardDef {
   name: string;
   condition: CardCondition;
   action: CardAction;
-  unlock:
-    | { kind: 'always' }
-    | { kind: 'level'; value: number }
-    | { kind: 'hollowClear'; value: HollowId };
   effect: string;
 }
 
-export const CARDS: readonly CardDef[] = [
+/**
+ * The one deck: brace when badly hurt, open with the strongest skill, otherwise keep a skill on
+ * cooldown. Ordered by urgency — the first rule whose condition and action both hold wins.
+ */
+export const BUILTIN_DECK: readonly CardDef[] = [
   {
     id: 'rainy-day',
     name: 'Rainy Day',
     condition: { kind: 'hpBelow', percent: 35 },
     action: { kind: 'prefer', role: 'guard' },
-    unlock: { kind: 'always' },
     effect: 'If HP is below 35%, use the guard skill.',
   },
   {
@@ -50,99 +49,20 @@ export const CARDS: readonly CardDef[] = [
     name: 'Opening Move',
     condition: { kind: 'roundOne' },
     action: { kind: 'prefer', role: 'strongest' },
-    unlock: { kind: 'always' },
     effect: 'Use the strongest skill in round 1.',
-  },
-  {
-    id: 'mark-hunter',
-    name: 'Mark Hunter',
-    condition: { kind: 'markedTarget' },
-    action: { kind: 'attackMarked' },
-    unlock: { kind: 'level', value: 5 },
-    effect: 'Attack marked enemies first.',
   },
   {
     id: 'steady-hand',
     name: 'Steady Hand',
     condition: { kind: 'always' },
     action: { kind: 'prefer', role: 'offCooldown' },
-    unlock: { kind: 'always' },
     effect: 'Use any skill that is off cooldown.',
-  },
-  {
-    id: 'finisher',
-    name: 'Finisher',
-    condition: { kind: 'targetHpBelow', percent: 30 },
-    action: { kind: 'prefer', role: 'burst' },
-    unlock: { kind: 'level', value: 3 },
-    effect: 'Use a burst skill when the target is below 30% HP.',
-  },
-  {
-    id: 'shield-up',
-    name: 'Shield Up',
-    condition: { kind: 'hpBelow', percent: 60 },
-    action: { kind: 'prefer', role: 'guard' },
-    unlock: { kind: 'level', value: 3 },
-    effect: 'If HP is below 60%, use the guard skill.',
-  },
-  {
-    id: 'cool-off',
-    name: 'Cool Off',
-    condition: { kind: 'energyAbove', amount: 5 },
-    action: { kind: 'prefer', role: 'strongest' },
-    unlock: { kind: 'level', value: 5 },
-    effect: 'At 5 or more energy, spend it on the strongest skill.',
-  },
-  {
-    id: 'ember-first',
-    name: 'Ember First',
-    condition: { kind: 'enemyWeakTo', element: 'ember' },
-    action: { kind: 'element', element: 'ember' },
-    unlock: { kind: 'hollowClear', value: 1 },
-    effect: 'Use an Ember skill against enemies weak to Ember.',
-  },
-  {
-    id: 'frost-first',
-    name: 'Frost First',
-    condition: { kind: 'enemyWeakTo', element: 'frost' },
-    action: { kind: 'element', element: 'frost' },
-    unlock: { kind: 'hollowClear', value: 2 },
-    effect: 'Use a Frost skill against enemies weak to Frost.',
-  },
-  {
-    id: 'basic-discipline',
-    name: 'Basic Discipline',
-    condition: { kind: 'always' },
-    action: { kind: 'basic' },
-    unlock: { kind: 'always' },
-    effect: 'Always use a basic attack.',
   },
 ];
 
-export function cardById(id: string): CardDef | undefined {
-  return CARDS.find((c) => c.id === id);
-}
-
-export function cardUnlocked(
-  id: string,
-  meta: { clearedHollows: readonly HollowId[] },
-  companionLevel: number,
-): boolean {
-  const c = cardById(id);
-  if (!c) return false;
-  switch (c.unlock.kind) {
-    case 'always':
-      return true;
-    case 'level':
-      return companionLevel >= c.unlock.value;
-    case 'hollowClear':
-      return meta.clearedHollows.includes(c.unlock.value);
-  }
-}
-
 /**
  * The state a card is evaluated against is `TurnState` in `../types` — the same snapshot the turn
- * loop hands the player, so the fallback policy and the human are never priced from two shapes.
+ * loop hands the player, so the headless policy and the human are never priced from two shapes.
  */
 export interface CardDecision {
   fired: CardDef | null;
@@ -241,4 +161,16 @@ export function evaluateCards(cards: readonly CardDef[], state: TurnState): Card
     return { fired: c, skipped };
   }
   return { fired: null, skipped };
+}
+
+/** The headless decider: the built-in deck's answer for this round, with no randomness of its own. */
+export function builtinDecider(state: TurnState): TurnOrder {
+  const decision = evaluateCards(BUILTIN_DECK, state);
+  const action = decision.fired ? resolveCardAction(decision.fired.action, state) : { basic: true };
+  const marked = state.targets.findIndex((t) => t.marked);
+  return {
+    skillId: action.skill?.id ?? null,
+    targetIndex: action.attackMarked && marked >= 0 ? marked : 0,
+    guard: false,
+  };
 }

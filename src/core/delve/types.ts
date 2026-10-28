@@ -78,7 +78,7 @@ export type ChoiceKind = 'boon' | 'fork' | 'shop' | 'event' | 'rest';
 
 export interface PendingChoice {
   kind: ChoiceKind;
-  /** Options the player (or Autopilot) picks from. */
+  /** Options the player picks from. */
   options: ChoiceOption[];
   reason: string;
   stepIndex: number;
@@ -127,9 +127,6 @@ export interface TurnTarget {
  * The round being decided, assembled by `runCombat` immediately before it asks for an order. This is
  * the whole menu: energy, cooldowns and the living targets are everything the rules let a round turn
  * on, so an option can be priced from it without peeking at anything else (§4 A.1).
- *
- * Named for the turn loop rather than Habit Cards, because after 7b it describes the human's choice
- * as well as the card fallback's.
  */
 export interface TurnState {
   round: number;
@@ -144,9 +141,7 @@ export interface TurnState {
 
 /**
  * Who acts on the companion's turn. `null` means "no order yet", which stops the room and hands the
- * round back rather than letting a policy answer for the player — the one behaviour that separates a
- * hand-played Delve from Autopilot by another name (§4 A.2). Headless suites supply a decider that
- * always answers.
+ * round back to the player (§4 A.2). Headless suites supply a decider that always answers.
  */
 export type TurnDecider = (state: TurnState) => TurnOrder | null;
 
@@ -167,8 +162,6 @@ export interface RunState {
   /** Selected build; the talent tree is snapshotted from meta at run start. */
   buildId: string;
   tree: string[];
-  /** Equipped Habit Cards for this run (max 3, priority order). */
-  cards: string[];
   /** Absolute step index; every applied step increments it. */
   stepIndex: number;
   floor: number;
@@ -215,8 +208,7 @@ export interface RunState {
   orders: TurnOrder[];
   /**
    * True while the room the run stands in is waiting for the player's next order. Absent on a run
-   * between rooms, and never written by the auto-played path — so a stored shape that cannot pause
-   * does not grow a key it has no use for.
+   * between rooms, so a stored shape that is not mid-fight does not grow a key it has no use for.
    */
   pendingTurn?: boolean;
   /**
@@ -246,8 +238,6 @@ export interface DelveMeta {
   knownWeaknesses: Element[];
   /** Bosses studied by fainting to them: their weakness and tells are permanently revealed. */
   bossKnowledge: string[];
-  /** Equipped Habit Cards (max 3, priority top to bottom). */
-  cards: string[];
   bestFloor: Partial<Record<HollowId, number>>;
   forge: ForgeLevels;
   runsStarted: number;
@@ -309,34 +299,14 @@ export interface BudgetSignals {
   reviewedLast7d: boolean;
 }
 
-export interface AutopilotPolicy {
-  mode: 'autopilot' | 'camp';
-  /** Boon tag priority, highest first. */
-  tagPriority: BoonTag[];
-  /** Retreat from a Rest room when HP ratio is at or below this (0-100). */
-  retreatHpPercent: number;
-  route: 'safe' | 'balanced' | 'greedy';
-  /** Minimum companion level to attempt a hollow's boss; below it the pre-boss Rest retreats. */
-  bossGate?: Partial<Record<HollowId, number>>;
-}
-
 export interface StepContext {
   /** Current epoch ms. Injected; the engine never reads the clock itself. */
   now: number;
-  oil: number;
-  /** Oil capacity (storage cap + Forge + buffs). */
-  oilCapacity: number;
   signals: BudgetSignals;
   meta: DelveMeta;
-  policy: AutopilotPolicy;
   /** Local date of the step, for ledger events. */
   today: LocalDate;
-  /**
-   * True when a human is playing this step: the room waits for `order` instead of resolving itself.
-   * Absent on the auto-played path, so a batch or catch-up step behaves exactly as before.
-   */
-  play?: boolean;
-  /** The order for the round the run is waiting on. Ignored unless `play` is set. */
+  /** The player's order for the round the run is waiting on. Absent means "rebuild the menu". */
   order?: TurnOrder;
 }
 

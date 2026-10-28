@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BASE_MODIFIERS,
   ROUND_CAP,
+  builtinDecider,
   companionBase,
   computeModifiers,
   emptyMeta,
@@ -122,8 +123,26 @@ describe('auto-battle', () => {
   it('is fully deterministic for the same state and room', () => {
     const run = runWith({ runId: 'd1-test-1', stepIndex: 4 });
     const room = { enemies: ['tollbug', 'mossbite'] };
-    const a = runCombat(run, room, computeModifiers(run, {}, zeroBuffs()), 2);
-    const b = runCombat(run, room, computeModifiers(run, {}, zeroBuffs()), 2);
+    const a = runCombat(
+      run,
+      room,
+      computeModifiers(run, {}, zeroBuffs()),
+      2,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
+    const b = runCombat(
+      run,
+      room,
+      computeModifiers(run, {}, zeroBuffs()),
+      2,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     expect(a).toEqual(b);
     expect(a.log.every((l) => l.type === 'combat' && l.step === run.stepIndex)).toBe(true);
   });
@@ -131,7 +150,16 @@ describe('auto-battle', () => {
   it('wins decisively when much stronger', () => {
     const run = runWith({ companionLevel: 10 });
     const room = { enemies: ['tollbug'] };
-    const result = runCombat(run, room, computeModifiers(run, {}, zeroBuffs()), 1);
+    const result = runCombat(
+      run,
+      room,
+      computeModifiers(run, {}, zeroBuffs()),
+      1,
+      [],
+      [],
+      {},
+      builtinDecider,
+    );
     expect(result.won).toBe(true);
     expect(result.drawn).toBe(false);
     expect(result.hpAfter).toBeGreaterThan(0);
@@ -155,7 +183,7 @@ describe('auto-battle', () => {
     });
     const mods = { ...computeModifiers(run, {}, zeroBuffs()), maxHp: 900 };
     const room = { enemies: ['umbralmonarch'] };
-    const result = runCombat(run, room, mods, 1);
+    const result = runCombat(run, room, mods, 1, [], [], {}, builtinDecider);
     expect(result.won).toBe(false);
     expect(result.drawn).toBe(true);
     expect(result.hpAfter).toBeGreaterThan(0);
@@ -173,6 +201,10 @@ describe('auto-battle', () => {
         { enemies: ['thorncrown'] },
         computeModifiers(run, {}, zeroBuffs()),
         6,
+        [],
+        [],
+        {},
+        builtinDecider,
       );
       if (r.log.some((l) => l.text.includes('unleashes its mechanic'))) result = r;
     }
@@ -186,7 +218,7 @@ describe('auto-battle', () => {
     const run = runWith({ companionLevel: 1 });
     const mods = { ...computeModifiers(run, {}, zeroBuffs()), roomShield: 100 };
     const room = { enemies: ['tollbug'] };
-    const result = runCombat(run, room, mods, 1);
+    const result = runCombat(run, room, mods, 1, [], [], {}, builtinDecider);
     expect(result.won).toBe(true);
     expect(result.log.some((l) => l.text.includes('shield absorbs'))).toBe(true);
   });
@@ -195,8 +227,8 @@ describe('auto-battle', () => {
     // Tollbug at floor 1 vs floor 6: the deeper one is stronger.
     const run = runWith({ companionLevel: 1 });
     const mods = computeModifiers(run, {}, zeroBuffs());
-    const shallow = runCombat(run, { enemies: ['tollbug'] }, mods, 1);
-    const deep = runCombat(run, { enemies: ['tollbug'] }, mods, 6);
+    const shallow = runCombat(run, { enemies: ['tollbug'] }, mods, 1, [], [], {}, builtinDecider);
+    const deep = runCombat(run, { enemies: ['tollbug'] }, mods, 6, [], [], {}, builtinDecider);
     expect(deep.rounds).toBeGreaterThanOrEqual(shallow.rounds);
   });
 });

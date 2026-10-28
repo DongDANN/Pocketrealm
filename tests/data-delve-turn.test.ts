@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyMeta, hitOf, type TurnOrder } from '../src/core/delve';
 import type { PocketDb } from '../src/data/db';
 import {
+  chooseDelve,
   loadDelveSnapshot,
   retreatDelve,
   stepDelve,
@@ -19,10 +20,10 @@ import {
 } from '../src/data/delve';
 import { createRun, loadActiveRun, META_KEY } from '../src/data/delveStore';
 import { dbOn } from './data-harness';
-import { NOW, POLICY, singleRowRun, TODAY } from './delve-helpers';
+import { NOW, singleRowRun, TODAY } from './delve-helpers';
 
 const BASIC: TurnOrder = { skillId: null, targetIndex: 0, guard: false };
-const PLAY: StepDelveOptions = { today: TODAY, now: NOW, policy: POLICY, play: true };
+const PLAY: StepDelveOptions = { today: TODAY, now: NOW };
 
 let factory: IDBFactory;
 let name: string;
@@ -158,7 +159,10 @@ describe('finishing the room', () => {
     expect(last.run!.pendingTurn).toBeUndefined();
     expect(last.run!.orders).toEqual([]);
     expect(last.run!.stepIndex).toBe(1);
-    // The one-row plan is done, so the room advanced the run rather than the step index.
+    // The win holds its boon offer before the floor is handed over; answering it is the move that
+    // runs the one-row plan out into floor 2.
+    const offer = last.run!.pendingChoice;
+    if (offer) last = await chooseDelve(db, { ...PLAY, optionId: offer.options[0]!.id });
     expect(last.run!.floor).toBe(2);
 
     const stored = await loadActiveRun(db);

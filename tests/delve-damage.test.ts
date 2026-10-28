@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   attackBreakdown,
   attackRange,
+  builtinDecider,
   computeModifiers,
   damageSumText,
   emptyMeta,
@@ -251,7 +252,10 @@ describe('the engine resolves through the same sum the panel shows', () => {
   function fight(over: Partial<RunState> = {}) {
     const run: RunState = { ...newRun(1, 1, 1, emptyMeta()), ...over };
     const mods = computeModifiers(run, {}, { wardHp: 0, luckBonus: 0 });
-    return { run, res: runCombat(run, { enemies: ['tollbug'] }, mods, 1) };
+    return {
+      run,
+      res: runCombat(run, { enemies: ['tollbug'] }, mods, 1, [], [], {}, builtinDecider),
+    };
   }
 
   it('records a sum for every hit that lands', () => {

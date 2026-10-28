@@ -1,7 +1,7 @@
 /**
  * Daily Challenge (SPEC 6.11 J). The dungeon is seeded by hash(date, "daily") so it is the same
  * for every player on a date with no server. The loadout is fixed (Warden, level 12, no Forge,
- * cards, consumables, buildings, or Heat), there is one attempt per local day, the run costs no
+ * consumables, buildings, or Heat), there is one attempt per local day, the run costs no
  * Lantern Oil, and finishing pays a small Embers and Spark reward plus a local personal best.
  */
 

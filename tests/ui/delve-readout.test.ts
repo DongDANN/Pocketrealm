@@ -16,11 +16,21 @@ import {
   newRun,
   stepRun,
   type BudgetSignals,
+  type CombatPause,
   type IncomingInput,
   type RunState,
+  type TurnOrder,
 } from '../../src/core/delve';
 import { recapOf, roomSwings, roomThreats } from '../../src/ui/lib/delveReadout';
 import { mkCtx, singleRowRun } from '../delve-helpers';
+
+const BASIC: TurnOrder = { skillId: null, targetIndex: 0, guard: false };
+
+/** Enter a room and take one basic round; the pause carries the log of that exchange. */
+function firstRound(run: RunState = singleRowRun('skirmish')): CombatPause {
+  const entered = stepRun(run, mkCtx(emptyMeta()));
+  return stepRun(entered.run, mkCtx(emptyMeta(), { order: BASIC })).pause!;
+}
 
 const NO_SIGNALS: BudgetSignals = {
   checkedInToday: false,
@@ -154,8 +164,8 @@ describe('the swing panel', () => {
 
 describe('the recap under the stage', () => {
   it('reads the structured records the engine left in the log', () => {
-    const out = stepRun(singleRowRun('skirmish'), mkCtx(emptyMeta()));
-    const { rows } = recapOf(out.run.log);
+    const log = firstRound().log;
+    const { rows } = recapOf(log);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.sum).toMatch(/= \d+$/);
@@ -165,9 +175,9 @@ describe('the recap under the stage', () => {
   });
 
   it('keeps the newest beats and counts what it dropped', () => {
-    const out = stepRun(singleRowRun('skirmish'), mkCtx(emptyMeta()));
-    const all = recapOf(out.run.log).rows;
-    const short = recapOf(out.run.log, 2);
+    const log = firstRound().log;
+    const all = recapOf(log).rows;
+    const short = recapOf(log, 2);
     expect(short.rows.length).toBe(2);
     expect(short.omitted).toBe(Math.max(0, all.length - 2));
     expect(short.rows[1]).toEqual(all[all.length - 1]);
@@ -179,9 +189,9 @@ describe('the recap under the stage', () => {
   });
 
   it('prints the same arithmetic the log line carried', () => {
-    const out = stepRun(singleRowRun('skirmish'), mkCtx(emptyMeta()));
-    const { rows } = recapOf(out.run.log);
-    for (const entry of out.run.log) {
+    const log = firstRound().log;
+    const { rows } = recapOf(log);
+    for (const entry of log) {
       const hit = hitOf(entry);
       if (!hit) continue;
       const row = rows.find(
@@ -202,8 +212,8 @@ describe('the strip and the fight agree', () => {
   it('forecasts the enemy the room actually contained', () => {
     const run = room('skirmish', ['tollbug']);
     const rows = roomThreats(run, emptyMeta(), NO_SIGNALS);
-    const out = stepRun(run, mkCtx(emptyMeta(), { oil: 999 }));
-    const firstPlayerHit = out.run.log.map(hitOf).find((h) => h !== null && h.side === 'player')!;
+    const pause = firstRound(run);
+    const firstPlayerHit = pause.log.map(hitOf).find((h) => h !== null && h.side === 'player')!;
     expect(firstPlayerHit, 'the room resolved a hit').toBeTruthy();
     // The DEF the strip printed is the DEF the engine subtracted, and the HP is the HP it hit.
     expect(rows[0]!.def).toBe(firstPlayerHit.input.def);
@@ -215,8 +225,8 @@ describe('the strip and the fight agree', () => {
     for (let seed = 1; seed <= 60 && checked < 2; seed++) {
       const run = { ...room('skirmish', ['tollbug']), runId: `readout-${seed}` };
       const [row] = roomThreats(run, emptyMeta(), NO_SIGNALS);
-      const out = stepRun(run, mkCtx(emptyMeta(), { oil: 999 }));
-      const hit = out.run.log.map(hitOf).find((h) => h !== null && h.side === 'enemy');
+      const pause = firstRound(run);
+      const hit = pause.log.map(hitOf).find((h) => h !== null && h.side === 'enemy');
       if (!hit) continue;
       const input = hit.input as IncomingInput;
       // Once the exchange has moved, the pool and the HP are history; compare only an untouched opening.

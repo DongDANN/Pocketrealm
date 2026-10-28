@@ -24,7 +24,7 @@ import {
   type StepOutcome,
   type TurnOrder,
 } from '../src/core/delve';
-import { mkCtx, singleRowRun, TODAY } from './delve-helpers';
+import { answerChoice, mkCtx, singleRowRun, TODAY } from './delve-helpers';
 
 const BASIC: TurnOrder = { skillId: null, targetIndex: 0, guard: false };
 
@@ -33,7 +33,7 @@ function openRoom(kind: 'skirmish' | 'elite' | 'boss' = 'skirmish'): {
   entry: StepOutcome;
 } {
   const meta = emptyMeta();
-  return { meta, entry: stepRun(singleRowRun(kind), mkCtx(meta, { play: true })) };
+  return { meta, entry: stepRun(singleRowRun(kind), mkCtx(meta)) };
 }
 
 /** Answer the room one order at a time until it finishes, and report every step taken. */
@@ -45,7 +45,7 @@ function playOut(
   let current = run;
   const steps: StepOutcome[] = [];
   for (let guard = 0; guard < 200; guard++) {
-    const out = stepRun(current, mkCtx(meta, { play: true, order: order() }));
+    const out = stepRun(current, mkCtx(meta, { order: order() }));
     steps.push(out);
     if (out.pause === undefined) return { run: out.run, steps };
     current = out.run;
@@ -94,7 +94,7 @@ describe('a fight room opens instead of resolving', () => {
   it('takes one order per round and never rewrites the HP the fight started from', () => {
     const { meta, entry } = openRoom();
 
-    const first = stepRun(entry.run, mkCtx(meta, { play: true, order: BASIC }));
+    const first = stepRun(entry.run, mkCtx(meta, { order: BASIC }));
     expect(first.pause).toBeDefined();
     expect(first.pause!.state.round).toBe(2);
     expect(first.run.orders).toEqual([BASIC]);
@@ -105,24 +105,25 @@ describe('a fight room opens instead of resolving', () => {
     expect(first.pause!.log.some((line) => line.text.startsWith('You hit'))).toBe(true);
   });
 
-  it('a dry lamp does not stop a run that was already paid for', () => {
+  it('takes an order without a wallet in sight', () => {
     const { meta, entry } = openRoom();
 
-    const out = stepRun(entry.run, mkCtx(meta, { play: true, order: BASIC, oil: 0 }));
+    const out = stepRun(entry.run, mkCtx(meta, { order: BASIC }));
     expect(out.pause).toBeDefined();
     expect(out.run.orders).toEqual([BASIC]);
 
-    // Auto-played steps still cannot move a run that is waiting for a person.
-    const auto = stepRun(entry.run, mkCtx(meta, { oil: 0 }));
-    expect(auto.run).toBe(entry.run);
-    expect(auto.pause).toBeUndefined();
+    // A step with no order only rebuilds the menu: the run comes back with the same content, and the
+    // pause is the rebuilt one. (The engine is pure, so it returns a fresh object rather than reuse.)
+    const idle = stepRun(entry.run, mkCtx(meta));
+    expect(idle.run).toEqual(entry.run);
+    expect(idle.pause).toBeDefined();
   });
 
   it('asks with no order only to rebuild the same menu, without moving the run', () => {
     const { meta, entry } = openRoom();
-    const answered = stepRun(entry.run, mkCtx(meta, { play: true, order: BASIC }));
+    const answered = stepRun(entry.run, mkCtx(meta, { order: BASIC }));
 
-    const rebuilt = stepRun(answered.run, mkCtx(meta, { play: true }));
+    const rebuilt = stepRun(answered.run, mkCtx(meta));
     expect(rebuilt.pause!.state).toEqual(answered.pause!.state);
     expect(rebuilt.pause!.enemies).toEqual(answered.pause!.enemies);
     expect(rebuilt.pause!.log.map((line) => line.text)).toEqual(
@@ -139,7 +140,6 @@ describe('a fight room opens instead of resolving', () => {
     const refused = stepRun(
       entry.run,
       mkCtx(meta, {
-        play: true,
         order: { skillId: 'no-such-skill', targetIndex: 0, guard: false },
       }),
     );
@@ -164,13 +164,13 @@ describe('the fight is rebuilt from the trail, so the run carries no outcome', (
       .map((l) => l.text);
 
     // Same room, but the run is serialized to storage after round one and walked back from JSON.
-    const first = stepRun(entry.run, mkCtx(meta, { play: true, order: orders[0]! }));
+    const first = stepRun(entry.run, mkCtx(meta, { order: orders[0]! }));
     const reloaded = JSON.parse(JSON.stringify(first.run)) as RunState;
     expect(reloaded.orders).toEqual([BASIC]);
     const resumed: StepOutcome[] = [];
     let current = reloaded;
     for (;;) {
-      const out = stepRun(current, mkCtx(meta, { play: true, order: BASIC }));
+      const out = stepRun(current, mkCtx(meta, { order: BASIC }));
       resumed.push(out);
       if (out.pause === undefined) break;
       current = out.run;
@@ -192,7 +192,7 @@ describe('the fight is rebuilt from the trail, so the run carries no outcome', (
       consumables: ['fire-oil'],
       consumablesUsed: {},
     };
-    const entry = stepRun(run, mkCtx(meta, { play: true }));
+    const entry = stepRun(run, mkCtx(meta));
 
     // Still unspent in the run: the replay that finishes the room spends it, exactly once.
     expect(entry.run.consumablesUsed).toEqual({});
@@ -227,8 +227,10 @@ describe('a finished room forgets its trail', () => {
     expect('pendingTurn' in done.run).toBe(false);
     expect(done.run.orders).toEqual([]);
     expect(done.run.result).toBe('active');
-    // The one-row plan is over, so the run moved on to the next floor.
-    expect(done.run.floor).toBe(2);
+    // A win can drop a boon offer between the room and the next floor. The player answers it, and
+    // only that answer runs the one-row plan out into floor 2.
+    const settled = answerChoice(done.run, mkCtx(meta)).run;
+    expect(settled.floor).toBe(2);
   });
 
   it('a faint clears them too, and the fight that caused it is in the log', () => {
@@ -236,7 +238,7 @@ describe('a finished room forgets its trail', () => {
     const base = singleRowRun('skirmish');
     const entry = stepRun(
       { ...base, companionLevel: 1, unit: { ...base.unit, hp: 1 } },
-      mkCtx(meta, { play: true }),
+      mkCtx(meta),
     );
 
     const done = playOut(entry.run, meta);
@@ -248,7 +250,7 @@ describe('a finished room forgets its trail', () => {
 
   it('retreating out of a waiting room drops the trail', () => {
     const { meta, entry } = openRoom();
-    const answered = stepRun(entry.run, mkCtx(meta, { play: true, order: BASIC }));
+    const answered = stepRun(entry.run, mkCtx(meta, { order: BASIC }));
 
     const out = retreatRun(answered.run, meta, TODAY);
     expect(out.run.result).toBe('retreated');

@@ -6,14 +6,15 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  builtinDecider,
   computeModifiers,
   emptyMeta,
   enemyById,
   newRun,
   runCombat,
-  stepRun,
   type DelveMeta,
 } from '../src/core/delve';
+import { NO_SIGNALS, playOne, type PlayState } from './delve-helpers';
 import {
   MAX_MASTERY_LEVEL,
   MASTERY_XP_PER_KILL,
@@ -119,8 +120,17 @@ describe('mastery damage bonus in combat', () => {
   it('adds +1% damage per level against the species (same seed, same rolls)', () => {
     const run = newRun(5, 1, 5, emptyMeta());
     const mods = computeModifiers(run, {}, { wardHp: 0, luckBonus: 0 });
-    const plain = runCombat(run, { enemies: ['tollbug'] }, mods, 1, [], [], {});
-    const studied = runCombat(run, { enemies: ['tollbug'] }, mods, 1, [], [], { tollbug: 30 });
+    const plain = runCombat(run, { enemies: ['tollbug'] }, mods, 1, [], [], {}, builtinDecider);
+    const studied = runCombat(
+      run,
+      { enemies: ['tollbug'] },
+      mods,
+      1,
+      [],
+      [],
+      { tollbug: 30 },
+      builtinDecider,
+    );
     const firstHit = (log: { text: string }[]): number => {
       for (const l of log) {
         const m = /for (\d+)\./.exec(l.text);
@@ -135,28 +145,19 @@ describe('mastery damage bonus in combat', () => {
     const meta = emptyMeta();
     const run = newRun(5, 1, 5, meta);
     const enemy = run.floorPlan.rows[0]![0]!.enemies[0]!;
-    const out = stepRun(run, {
-      now: 0,
-      oil: 100,
-      oilCapacity: 100,
-      signals: {
-        checkedInToday: false,
-        envelopesWithinAllowance: 0,
-        contributedToGoalLast7d: false,
-        reviewedLast7d: false,
-      },
-      meta,
-      policy: {
-        mode: 'autopilot',
-        tagPriority: ['guard', 'vigor', 'fury', 'fortune', 'thrift'],
-        retreatHpPercent: 0,
-        route: 'balanced',
-      },
-      today: '2026-10-25',
-    });
-    // One step resolves the first room (autopilot resolves offers inline).
-    expect(out.run.roomsVisited.length).toBe(1);
-    expect(out.meta.codex).toContain(enemy);
-    expect(out.meta.mastery[enemy]).toBe(10);
+    let state: PlayState = { run, meta, pause: null, ledger: [], signals: NO_SIGNALS };
+    let guard = 0;
+    while (
+      state.run.result === 'active' &&
+      state.meta.mastery[enemy] === undefined &&
+      guard < 200
+    ) {
+      state = playOne(state);
+      guard += 1;
+    }
+    // One room fought to its end: the sighting opens the codex and the kill pays mastery.
+    expect(state.run.roomsVisited.length).toBe(1);
+    expect(state.meta.codex).toContain(enemy);
+    expect(state.meta.mastery[enemy]).toBe(10);
   });
 });

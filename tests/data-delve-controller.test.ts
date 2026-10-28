@@ -2,19 +2,19 @@
  * Gate 4a — the Delve controller. These tests drive the public data API, not the engine helpers:
  * they prove that a screen action becomes exactly one guarded write, that Lantern Oil buys a run
  * start and nothing inside it, that a Daily Challenge never contaminates permanent progress, and
- * that catch-up survives a camp fork, a pending choice and a backwards clock.
+ * that a hand-played room is answered with an order instead of simulated on a timer.
  */
 
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { addDays } from '../src/core/dates';
-import { CAMP_POLICY, NO_SIGNALS, NOW, POLICY, TODAY } from './delve-helpers';
+import { NO_SIGNALS, NOW, TODAY } from './delve-helpers';
 import {
   HEAT_MAX,
-  STEP_MS,
+  builtinDecider,
   emptyMeta,
   newRun,
-  runCatchUpJob,
+  type CombatPause,
   type DelveMeta,
   type HollowId,
   type RunState,
@@ -22,9 +22,7 @@ import {
 import { LEVELS } from '../src/core/rewards';
 import type { RewardEvent } from '../src/core/types';
 import type { PocketDb } from '../src/data/db';
-import type { CatchUpRunner } from '../src/data/delveWorker';
 import {
-  applyCatchUp,
   chooseDelve,
   listDelveHistory,
   loadBuildingMilestones,
@@ -33,7 +31,6 @@ import {
   normalizeMeta,
   purchaseForge,
   retreatDelve,
-  setHabitCards,
   startDailyDelve,
   startDelve,
   stepDelve,
@@ -43,7 +40,6 @@ import {
 import { META_KEY, createRun, loadActiveRun, loadMeta, loadRun } from '../src/data/delveStore';
 import { dbOn } from './data-harness';
 
-const inProcess: CatchUpRunner = async (request) => runCatchUpJob(request);
 const OPTIONS = { today: TODAY, now: NOW };
 
 let db: PocketDb;
@@ -134,13 +130,39 @@ function forkRun(level = 8): RunState {
   };
 }
 
+/** Play the active run to its end through the public API, answering rooms like a player. */
+async function playToEnd(): Promise<void> {
+  let pause: CombatPause | undefined;
+  for (let i = 0; i < 600; i++) {
+    const active = await loadActiveRun(db);
+    if (!active) return;
+    if (active.state.pendingChoice) {
+      const out = await chooseDelve(db, {
+        ...OPTIONS,
+        optionId: active.state.pendingChoice.options[0]!.id,
+      });
+      expect(out.ok, out.reason).toBe(true);
+      pause = undefined;
+      continue;
+    }
+    const out = await stepDelve(
+      db,
+      pause && active.state.pendingTurn
+        ? { ...OPTIONS, order: builtinDecider(pause.state) }
+        : OPTIONS,
+    );
+    expect(out.ok, out.reason).toBe(true);
+    pause = out.pause;
+  }
+  throw new Error('the run never settled');
+}
+
 describe('normalizeMeta', () => {
   it('fills the current shape and drops malformed fields', () => {
     expect(normalizeMeta(null)).toEqual(emptyMeta());
     const meta = normalizeMeta({
       embers: 12.9,
       clearedHollows: [2, 2, 9, 'x'],
-      cards: ['a', 'a', 'b', 'c', 'd'],
       materials: { ore: 3, herb: -4 },
       daily: { date: '2026-10-25', played: true, settled: true },
       forge: { atk: 2.8, bad: 'x' },
@@ -148,7 +170,7 @@ describe('normalizeMeta', () => {
     });
     expect(meta.embers).toBe(12);
     expect(meta.clearedHollows).toEqual([2]);
-    expect(meta.cards).toEqual(['a', 'b', 'c']);
+    expect('cards' in meta).toBe(false);
     expect(meta.materials).toEqual({ ore: 3, herb: 0, echo: 0 });
     expect(meta.daily).toEqual({ date: '2026-10-25', played: true, settled: true });
     expect(meta.forge).toEqual({ atk: 2 });
@@ -290,7 +312,7 @@ describe('starting and stepping', () => {
     const started = await startReadyRun();
     expect(started.wallet.oil).toBe(40);
     const before = started.wallet.oil;
-    const tick = await stepDelve(db, { ...OPTIONS, policy: POLICY });
+    const tick = await stepDelve(db, { ...OPTIONS });
     expect(tick.ok).toBe(true);
     expect(tick.run?.stepIndex).toBe(1);
     expect(tick.wallet.oil).toBe(before);
@@ -306,7 +328,7 @@ describe('starting and stepping', () => {
   it('keeps stepping a run whose lamp ran dry after the start', async () => {
     const started = await startReadyRun(20);
     expect(started.wallet.oil).toBe(0);
-    const tick = await stepDelve(db, { ...OPTIONS, policy: POLICY });
+    const tick = await stepDelve(db, { ...OPTIONS });
     expect(tick.ok).toBe(true);
     expect(tick.run?.stepIndex).toBe(1);
     expect((await loadMeta(db))?.oil).toBe(0);
@@ -314,7 +336,7 @@ describe('starting and stepping', () => {
 
   it('banks a retreat, closes the run, and keeps it in history', async () => {
     const started = await startReadyRun();
-    await stepDelve(db, { ...OPTIONS, policy: POLICY });
+    await stepDelve(db, { ...OPTIONS });
     const out = await retreatDelve(db, OPTIONS);
     expect(out.ok).toBe(true);
     expect(out.ended).toBe(true);
@@ -351,10 +373,10 @@ describe('starting and stepping', () => {
 
 describe('choices and camp forks', () => {
   it('stores a camp fork at step zero without spending or the step clock', async () => {
-    const meta = { ...emptyMeta(), lastStepAt: NOW - 10 * STEP_MS, maxSeenAt: NOW };
+    const meta = { ...emptyMeta(), lastStepAt: NOW - 300_000, maxSeenAt: NOW };
     const run = forkRun();
     await putRun(run, meta, 10);
-    const tick = await stepDelve(db, { ...OPTIONS, policy: CAMP_POLICY });
+    const tick = await stepDelve(db, { ...OPTIONS });
     expect(tick.ok).toBe(true);
     expect(tick.run?.stepIndex).toBe(0);
     expect(tick.run?.pendingChoice?.kind).toBe('fork');
@@ -363,18 +385,17 @@ describe('choices and camp forks', () => {
     expect(stored?.state.pendingChoice?.kind).toBe('fork');
     const wallet = await loadMeta(db);
     expect(wallet?.oil).toBe(10);
-    expect(wallet?.meta.lastStepAt).toBe(NOW - 10 * STEP_MS);
+    expect(wallet?.meta.lastStepAt).toBe(NOW - 300_000);
   });
 
   it('resolves a fork, then steps into the chosen room', async () => {
     const meta = { ...emptyMeta(), lastStepAt: NOW, maxSeenAt: NOW };
     const run = forkRun();
     await putRun(run, meta, 10);
-    await stepDelve(db, { ...OPTIONS, policy: CAMP_POLICY });
+    await stepDelve(db, { ...OPTIONS });
 
     const chosen = await chooseDelve(db, {
       ...OPTIONS,
-      policy: CAMP_POLICY,
       optionId: 'r0c1',
     });
     expect(chosen.ok).toBe(true);
@@ -382,7 +403,7 @@ describe('choices and camp forks', () => {
     expect(chosen.run?.path[0]).toBe(1);
     expect((await loadActiveRun(db))?.state.pendingChoice).toBeNull();
 
-    const stepped = await stepDelve(db, { ...OPTIONS, policy: CAMP_POLICY });
+    const stepped = await stepDelve(db, { ...OPTIONS });
     expect(stepped.ok).toBe(true);
     expect(stepped.run?.stepIndex).toBe(1);
     expect(stepped.run?.pendingChoice?.kind).toBe('rest');
@@ -392,40 +413,13 @@ describe('choices and camp forks', () => {
   it('rejects an option that is no longer offered', async () => {
     const meta = { ...emptyMeta(), lastStepAt: NOW, maxSeenAt: NOW };
     await putRun(forkRun(), meta, 10);
-    await stepDelve(db, { ...OPTIONS, policy: CAMP_POLICY });
+    await stepDelve(db, { ...OPTIONS });
     const bad = await chooseDelve(db, {
       ...OPTIONS,
-      policy: CAMP_POLICY,
       optionId: 'not-a-room',
     });
     expect(bad.ok).toBe(false);
     expect((await loadActiveRun(db))?.state.pendingChoice?.kind).toBe('fork');
-  });
-
-  it('resumes the step clock at the answer, so deciding time is never simulated as idle progress', async () => {
-    // The fork is offered with the clock already 30 steps old. The user takes the same 30 steps of
-    // wall-clock to answer, and that wait must not become free progress once the answer lands.
-    const waited = NOW + 30 * STEP_MS;
-    const meta = { ...emptyMeta(), lastStepAt: NOW, maxSeenAt: NOW };
-    await putRun(forkRun(), meta, 60, NOW);
-    await stepDelve(db, { ...OPTIONS, policy: CAMP_POLICY });
-
-    const chosen = await chooseDelve(db, {
-      ...OPTIONS,
-      now: waited,
-      policy: CAMP_POLICY,
-      optionId: 'r0c1',
-    });
-    expect(chosen.ok).toBe(true);
-    expect((await loadMeta(db))?.meta.lastStepAt).toBe(waited);
-
-    const report = await applyCatchUp(
-      db,
-      { ...OPTIONS, now: waited, policy: CAMP_POLICY },
-      inProcess,
-    );
-    expect(report.ran).toBe(false);
-    expect(report.steps).toBe(0);
   });
 });
 
@@ -437,17 +431,10 @@ describe('Daily Challenge', () => {
     expect(started.run?.daily).toBe(true);
     expect(started.run?.companionLevel).toBe(12);
 
-    const first = await stepDelve(db, { ...OPTIONS, policy: POLICY });
+    const first = await stepDelve(db, { ...OPTIONS });
     expect(first.ok).toBe(true);
 
-    const report = await applyCatchUp(
-      db,
-      { ...OPTIONS, now: NOW + 200 * STEP_MS, policy: POLICY },
-      inProcess,
-    );
-    expect(report.ended).toBe(true);
-    expect(report.daily).toBeDefined();
-    expect(report.steps).toBeGreaterThan(0);
+    await playToEnd();
 
     const wallet = (await loadMeta(db))!;
     expect(wallet.meta.daily.settled).toBe(true);
@@ -457,7 +444,6 @@ describe('Daily Challenge', () => {
     expect(wallet.meta.runsRetreated).toBe(0);
     expect(wallet.meta.clearedHollows).toEqual([]);
     expect(wallet.meta.materials).toEqual({ ore: 0, herb: 0, echo: 0 });
-    expect(wallet.meta.embers).toBe(report.daily!.embers);
 
     const events = await db.rewards.toArray();
     expect(events.filter((event) => event.type === 'delve:daily')).toHaveLength(1);
@@ -465,102 +451,11 @@ describe('Daily Challenge', () => {
     expect(events.some((event) => event.type === 'delve:clear')).toBe(false);
     expect(await loadActiveRun(db)).toBeUndefined();
 
-    const again = await stepDelve(db, { ...OPTIONS, policy: POLICY });
+    const again = await stepDelve(db, { ...OPTIONS });
     expect(again.ok).toBe(false);
     expect(
       (await db.rewards.toArray()).filter((event) => event.type === 'delve:daily'),
     ).toHaveLength(1);
-  });
-});
-
-describe('catch-up', () => {
-  it('applies elapsed steps and persists the clock without charging the wallet', async () => {
-    const meta = { ...emptyMeta(), lastStepAt: NOW - 5 * STEP_MS, maxSeenAt: NOW };
-    const run = newRun(21, 1, 20, meta);
-    await putRun(run, meta, 50);
-
-    const report = await applyCatchUp(db, { ...OPTIONS, policy: POLICY }, inProcess);
-    expect(report.ran).toBe(true);
-    expect(report.steps).toBe(5);
-    expect(report.oil).toBe(50);
-    expect(report.pending).toBe(false);
-    expect(report.log.length).toBeGreaterThan(0);
-
-    const stored = await loadRun(db, run.runId);
-    expect(stored?.stepIndex).toBe(5);
-    const wallet = await loadMeta(db);
-    expect(wallet?.oil).toBe(50);
-    expect(wallet?.meta.lastStepAt).toBe(NOW);
-
-    // Nothing new has elapsed, so a second pass is a no-op.
-    const idle = await applyCatchUp(db, { ...OPTIONS, policy: POLICY }, inProcess);
-    expect(idle.ran).toBe(false);
-    expect(idle.steps).toBe(0);
-  });
-
-  it('applies elapsed time even to an empty wallet, because the run was already paid for', async () => {
-    const meta = { ...emptyMeta(), lastStepAt: NOW - 10 * STEP_MS, maxSeenAt: NOW };
-    const run = newRun(22, 1, 20, meta);
-    await putRun(run, meta, 0);
-
-    const report = await applyCatchUp(db, { ...OPTIONS, policy: POLICY }, inProcess);
-    expect(report.steps).toBe(10);
-    expect(report.oil).toBe(0);
-    expect((await loadRun(db, run.runId))?.stepIndex).toBe(10);
-    expect((await loadMeta(db))?.meta.lastStepAt).toBe(NOW);
-  });
-
-  it('pauses time while a choice waits', async () => {
-    const meta = { ...emptyMeta(), lastStepAt: NOW - 10 * STEP_MS, maxSeenAt: NOW };
-    const run = forkRun();
-    const pending: RunState = {
-      ...run,
-      pendingChoice: { kind: 'fork', options: [], reason: 'Choose a route.', stepIndex: 0 },
-    };
-    await putRun(pending, meta, 10);
-    const report = await applyCatchUp(db, { ...OPTIONS, policy: CAMP_POLICY }, inProcess);
-    expect(report.steps).toBe(0);
-    expect((await loadMeta(db))?.meta.lastStepAt).toBe(NOW - 10 * STEP_MS);
-    expect((await loadActiveRun(db))?.state.pendingChoice?.kind).toBe('fork');
-  });
-
-  it('persists a camp fork opened by catch-up at the same step index', async () => {
-    const meta = { ...emptyMeta(), lastStepAt: NOW - 2 * STEP_MS, maxSeenAt: NOW };
-    await putRun(forkRun(), meta, 10);
-
-    const report = await applyCatchUp(db, { ...OPTIONS, policy: CAMP_POLICY }, inProcess);
-    expect(report.ran).toBe(false);
-    expect(report.steps).toBe(0);
-    expect(report.pending).toBe(true);
-    const stored = await loadActiveRun(db);
-    expect(stored?.stepIndex).toBe(0);
-    expect(stored?.state.pendingChoice?.kind).toBe('fork');
-    expect((await loadMeta(db))?.meta.lastStepAt).toBe(NOW);
-  });
-
-  it('grants nothing for a backwards clock and never lowers maxSeenAt', async () => {
-    const meta = { ...emptyMeta(), lastStepAt: NOW, maxSeenAt: NOW };
-    const run = newRun(23, 1, 20, meta);
-    await putRun(run, meta, 50);
-    const report = await applyCatchUp(
-      db,
-      { ...OPTIONS, now: NOW - 5 * STEP_MS, policy: POLICY },
-      inProcess,
-    );
-    expect(report.steps).toBe(0);
-    expect((await loadRun(db, run.runId))?.stepIndex).toBe(0);
-    const wallet = await loadMeta(db);
-    expect(wallet?.meta.lastStepAt).toBe(NOW);
-    expect(wallet?.meta.maxSeenAt).toBe(NOW);
-  });
-
-  it('does not let a pre-clock run claim a giant backlog on first open', async () => {
-    const meta = { ...emptyMeta(), lastStepAt: 0, maxSeenAt: 0 };
-    const run = newRun(24, 1, 20, meta);
-    await putRun(run, meta, 50);
-    const report = await applyCatchUp(db, { ...OPTIONS, policy: POLICY }, inProcess);
-    expect(report.steps).toBe(0);
-    expect((await loadMeta(db))?.meta.lastStepAt).toBe(NOW);
   });
 });
 
@@ -584,32 +479,6 @@ describe('meta progression actions', () => {
     expect(out.ok).toBe(false);
     expect(out.reason).toContain('Embers');
     expect((await loadMeta(db))?.meta.embers).toBe(3);
-  });
-
-  it('equips only unlocked, unique Habit Cards', async () => {
-    await addCompanion();
-    await addReward({ xp: 1100, type: 'milestone' }); // level 5
-    await putMeta(emptyMeta(), 10, 0);
-    const out = await setHabitCards(db, {
-      ...OPTIONS,
-      cardIds: ['mark-hunter', 'finisher'],
-    });
-    expect(out.ok).toBe(true);
-    expect(out.wallet.meta.cards).toEqual(['mark-hunter', 'finisher']);
-    expect((await loadMeta(db))?.meta.cards).toEqual(['mark-hunter', 'finisher']);
-
-    const duplicate = await setHabitCards(db, {
-      ...OPTIONS,
-      cardIds: ['mark-hunter', 'mark-hunter'],
-    });
-    expect(duplicate.ok).toBe(false);
-    const locked = await setHabitCards(db, { ...OPTIONS, cardIds: ['ember-first'] });
-    expect(locked.ok).toBe(false);
-    const tooMany = await setHabitCards(db, {
-      ...OPTIONS,
-      cardIds: ['rainy-day', 'opening-move', 'steady-hand', 'finisher'],
-    });
-    expect(tooMany.ok).toBe(false);
   });
 
   it('unlocks Realm buildings only from real budgeting milestones', async () => {

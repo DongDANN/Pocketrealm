@@ -66,10 +66,8 @@ test.describe('game goldens', () => {
 
   const screens: [string, string, string][] = [
     ['/delve', 'delve-run', 'The Delve'],
-    ['/delve/policy', 'delve-policy', 'Autopilot'],
     ['/delve/forge', 'delve-forge', 'Forge'],
     ['/delve/workshop', 'delve-workshop', 'Workshop'],
-    ['/delve/cards', 'delve-cards', 'Habit Cards'],
     ['/delve/codex', 'delve-codex', 'Codex'],
     ['/delve/history', 'delve-history', 'Run history'],
     ['/quests', 'quests', 'Quests'],
