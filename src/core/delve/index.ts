@@ -12,6 +12,7 @@ export * from './offers';
 export * from './materials';
 export * from './capsules';
 export * from './levels';
+export * from './moveset';
 export * from './engine';
 export * from './workshop';
 export * from './buildings';

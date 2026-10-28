@@ -1813,3 +1813,72 @@ nothing else could play the run; this gate proves a player can.
   modifier is owed by 7c-3b before any screen quotes it. Whether 5/15/40/90 and one Dust per ten swings
   is the right curve — and whether +32% at the end of a skill's whole life is worth the run count it
   takes to get there — is a 7f question with the persona pacing in it.
+
+### Gate 7c-4 — Four slots behind a know list the companion grows into (2026-10-28)
+
+- **What this gate is.** §7 D.2: the collection gets its two gates. A skill can only be swung if it is
+  equipped, equipping requires knowing, and knowing is capped by the companion's level (1–4 knows 6,
+  5–9 knows 10, 10–19 knows 16, 20–34 knows 24, 35+ knows 40) with four slots on top of that.
+  `src/core/delve/moveset.ts` is new and owns both gates plus the snapshot the run carries; `combat.ts`
+  now resolves a fight from that snapshot instead of from the build's fixed two skills.
+- **The ceiling is the progression, and it is a ceiling on _knowing_, not on holding.** This is the
+  Pokémon-style gate §7 D.2 asks for: a Mythic a level-3 companion cannot hold is a prize not yet
+  carried rather than a purchase, and the cap is what makes 60 entries a progression instead of a
+  shopping list. Forgetting is free and never destroys the entry, its Dust level or its lifetime, so the
+  ceiling is a choice about what to carry and not a tax — which is why re-learning costs a slot and
+  nothing else.
+- **Two readings the spec leaves open, settled here.** The 22 Commons are free to _learn_, not already
+  known: 7c-2 took them out of the capsule pool so no draw pays a dud, and a level-1 cap of 6 cannot
+  hold all 22 — so "free" means they cost a know slot and no capsule, while the other 38 need a capsule
+  to have handed one over first. And a build's own skills spend no know slot: they are its identity,
+  like its stat profile. Charging a slot for them would make choosing Warden over Spark a progression
+  loss, which §2 invariant 5 forbids in anything but name.
+- **A run fights with the list it started with, and only that list.** §7 D.2 says respec is free
+  _between runs_, and that phrasing is also what keeps §2 invariant 6 intact: `RunState.moveset` and
+  `RunState.passiveId` are written at run start, so a paused room replays against the moveset it was
+  opened with even if the book changes while it waits. The controller therefore refuses all six moveset
+  actions while a run is stored — "Finish or retreat your current run before changing the moveset." —
+  rather than writing a list the current fight will never read. The turn panel needed no change: it
+  already renders `menu.skills`, which now comes from the run.
+- **The two new keys are optional and written _only when they differ_,** so a book that has never
+  equipped anything produces a byte-identical run to the one it produced before the collection existed.
+  That is why this gate needs no schema bump, no `withV3Defaults` entry and no new migration field list:
+  absent reads as "the build's own", which is precisely what every stored run meant before it. It is
+  also why all five golden digests came back **unchanged** rather than re-recorded — `94a4734277595fe7`
+  / `3576928019daf46e` / `ead747a9c3dee2e7` / `9b13691c4c130d6e` / `bcc6e6e8a66ebb11`, the same values
+  7c-3 pinned, with the run-only and pre-ladder digests still matching too.
+- **Combat reads three things from the moveset and deliberately still reads the build for the rest.**
+  The four actives, the `startShield` passive that opens a fight, and `critBurn` now come from
+  `runMoveset(run)`; the build's stat profile (`profile.hpAdd` and friends) and its talent-tree node fx
+  stay where they were, because those _are_ the build and not its loadout. `openingShield` went from
+  scanning every build skill for a `startShield` to asking the one passive in play — equivalent for
+  every build, which ships one passive each, and honest for a run that swapped it.
+- **The Daily Challenge is on the right side of the snapshot by construction, and it is now tested.**
+  `newDailyRun` passes a sanitized `emptyMeta()` into `newRun`, so the fixed loadout the mode promises
+  cannot be reached by the book. That was an inheritance from 7b-4 rather than a decision made here, so
+  a test pins it: a book that has learned and equipped a catalogue skill and swapped its passive still
+  starts a Daily with neither key set.
+- **One real defect was caught before shipping, in `equipSkill`.** The first draft checked
+  `meta.equippedSkills` for "already equipped" and then wrote to a list seeded from the build's own two,
+  so equipping `warden-bastion` from an untouched book produced `[…, 'warden-bastion', 'warden-bastion']`
+  — the same id in two of four slots, and a name the panel would render twice. The check now runs
+  against the seeded list, which is both the fix and the honest message: a skill the build already
+  fights with reads as _already equipped_, not as a free second slot. Pinned by its own test.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 905/905 across 76 files**
+  (869/75 before, plus the 30-test moveset suite and six controller tests). `npm run sim:golden`
+  **verified all five digests unchanged** — see the paragraph above; this gate ships no arithmetic a
+  default book can reach, and the digests are the proof rather than a claim about intent.
+  `npm run test:e2e` **verified 67/67** in Chromium against the production build (5.8m) — unchanged from
+  7c-3, which is the point: no screen changed and no default book's fight did either.
+  `e2e/offline.spec.ts` stays parked and uncommitted.
+- **Not verified / still open:** the gates have no door. Nothing on screen offers learn, forget, equip
+  or unequip, and no screen prints the know cap or `meta.equippedPassive` — 7c-5 owns those screens, so
+  today the whole gate is reachable through the data API and through tests only. Two UI lines still
+  quote `build.skills` as the skill list (`src/ui/screens/Delve.tsx:801` and
+  `src/ui/screens/DelveForge.tsx:165`); both describe a
+  build, which is true, but neither is the run's moveset and 7c-5 has to say which is which. Whether 6
+  skills at level 1 is the right opening ceiling, and whether the four-slot list stays legible once a
+  player carries a Stun, a Shield and a Burn in the same panel, are 7f questions with the pacing tests
+  in it. Of the 60 catalogue entries, only the ones the resolver can honour are swingable today, so the
+  7c-3b LV5 modifiers stay withheld.

@@ -11,6 +11,7 @@ import { addDays } from '../src/core/dates';
 import { NO_SIGNALS, NOW, TODAY } from './delve-helpers';
 import {
   HEAT_MAX,
+  FREE_SKILL_IDS,
   builtinDecider,
   emptyMeta,
   newRun,
@@ -25,14 +26,20 @@ import type { RewardEvent } from '../src/core/types';
 import type { PocketDb } from '../src/data/db';
 import {
   chooseDelve,
+  clearRealmPassive,
   craftCapsuleAction,
   dismissCapsuleRevealAction,
+  equipRealmPassive,
+  equipRealmSkill,
+  forgetRealmSkill,
+  learnRealmSkill,
   levelUpRealmSkill,
   listDelveHistory,
   loadBuildingMilestones,
   loadDelveSnapshot,
   loadDelveSignals,
   normalizeMeta,
+  unequipRealmSkill,
   openCapsuleAction,
   purchaseForge,
   retreatDelve,
@@ -703,6 +710,127 @@ describe('Skill Dust and the level ladder', () => {
     expect(out.ok).toBe(false);
     expect(out.reason).toContain('does not hold');
     expect((await loadMeta(db))?.meta.dust).toBe(90);
+  });
+});
+
+describe('the moveset and the know cap', () => {
+  const CINDER = 'skill-cinder-cut';
+  const CELLAR = 'skill-deep-cellar';
+  const WARDEN_ACTIVES = ['warden-bastion', 'warden-shieldbash'];
+
+  /** A book that has already been handed this capsule prize, at the level the test needs. */
+  function book(ids: string[]): DelveMeta {
+    return {
+      ...emptyMeta(),
+      knownSkills: ids,
+      skills: { [CELLAR]: { level: 1, uses: 0, lifetime: 0 } },
+    };
+  }
+
+  it('writes a learned skill and an equipped slot to the book, and reads them back', async () => {
+    await addCompanion();
+    await putMeta(book([]), 50, 0);
+    const learned = await learnRealmSkill(db, { ...OPTIONS, skillId: CINDER });
+    expect(learned.ok, learned.reason).toBe(true);
+    expect(learned.wallet.meta.knownSkills).toEqual([CINDER]);
+
+    const equipped = await equipRealmSkill(db, { ...OPTIONS, skillId: CINDER, buildId: 'warden' });
+    expect(equipped.ok, equipped.reason).toBe(true);
+    expect(equipped.wallet.meta.equippedSkills).toEqual([...WARDEN_ACTIVES, CINDER]);
+
+    const passive = await equipRealmPassive(db, { ...OPTIONS, skillId: CELLAR, buildId: 'warden' });
+    expect(passive.ok, passive.reason).toBe(false);
+    expect(passive.reason).toContain('not known yet');
+
+    const cellar = await learnRealmSkill(db, { ...OPTIONS, skillId: CELLAR });
+    expect(cellar.ok, cellar.reason).toBe(true);
+    const swapped = await equipRealmPassive(db, { ...OPTIONS, skillId: CELLAR, buildId: 'warden' });
+    expect(swapped.ok, swapped.reason).toBe(true);
+    expect(swapped.wallet.meta.equippedPassive).toBe(CELLAR);
+
+    const stored = await loadMeta(db);
+    expect(stored?.meta.knownSkills).toEqual([CINDER, CELLAR]);
+    expect(stored?.meta.equippedSkills).toEqual([...WARDEN_ACTIVES, CINDER]);
+    expect(stored?.meta.equippedPassive).toBe(CELLAR);
+
+    const cleared = await clearRealmPassive(db, OPTIONS);
+    expect(cleared.ok).toBe(true);
+    expect((await loadMeta(db))?.meta.equippedPassive).toBeUndefined();
+  });
+
+  it('drops a learned skill back to the shelf without spending anything', async () => {
+    await addCompanion();
+    await putMeta(book([CINDER]), 50, 0);
+    const before = (await loadMeta(db))!.meta;
+    const out = await forgetRealmSkill(db, { ...OPTIONS, skillId: CINDER });
+    expect(out.ok, out.reason).toBe(true);
+    expect(out.wallet.meta.knownSkills).toEqual([]);
+    expect(out.wallet.meta.dust).toBe(before.dust);
+    expect(out.wallet.meta.capsuleIndex).toBe(before.capsuleIndex);
+  });
+
+  it('charges the know cap from the ledger level, not from a number the screen chose', async () => {
+    await addCompanion();
+    await putMeta(book([]), 50, 0);
+    for (const id of FREE_SKILL_IDS.slice(0, 6)) {
+      const out = await learnRealmSkill(db, { ...OPTIONS, skillId: id });
+      expect(out.ok, `${id}: ${out.reason}`).toBe(true);
+    }
+    const seventh = await learnRealmSkill(db, { ...OPTIONS, skillId: FREE_SKILL_IDS[6]! });
+    expect(seventh.ok).toBe(false);
+    expect(seventh.reason).toContain('knows 6 skills');
+  });
+
+  it('refuses every moveset change while a run is in progress and writes nothing', async () => {
+    const started = await startReadyRun();
+    expect(started.ok, started.reason).toBe(true);
+    const before = (await loadMeta(db))!.meta;
+
+    const attempts = await Promise.all([
+      learnRealmSkill(db, { ...OPTIONS, skillId: CINDER }),
+      forgetRealmSkill(db, { ...OPTIONS, skillId: CINDER }),
+      equipRealmSkill(db, { ...OPTIONS, skillId: CINDER, buildId: 'warden' }),
+      unequipRealmSkill(db, { ...OPTIONS, skillId: CINDER, buildId: 'warden' }),
+      equipRealmPassive(db, { ...OPTIONS, skillId: CELLAR, buildId: 'warden' }),
+      clearRealmPassive(db, OPTIONS),
+    ]);
+    for (const out of attempts) {
+      expect(out.ok).toBe(false);
+      expect(out.reason).toBe('Finish or retreat your current run before changing the moveset.');
+    }
+    const stored = await loadMeta(db);
+    expect(stored?.meta.knownSkills).toEqual(before.knownSkills);
+    expect(stored?.meta.equippedSkills).toEqual(before.equippedSkills);
+    expect(stored?.meta.equippedPassive).toBeUndefined();
+  });
+
+  it('lets the same change through once the run is over, for nothing', async () => {
+    const started = await startReadyRun();
+    expect(started.ok).toBe(true);
+    const blocked = await learnRealmSkill(db, { ...OPTIONS, skillId: CINDER });
+    expect(blocked.ok).toBe(false);
+
+    const retreat = await retreatDelve(db, OPTIONS);
+    expect(retreat.ok).toBe(true);
+    const after = await learnRealmSkill(db, { ...OPTIONS, skillId: CINDER });
+    expect(after.ok, after.reason).toBe(true);
+    expect(after.wallet.meta.knownSkills).toContain(CINDER);
+  });
+
+  it('starts a run that carries the equipped list, so the fight cannot read a newer book', async () => {
+    await addCompanion();
+    await addReward({ xp: 4000, type: 'milestone' });
+    await putMeta(book([]), 60, 0);
+    await learnRealmSkill(db, { ...OPTIONS, skillId: CINDER });
+    const equipped = await equipRealmSkill(db, { ...OPTIONS, skillId: CINDER, buildId: 'warden' });
+    expect(equipped.ok).toBe(true);
+
+    const started = await startDelve(db, { ...OPTIONS, hollow: 1 });
+    expect(started.ok, started.reason).toBe(true);
+    expect(started.run).not.toBeNull();
+    if (!started.run) return;
+    expect(started.run.moveset).toEqual([...WARDEN_ACTIVES, CINDER]);
+    expect(started.run.passiveId).toBeUndefined();
   });
 });
 

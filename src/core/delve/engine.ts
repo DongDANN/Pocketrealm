@@ -17,6 +17,7 @@ import { anyBoonById, fusionById, fusionRecipesFor, type FusionDef } from './dat
 import { forgeTotals } from './forge';
 import { generateFloor, HOLLOW_FLOORS } from './map';
 import { settleSkillUses, skillLevels, usesFromLog } from './levels';
+import { movesetSnapshot } from './moveset';
 import { computeBuffs } from './signals';
 import { lookaheadRows, masteryMult } from './buildings';
 import { gainMastery } from './mastery';
@@ -156,6 +157,7 @@ export function newRun(
     offerStreak: 0,
     relicFlags: {},
     consumables: (meta.equippedConsumables ?? []).slice(0, 3),
+    ...movesetSnapshot(meta, build.id),
     consumablesUsed: {},
     materials: { ore: 0, herb: 0, echo: 0 },
     buildings: { ...(meta.buildingLevels ?? {}) },

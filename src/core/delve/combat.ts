@@ -3,8 +3,9 @@
  * variance and LUCK-driven crits. Bosses telegraph their mechanic one round ahead. Combat
  * terminates at a hard 40-round cap, which counts as a safe retreat with no loss.
  *
- * Gate 1.6 layers: the selected build supplies two active skills (energy, cooldowns) and a
- * passive; statuses (burn/poison/chill/stun/mark/regen) tick every round and clear after combat;
+ * Gate 1.6 layers: the moveset the run carries supplies up to four active skills (energy, cooldowns)
+ * and one passive — its own, or the build's when it names nothing (§7 D.2); statuses
+ * (burn/poison/chill/stun/mark/regen) tick every round and clear after combat;
  * skill attacks carry an element and hit ±25% weakness/resistance (weakness only once the codex
  * knows it, resistance always). Affixes (armored/swift/vampiric/splitting/enraged/thorned/
  * warded/frenzied) modify enemy stats and behavior; bosses enter harder phases at 66%/33% HP
@@ -23,6 +24,7 @@ import {
   type SkillDef,
 } from './data/builds';
 import { potencyMult } from './levels';
+import { runMoveset } from './moveset';
 import {
   ENRAGE_ATK_MULTIPLIER,
   ENRAGE_HP_PERCENT,
@@ -395,14 +397,12 @@ export interface ShieldPart {
   amount: number;
 }
 
-/** The Shield a fight opens with: the room's ward, then build passives, then an unspent Shield Charm. */
+/** The Shield a fight opens with: the room's ward, then the passive in play, then a Shield Charm. */
 export function openingShield(run: RunState, modifiers: CombatModifiers): ShieldPart[] {
-  const build = buildById(run.buildId) ?? buildById(DEFAULT_BUILD)!;
   const parts: ShieldPart[] = [{ label: '', amount: modifiers.roomShield }];
-  for (const s of build.skills) {
-    if (s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'startShield') {
-      parts.push({ label: `${s.name} grants ${s.fx.amount} Shield.`, amount: s.fx.amount });
-    }
+  const s = runMoveset(run).passive;
+  if (s && s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'startShield') {
+    parts.push({ label: `${s.name} grants ${s.fx.amount} Shield.`, amount: s.fx.amount });
   }
   if (run.consumables.includes('shield-charm') && !run.consumablesUsed['shield-charm']) {
     parts.push({ label: 'Shield Charm: +8 Shield.', amount: 8 });
@@ -522,11 +522,12 @@ export function runCombat(
   };
   const studied = (id: string): boolean => studiedBosses.includes(id);
 
-  const build = buildById(run.buildId) ?? buildById(DEFAULT_BUILD)!;
-  const actives = build.skills.filter((s): s is SkillDef => s.kind === 'active');
-  const critBurn = build.skills.find(
-    (s) => s.kind === 'passive' && isPassiveFx(s.fx) && s.fx.kind === 'critBurn',
-  );
+  const moveset = runMoveset(run);
+  const actives = moveset.actives;
+  const critBurn =
+    moveset.passive && isPassiveFx(moveset.passive.fx) && moveset.passive.fx.kind === 'critBurn'
+      ? moveset.passive
+      : undefined;
 
   const base = companionBase(run.companionLevel);
   const defence = openingDefence(run, modifiers);

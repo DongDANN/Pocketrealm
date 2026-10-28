@@ -20,15 +20,22 @@ import {
   buildingMilestones,
   buyForgeNode,
   buyTreeNode,
+  clearPassive,
   craftCapsule,
   craftConsumable,
+  DEFAULT_BUILD,
   dismissCapsuleReveal,
   emptyMeta,
+  EQUIP_SLOTS,
   equipConsumable,
+  equipPassive,
+  equipSkill,
   finishDailyRun,
+  forgetSkill,
   heatUnlocked,
   hollowUnlocked,
   isCapsuleCeiling,
+  learnSkill,
   levelUpSkill,
   newDailyRun,
   newRun,
@@ -41,6 +48,7 @@ import {
   skillById,
   stepRun,
   unequipConsumable,
+  unequipSkill,
   unlockBuilding,
   upgradeBuilding,
   type BudgetSignals,
@@ -52,6 +60,7 @@ import {
   type HollowId,
   type Materials,
   type MilestoneInput,
+  type MovesetChange,
   type RunResult,
   type RunState,
   type StepContext,
@@ -246,7 +255,8 @@ export function normalizeMeta(raw?: unknown): DelveMeta {
     lastStepAt: count(m.lastStepAt),
     skills: skillStates(m.skills),
     knownSkills: uniqueText(m.knownSkills),
-    equippedSkills: uniqueText(m.equippedSkills).slice(0, 4),
+    equippedSkills: uniqueText(m.equippedSkills).slice(0, EQUIP_SLOTS),
+    equippedPassive: text(m.equippedPassive) || undefined,
     dust: count(m.dust),
     capsules: numberRecord(m.capsules),
     capsuleIndex: count(m.capsuleIndex),
@@ -945,9 +955,19 @@ async function mutateMeta(
   const sync = await syncDelveWallet(db, options);
   const out = change(sync.meta);
   if (!out.ok) return { ok: false, reason: out.reason, wallet: sync };
-  const capacity = oilCapacity(out.meta, sync.signals.reviewedLast7d);
+  return writeMeta(db, options, sync, out.meta);
+}
+
+/** One transaction for the book alone: no run row is read or written here. */
+async function writeMeta(
+  db: PocketDb,
+  options: DelveActionOptions,
+  sync: DelveSync,
+  meta: DelveMeta,
+): Promise<MetaActionResult> {
+  const capacity = oilCapacity(meta, sync.signals.reviewedLast7d);
   const saved = await saveMetaWallet(db, {
-    meta: out.meta,
+    meta,
     oil: Math.min(sync.oil, capacity),
     oilCapacity: capacity,
     oilGranted: sync.oilGranted,
@@ -1076,6 +1096,90 @@ export function levelUpRealmSkill(
     const out = levelUpSkill(meta, options.skillId);
     return { ok: out.ok, meta: out.meta, reason: out.reason };
   });
+}
+
+export interface MovesetOptions extends DelveActionOptions {
+  /** Which build the slots are read against. Defaults to the build a run starts on. */
+  buildId?: string;
+}
+
+export interface SkillMovesetOptions extends MovesetOptions {
+  skillId: string;
+}
+
+/**
+ * The four slots and the know list are campfire decisions (§7 D.2): "respec is free between runs" is
+ * also the rule that keeps a stored run honest, because combat resolves from the moveset snapshotted
+ * at run start. So the book only changes while no run is waiting for its next order, and the refusal
+ * says so instead of writing a list the current fight will never read.
+ */
+async function mutateMoveset(
+  db: PocketDb,
+  options: MovesetOptions,
+  change: (meta: DelveMeta, companionLevel: number, buildId: string) => MovesetChange,
+): Promise<MetaActionResult> {
+  const sync = await syncDelveWallet(db, options);
+  const active = await loadActiveRun(db);
+  if (active) {
+    return {
+      ok: false,
+      reason: 'Finish or retreat your current run before changing the moveset.',
+      wallet: sync,
+    };
+  }
+  const level = await companionLevelOf(db);
+  const out = change(sync.meta, level, options.buildId ?? DEFAULT_BUILD);
+  if (!out.ok) return { ok: false, reason: out.reason, wallet: sync };
+  return writeMeta(db, options, sync, out.meta);
+}
+
+/** Spend one of the know slots this companion's level allows (§7 D.2). */
+export function learnRealmSkill(
+  db: PocketDb,
+  options: SkillMovesetOptions,
+): Promise<MetaActionResult> {
+  return mutateMoveset(db, options, (meta, level) => learnSkill(meta, options.skillId, level));
+}
+
+/** Free a know slot. The collection entry, its Dust level and its lifetime all survive. */
+export function forgetRealmSkill(
+  db: PocketDb,
+  options: SkillMovesetOptions,
+): Promise<MetaActionResult> {
+  return mutateMoveset(db, options, (meta) => forgetSkill(meta, options.skillId));
+}
+
+export function equipRealmSkill(
+  db: PocketDb,
+  options: SkillMovesetOptions,
+): Promise<MetaActionResult> {
+  return mutateMoveset(db, options, (meta, _level, buildId) =>
+    equipSkill(meta, options.skillId, buildId),
+  );
+}
+
+export function unequipRealmSkill(
+  db: PocketDb,
+  options: SkillMovesetOptions,
+): Promise<MetaActionResult> {
+  return mutateMoveset(db, options, (meta) => unequipSkill(meta, options.skillId));
+}
+
+export function equipRealmPassive(
+  db: PocketDb,
+  options: SkillMovesetOptions,
+): Promise<MetaActionResult> {
+  return mutateMoveset(db, options, (meta, _level, buildId) =>
+    equipPassive(meta, options.skillId, buildId),
+  );
+}
+
+/** Back to the build's own passive — the free respec §7 D.2 promises. */
+export function clearRealmPassive(
+  db: PocketDb,
+  options: MovesetOptions,
+): Promise<MetaActionResult> {
+  return mutateMoveset(db, options, (meta) => clearPassive(meta));
 }
 
 export interface EquipOptions extends DelveActionOptions {

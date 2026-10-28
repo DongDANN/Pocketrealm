@@ -192,6 +192,15 @@ export interface RunState {
   relicFlags: Record<string, boolean>;
   /** Consumables equipped for this run (snapshot of the meta loadout, max 3). */
   consumables: string[];
+  /**
+   * The four actives this run fights with, snapshotted from the book at run start (§7 D.2). Absent
+   * reads as the build's own two, so a book that has never equipped anything stores exactly what it
+   * stored before the collection existed — and a paused room replays against the list it started with
+   * even if the book changes while it waits.
+   */
+  moveset?: string[];
+  /** The passive snapshotted the same way; absent reads as the build's own. */
+  passiveId?: string;
   /** Consumables already spent this run (each triggers at most once). */
   consumablesUsed: Record<string, boolean>;
   /** Materials gathered this run (banked into the meta when the run ends). */
@@ -285,6 +294,11 @@ export interface DelveMeta {
   knownSkills: string[];
   /** The four slots the companion fights with. Respec is free between runs. */
   equippedSkills: string[];
+  /**
+   * The passive slot (§7 D.2 keeps the action bar at four, so a collected passive takes its own).
+   * Absent reads as the build's own passive, which is the fight every book had before the collection.
+   */
+  equippedPassive?: string;
   /** Skill Dust: the single progression currency, earned by use and by duplicates. */
   dust: number;
   /** Held capsules, counted per tier ceiling — see §7 D.3. */
