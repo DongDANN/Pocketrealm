@@ -49,7 +49,12 @@ export const RARITY_WEIGHT: Record<Rarity, number> = {
   uncommon: 25,
   rare: 12,
   epic: 3,
+  // The tier belongs to skills, not boons. Zero keeps it undrawable even if a boon is mislabelled.
+  mythic: 0,
 };
+
+/** The five tags, in the order the codex and the relevance pity layer both want them. */
+export const BOON_TAGS: readonly BoonTag[] = ['guard', 'fury', 'fortune', 'vigor', 'thrift'];
 
 const boon = (
   id: string,

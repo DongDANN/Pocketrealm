@@ -11,7 +11,11 @@ import type { Element } from './data/elements';
 
 export type HollowId = 1 | 2 | 3;
 export type BoonTag = 'guard' | 'fury' | 'fortune' | 'vigor' | 'thrift';
-export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic';
+/**
+ * `mythic` is the top of the skill catalogue (DELVE_REDESIGN §7 D.1). Boons and relics stop at
+ * `epic`, so nothing in the offer pool ever reads the fifth tier.
+ */
+export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'mythic';
 
 export type RoomKind = 'skirmish' | 'elite' | 'treasure' | 'rest' | 'shop' | 'event' | 'boss';
 

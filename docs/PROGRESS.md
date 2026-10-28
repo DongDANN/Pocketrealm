@@ -1615,3 +1615,56 @@ nothing else could play the run; this gate proves a player can.
   rather than legible. Item orders stay unimplemented, so the panel's Item group is only proven to
   refuse. Whether any of this is usable with a thumb on a real phone is `docs/MANUAL_TEST.md` §10 and
   has not been run.
+
+### Gate 7c-1 — Sixty skills, written before anything can hold one (2026-10-28)
+
+- **What this gate is.** `docs/DELVE_REDESIGN.md` §7 opens the collection: 60 skills, capsules, Skill
+  Dust, levels, a four-slot moveset, a Codex tab. 7c-1 is the bottom of that stack — the catalogue
+  itself — and it ships as data only. Nothing reads it yet: no capsule draws from it, no slot equips
+  from it, no screen lists it. That is deliberate, because the sixty entries have to be settled before
+  the pity layers and the dust ladder can be pointed at real counts.
+- **`src/core/delve/data/skills.ts`** is the new file: 60 entries in §7 D.1's tier counts (22 common,
+  16 uncommon, 12 rare, 7 epic, 3 mythic), twelve per boon tag, grouped by tag so the tier vector is
+  readable rather than counted after the fact. Each entry reuses the existing `SkillDef` shape from
+  `data/builds.ts:45` plus two collection fields — `rarity` and `tag` — and a `level5` line, which is
+  §7 D.6's top-of-ladder modifier and stays prose until 7c-3 gives it arithmetic. The list is grouped
+  by tag with its tier written next to each entry, and the file has no imports with behaviour in them.
+- **The fifth tier.** `Rarity` (`src/core/delve/types.ts:18`) gains `'mythic'`, which §7 D.1 asks for
+  and `src/art/palette.ts:135` already has a colour ramp for, so the tier is free at the pixel level.
+  Boons and relics stop at `epic`: `RARITY_WEIGHT` carries `mythic: 0` (`data/boons.ts:53`) so the tier
+  is undrawable even if a boon were mislabelled, and `RARITY_UP` keeps `epic` terminal with
+  `mythic: 'mythic'` (`offers.ts:35`). Inkwell boons still cannot reach the top tier.
+- **`BOON_TAGS` is now a real export** (`data/boons.ts:57`) instead of a literal repeated inside
+  `offers.ts`. The catalogue validates against it and 7c-2's relevance pity layer will read it too.
+- **The validator is the authoring contract** — `tests/delve-skills-catalogue.test.ts`, twelve tests.
+  It pins the count, the per-tier counts, id uniqueness and the id-from-name rule, one legal tag per
+  skill with at least six per tag (one tag carrying the catalogue would make the pity layer a
+  formality), energy/cooldown/power/element on every active, `level5` on all sixty, sixty distinct
+  effect strings with no filler, and a mythic average power above 1.3× the common average so the pity
+  counter is chasing something.
+- **Two of those tests exist because the first draft lied.** The vocabulary tests read the status and
+  element tables rather than a hand-written list, and the passive test asserts that a `startShield`
+  passive writes the word "shield" and a `critBurn` one writes the word for fire: four of the six
+  passives promised braces, dodges and refunds that the resolver has no field for. The same class of
+  defect ran through the actives, so a further test forbids the two things `combat.ts` cannot do at all
+  — hitting more than one target, and giving energy back — and twenty-four effect strings (four
+  passives, twenty actives) were rewritten to match the `fx` that actually backs them. This is not copy
+  polish: the turn panel prints the effect line as the thing a player spends energy against, and since
+  7b-7 the e2e hand reads the screen rather than the engine, so a promise the resolver cannot keep is a
+  UI lie a test can now catch.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean; `npm run
+format:check` **verified** clean; `npx vitest run` **verified 796/796 across 73 files** (784/72
+  before, plus this suite). `npm run sim:golden` prints the same five digests as 7b-7 —
+  `837106532b87b6aa`, `7fbf913c7da7c523`, `317ae9b8898d8b8b`, `5491625f617eb6e9`, `fd1fa46095a964c5` —
+  which is the check that matters here: a catalogue nothing reads yet must not move a single damage
+  number. `npm run test:e2e` **verified 67/67** in Chromium against the production build (6.6m),
+  including the hand-played run and the turn-panel golden recorded at 7b-7 — the golden still matching
+  is the evidence that this gate changed nothing a player can see. `e2e/offline.spec.ts` stays parked
+  and uncommitted; its four tests passed anyway.
+- **Not verified / still open:** nothing consumes the catalogue yet, so every entry is proven only as
+  data — no capsule has drawn one, no slot has equipped one, and no player has seen one on a screen. The
+  moveset the turn panel offers still comes from the three builds in `data/builds.ts`. The `level5`
+  lines are authored prose with no arithmetic behind them until 7c-3, and the power ladder is authored
+  rather than simulated: whether a Mythic is actually worth the pity is a 7f question with 7c's economy
+  in it. Chromium was not re-run for this gate beyond the production build, because no product code
+  path changed — see the 7b-7 entry for the browser evidence that stands.

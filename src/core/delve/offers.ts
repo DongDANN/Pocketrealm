@@ -32,6 +32,7 @@ const RARITY_UP: Record<Rarity, Rarity> = {
   uncommon: 'rare',
   rare: 'epic',
   epic: 'epic',
+  mythic: 'mythic',
 };
 
 function effectiveRarity(run: RunState, b: BoonLike): Rarity {
