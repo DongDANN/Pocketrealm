@@ -49,7 +49,7 @@ import {
 } from '../src/core/delve';
 import type { SkillDef } from '../src/core/delve/data/builds';
 import { SKILLS, level5FxOf, type CatalogueSkill } from '../src/core/delve/data/skills';
-import { mkCtx, NO_SIGNALS, singleRowRun } from './delve-helpers';
+import { mkCtx, NEUTRAL_RULE, NO_SIGNALS, singleRowRun } from './delve-helpers';
 
 const byId = (id: string): CatalogueSkill => SKILLS.find((s) => s.id === id)!;
 /** One skill per rung kind, each cheap enough to come ready inside a five-tollbug room. */
@@ -80,7 +80,7 @@ function held(level: number, ...ids: string[]): DelveMeta {
 
 /** A room one blow cannot finish, so the swing being read is the swing the hand ordered. */
 function roomFor(over: Partial<RunState> = {}): RunState {
-  const base = singleRowRun('skirmish', over);
+  const base = singleRowRun('skirmish', { floorRule: NEUTRAL_RULE, ...over });
   const cell = base.floorPlan.rows[0]![0]!;
   return {
     ...base,

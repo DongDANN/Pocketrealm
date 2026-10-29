@@ -22,12 +22,13 @@ import {
   type TurnDecider,
   type TurnOrder,
 } from '../src/core/delve';
+import { NEUTRAL_RULE } from './delve-helpers';
 
 const basic: TurnOrder = { skillId: null, targetIndex: 0, guard: false };
 
-/** A floor-1 skirmish against the Warden's default build. */
+/** A floor-1 skirmish against the Warden's default build, on a floor whose rule touches nothing. */
 function fight(decide: TurnDecider, enemies: string[] = ['tollbug']): CombatResult {
-  const run = newRun(7, 1, 1, emptyMeta());
+  const run = { ...newRun(7, 1, 1, emptyMeta()), floorRule: NEUTRAL_RULE };
   const modifiers = computeModifiers(run, {}, { wardHp: 0, luckBonus: 0 });
   return runCombat(run, { kind: 'skirmish', enemies }, modifiers, 1, [], [], {}, decide);
 }

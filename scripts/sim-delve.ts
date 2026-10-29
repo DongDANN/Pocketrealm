@@ -4,9 +4,11 @@
  * Personas: Trickle (free oil only), Casual (~3 logs/day), Habit (~6 logs + check-in +
  * weekly review), Optimizer (max oil every day). Oil buys a run, so a persona's budget decides how
  * often it descends. Each descent is played by a deterministic headless player: rooms are answered
- * by a fixed route preference, fights by the built-in decider. Personas spend Embers on a fixed
- * Forge priority. Prints runs/day, floors cleared, Embers/day, time to clear each Hollow, and faint
- * rates — the §6.10 tuning targets.
+ * by a fixed route preference, fights by the built-in decider read through the priced turn menu, so
+ * the model braces the way the battle screen teaches (`personaOrder`). Personas spend Embers on a
+ * fixed Forge priority. Prints runs/day, floors cleared, Embers banked per day, time to clear each
+ * Hollow — counted over every seed, so a seed that never clears is visible rather than averaged away —
+ * and faint rates: the §6.10 tuning targets.
  *
  * Usage: npm run sim:delve [-- --days 60] [--persona trickle|casual|habit|optimizer|all]
  */
@@ -34,6 +36,7 @@ import {
   resolveChoice,
   RUN_COST,
   stepRun,
+  turnMenu,
   unlockBuilding,
   upgradeBuilding,
   type BudgetSignals,
@@ -43,6 +46,7 @@ import {
   type RunState,
   type StepContext,
   type StepOutcome,
+  type TurnOrder,
 } from '../src/core/delve';
 import { levelForXp } from '../src/core/rewards';
 
@@ -139,8 +143,14 @@ function optionCost(label: string): number {
 }
 
 /**
- * The headless player's answer to any pending choice. A simulated player only retreats from a rest
- * room when its HP is low; the Breaker never retreats, so the balance sweep sees every fight.
+ * The headless player's answer to any pending choice.
+ *
+ * A rest is the cheapest thing in the Hollow — it heals for free — so the model takes it whenever it
+ * heals, and only declines when the floor rule has made it a no-op (`This floor does not heal`) and the
+ * descent has already spent the companion down to a single blow. That is the play a person makes; the
+ * old rule retreated at 35% HP whatever the room offered, which turned cautious personas into runs that
+ * banked nothing and never cleared a floor. A player at full breath who is offered the §9 promise takes
+ * it instead of a heal they do not need.
  */
 function chooseOption(run: RunState, route: RouteId, allowRetreat: boolean): string {
   const choice = run.pendingChoice!;
@@ -154,8 +164,14 @@ function chooseOption(run: RunState, route: RouteId, allowRetreat: boolean): str
     return ids[0]!;
   }
   if (choice.kind === 'rest') {
-    if (allowRetreat && hpPercent(run) <= 35) return 'retreat';
-    return ids.includes('rest') ? 'rest' : ids[0]!;
+    const rest = choice.options.find((o) => o.id === 'rest');
+    const heals = /^Heal\b/.test(rest?.detail ?? '');
+    if (!heals) {
+      if (allowRetreat && hpPercent(run) <= 25) return 'retreat';
+      return ids.includes('rest') ? 'rest' : ids[0]!;
+    }
+    if (hpPercent(run) >= 85 && ids.includes('skip')) return 'skip';
+    return 'rest';
   }
   if (choice.kind === 'shop') {
     const want = hpPercent(run) < 55 ? 'heal' : 'boon';
@@ -164,6 +180,44 @@ function chooseOption(run: RunState, route: RouteId, allowRetreat: boolean): str
     return ids.includes('leave') ? 'leave' : ids[0]!;
   }
   return ids.find((id) => id !== 'reroll') ?? ids[0]!;
+}
+
+/**
+ * The headless player's answer to one combat round: the built-in deck's action, overridden to brace
+ * when reading the intent strip makes the brace the better trade.
+ *
+ * `builtinDecider` never braces — it cannot see prices — so a persona fainted to blows a player would
+ * simply soften, and the pacing report measured a worse game than the one the battle screen teaches.
+ * The rule reads the same `turnMenu` the panel renders and is deliberately narrow, because a brace
+ * costs the swing that would otherwise shorten the fight: against an ordinary strike it pays back less
+ * than the extra round it hands the enemy. So it fires on the two rounds a person actually braces — the
+ * one where the unbraced blow kills and the braced one does not, and the one carrying a blow large
+ * enough to be the mechanic the strip warned about. Killing the last thing alive is always better.
+ *
+ * The goldens keep the unbraced `builtinDecider`, so this model of a player who reads the menu lives
+ * only in the sim and touches nothing the engine resolves with.
+ */
+export function personaOrder(
+  run: RunState,
+  meta: DelveMeta,
+  signals: BudgetSignals,
+  pause: CombatPause,
+): TurnOrder {
+  const order = builtinDecider(pause.state);
+  if (order.guard) return order;
+  const menu = turnMenu(run, meta, signals, pause);
+  const incoming = menu.guard.unbraced;
+  const held = menu.guard.braced;
+  if (incoming <= 0 || held >= incoming) return order;
+  const action =
+    order.skillId === null
+      ? menu.attack
+      : (menu.skills.find((s) => s.id === order.skillId) ?? menu.attack);
+  const price = action.targets.find((t) => t.targetIndex === order.targetIndex);
+  if (price && price.afterHp <= 0 && menu.targets.length === 1) return order;
+  const survives = incoming >= menu.hp && held < menu.hp;
+  const heavy = incoming - held >= Math.max(4, Math.round(menu.maxHp * 0.3));
+  return survives || heavy ? { ...order, guard: true, skillId: null } : order;
 }
 
 interface PlayTurn {
@@ -198,7 +252,10 @@ function playTurn(
       ended: out.ended,
     };
   }
-  const out = stepRun(run, { ...step, order: pause ? builtinDecider(pause.state) : undefined });
+  const out = stepRun(run, {
+    ...step,
+    order: pause ? personaOrder(run, meta, signals, pause) : undefined,
+  });
   return {
     run: out.run,
     meta: out.meta,
@@ -229,10 +286,15 @@ export interface PersonaStats {
   clears: number;
   faints: number;
   retreats: number;
+  /** Embers actually banked over the horizon. Spending does not hide income, which is the §6 metric. */
+  banked: number;
+  /** Embers still held at the end, after the Forge bought everything it could afford. */
   embers: number;
   totalFloors: number;
   firstClear: Partial<Record<1 | 2 | 3, number>>;
-  /** Runs that ended before the hollow's first clear (faint rate on first-clear attempts). */
+  /** The result of each seed's very first run of a Hollow — the SPEC 6.10 first-attempt measure. */
+  firstRun: Partial<Record<1 | 2 | 3, 'cleared' | 'fainted' | 'retreated'>>;
+  /** Runs that ended before the hollow's first clear (the pre-clear failure trail). */
   firstAttempts: Partial<Record<1 | 2 | 3, { faints: number; attempts: number }>>;
 }
 
@@ -241,15 +303,20 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
   let run: RunState | null = null;
   let oil = 0;
   let xp = 0;
+  // Income is what the bank took, not what the Forge left behind: autoBuy spends down to the next
+  // unaffordable node, so a final balance says more about prices than about Embers earned.
+  let balanceAfterBuy = 0;
   const stats: PersonaStats = {
     days,
     runs: 0,
     clears: 0,
     faints: 0,
     retreats: 0,
+    banked: 0,
     embers: 0,
     totalFloors: 0,
     firstClear: {},
+    firstRun: {},
     firstAttempts: {},
   };
   let now = 1_700_000_000_000;
@@ -323,6 +390,7 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
         } else if (run.result === 'fainted') stats.faints += 1;
         else stats.retreats += 1;
         const hollow = run.hollowId as 1 | 2 | 3;
+        if (stats.firstRun[hollow] === undefined) stats.firstRun[hollow] = run.result;
         if (stats.firstClear[hollow] === undefined) {
           const fa = stats.firstAttempts[hollow] ?? { faints: 0, attempts: 0 };
           fa.attempts += 1;
@@ -330,7 +398,9 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
           stats.firstAttempts[hollow] = fa;
         }
         stats.totalFloors += run.floor - 1 + (run.result === 'cleared' ? 1 : 0);
+        stats.banked += Math.max(0, meta.embers - balanceAfterBuy);
         meta = autoBuy(meta);
+        balanceAfterBuy = meta.embers;
         run = null;
         pause = null;
       }
@@ -341,25 +411,99 @@ export function runPersona(def: PersonaDef, days: number, userSeed: number): Per
   return stats;
 }
 
-function report(def: PersonaDef, s: PersonaStats): void {
+/**
+ * The averaged report for a seed sweep, with the seeds that never cleared kept honest: an average
+ * over the seeds that happened to clear hides the ones the game shut out, which is exactly the
+ * failure a pacing target exists to catch. `clearSeeds` counts the seeds behind each day figure.
+ */
+export interface AveragedStats extends PersonaStats {
+  seeds: number;
+  clearSeeds: Partial<Record<1 | 2 | 3, number>>;
+  /** Every seed's clear day, ascending — the spread the average alone would hide. */
+  clearDays: Partial<Record<1 | 2 | 3, number[]>>;
+  /** Seeds whose very first run of a Hollow fainted. */
+  firstFaints: Partial<Record<1 | 2 | 3, number>>;
+}
+
+export function averageStats(runs: readonly PersonaStats[]): AveragedStats {
+  const avg: AveragedStats = {
+    days: runs[0]?.days ?? 0,
+    runs: 0,
+    clears: 0,
+    faints: 0,
+    retreats: 0,
+    banked: 0,
+    embers: 0,
+    totalFloors: 0,
+    firstClear: {},
+    firstRun: {},
+    firstAttempts: {},
+    seeds: runs.length,
+    clearSeeds: {},
+    clearDays: {},
+    firstFaints: {},
+  };
+  for (const r of runs) {
+    avg.runs += r.runs;
+    avg.clears += r.clears;
+    avg.faints += r.faints;
+    avg.retreats += r.retreats;
+    avg.banked += r.banked;
+    avg.embers += r.embers;
+    avg.totalFloors += r.totalFloors;
+  }
+  const n = Math.max(1, runs.length);
+  avg.runs = Math.round(avg.runs / n);
+  avg.clears = Math.round(avg.clears / n);
+  avg.faints = Math.round(avg.faints / n);
+  avg.retreats = Math.round(avg.retreats / n);
+  avg.banked = Math.round(avg.banked / n);
+  avg.embers = Math.round(avg.embers / n);
+  for (const hollow of [1, 2, 3] as const) {
+    const days_ = runs
+      .map((r) => r.firstClear[hollow])
+      .filter((d): d is number => d !== undefined)
+      .sort((a, b) => a - b);
+    avg.clearSeeds[hollow] = days_.length;
+    avg.clearDays[hollow] = days_;
+    if (days_.length > 0)
+      avg.firstClear[hollow] = Math.round(days_.reduce((a, b) => a + b, 0) / days_.length);
+    avg.firstFaints[hollow] = runs.filter((r) => r.firstRun[hollow] === 'fainted').length;
+    const faints = runs.reduce((sum, r) => sum + (r.firstAttempts[hollow]?.faints ?? 0), 0);
+    const attempts = runs.reduce((sum, r) => sum + (r.firstAttempts[hollow]?.attempts ?? 0), 0);
+    if (attempts > 0) avg.firstAttempts[hollow] = { faints, attempts };
+  }
+  return avg;
+}
+
+function report(def: PersonaDef, s: AveragedStats): void {
   const runsPerDay = s.runs / s.days;
-  const embersPerDay = s.embers / s.days;
+  const bankedPerDay = s.banked / s.days;
   const faintRate = s.runs > 0 ? Math.round((s.faints / s.runs) * 100) : 0;
-  const h1 = s.firstClear[1] !== undefined ? `${s.firstClear[1]}d` : '—';
-  const h2 = s.firstClear[2] !== undefined ? `${s.firstClear[2]}d` : '—';
-  const h3 = s.firstClear[3] !== undefined ? `${s.firstClear[3]}d` : '—';
-  const attempt = (h: 1 | 2 | 3): string => {
-    const fa = s.firstAttempts[h];
-    if (!fa || fa.attempts === 0) return '—';
-    return `${Math.round((fa.faints / fa.attempts) * 100)}%`;
+  const day = (hollow: 1 | 2 | 3): string => {
+    const days = s.firstClear[hollow];
+    const spread = s.clearDays[hollow] ?? [];
+    const seedTag = `${spread.length}/${s.seeds}`;
+    const range =
+      spread.length > 1 && spread[0] !== spread[spread.length - 1]
+        ? `, ${spread[0]}–${spread[spread.length - 1]}`
+        : '';
+    return days !== undefined ? `${days}d (${seedTag}${range})` : `— (${seedTag})`;
+  };
+  const h1 = day(1);
+  const h2 = day(2);
+  const h3 = day(3);
+  const firstTry = (h: 1 | 2 | 3): string => {
+    const fainted = s.firstFaints[h] ?? 0;
+    return `${Math.round((fainted / Math.max(1, s.seeds)) * 100)}% (${fainted}/${s.seeds})`;
   };
   console.log(
     `${def.key.padEnd(9)} | runs ${s.runs.toString().padStart(3)} (${runsPerDay.toFixed(2)}/d) | clears ${String(s.clears).padStart(3)} | ` +
-      `faint ${String(s.faints).padStart(3)} (${faintRate}%) | retreat ${String(s.retreats).padStart(3)} | Embers ${String(s.embers).padStart(4)} (${embersPerDay.toFixed(1)}/d) | ` +
-      `H1 ${h1} H2 ${h2} H3 ${h3}`,
+      `faint ${String(s.faints).padStart(3)} (${faintRate}%) | retreat ${String(s.retreats).padStart(3)} | ` +
+      `Embers banked ${String(s.banked).padStart(5)} (${bankedPerDay.toFixed(1)}/d, held ${s.embers}) | H1 ${h1} H2 ${h2} H3 ${h3}`,
   );
   console.log(
-    `${''.padEnd(9)} | first-attempt faint rate: H1 ${attempt(1)}  H2 ${attempt(2)}  H3 ${attempt(3)}`,
+    `${''.padEnd(9)} | first-run faint: H1 ${firstTry(1)}  H2 ${firstTry(2)}  H3 ${firstTry(3)}`,
   );
 }
 
@@ -525,7 +669,7 @@ if (isCli) {
   const SEEDS = 5;
 
   console.log(
-    `sim:delve — ${days} simulated days, deterministic headless player (balanced route, retreat ≤35% HP), ${SEEDS} seeds averaged`,
+    `sim:delve — ${days} simulated days, deterministic headless player (balanced route, rests when the room heals, braces a killing or heavy blow), ${SEEDS} seeds averaged`,
   );
   console.log('');
 
@@ -541,41 +685,7 @@ if (isCli) {
     for (let s = 0; s < SEEDS; s++) {
       runs.push(runPersona(def, days, 0x5eed0000 + def.key.length * 0x1000 + s));
     }
-    const avg: PersonaStats = {
-      days,
-      runs: 0,
-      clears: 0,
-      faints: 0,
-      retreats: 0,
-      embers: 0,
-      totalFloors: 0,
-      firstClear: {},
-      firstAttempts: {},
-    };
-    for (const r of runs) {
-      avg.runs += r.runs;
-      avg.clears += r.clears;
-      avg.faints += r.faints;
-      avg.retreats += r.retreats;
-      avg.embers += r.embers;
-      avg.totalFloors += r.totalFloors;
-    }
-    avg.runs = Math.round(avg.runs / SEEDS);
-    avg.clears = Math.round(avg.clears / SEEDS);
-    avg.faints = Math.round(avg.faints / SEEDS);
-    avg.retreats = Math.round(avg.retreats / SEEDS);
-    avg.embers = Math.round(avg.embers / SEEDS);
-    for (const hollow of [1, 2, 3] as const) {
-      const days_ = runs
-        .map((r) => r.firstClear[hollow])
-        .filter((d): d is number => d !== undefined);
-      if (days_.length > 0)
-        avg.firstClear[hollow] = Math.round(days_.reduce((a, b) => a + b, 0) / days_.length);
-      const faints = runs.reduce((sum, r) => sum + (r.firstAttempts[hollow]?.faints ?? 0), 0);
-      const attempts = runs.reduce((sum, r) => sum + (r.firstAttempts[hollow]?.attempts ?? 0), 0);
-      if (attempts > 0) avg.firstAttempts[hollow] = { faints, attempts };
-    }
-    report(def, avg);
+    report(def, averageStats(runs));
   }
 
   if (personaArg === 'all' || personaArg === 'breaker') {

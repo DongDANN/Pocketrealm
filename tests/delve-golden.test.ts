@@ -48,6 +48,18 @@
  * pays and its runId-keyed boon roll are unchanged. A headless replay never skips, so no golden
  * carries a boost — the skip's ×1.8 is pinned separately in tests/delve-patience.test.ts, and the
  * difference between the 7d and 7e digests is interest plus the one new key.
+ *
+ * Gate 7f re-recorded all five because the settlement moved on purpose, twice, in the direction the
+ * "a faint costs a run, never progress" rule demands: a fight room won inside a floor now pays its one
+ * Ember the moment the row steps forward instead of waiting for the floor to end, and the faint bank
+ * rounds its percentage rather than truncating it. Before that pair of changes a run that fell in the
+ * room after its first win left the Hollow with nothing at all; now the shortest possible faint still
+ * carries the room it took down. The third change is the pool: the two taxes a level-one account cannot
+ * answer (`no-rest-heal`, `skills-cost-two`) are drawn off every Hollow's opening floor. The roll comes
+ * from the same stream with a smaller modulus, so an opening floor deals a different card than it did —
+ * four of these five goldens start under a different rule than they did at 7e, and their fights move
+ * with it. Nothing else in the shape changed. All five replays still end fainted — the headless decider
+ * still never braces, because reading the intent strip remains the player's call.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -73,45 +85,45 @@ const CASES: GoldenCase[] = [
     seed: 12345,
     hollow: 1,
     level: 5,
-    hash: 'c6e7c4907d92278c',
-    hashBeforeLadder: '2fbf210c5dc4ddec',
-    runHash: 'b66f6365bd5cf1a2',
+    hash: '89bb09156c949717',
+    hashBeforeLadder: '95a25369cd3b98f8',
+    runHash: '4a347130d6a0dca3',
   },
   {
     label: 'H2 golden-ratio seed',
     seed: 0x9e3779b1,
     hollow: 2,
     level: 6,
-    hash: '1c2203bf0ccee3a8',
-    hashBeforeLadder: 'b1a7c9dd2fce8850',
-    runHash: '7a869dd2abd69ce2',
+    hash: 'e79aade157598cd8',
+    hashBeforeLadder: '40e4d21d6585d39e',
+    runHash: '4f3e1c700451dab8',
   },
   {
     label: 'H3 seed 777',
     seed: 777,
     hollow: 3,
     level: 8,
-    hash: '2e98f7ab412af353',
-    hashBeforeLadder: 'ecf3f0f23678821c',
-    runHash: '44bed27cc8d79f76',
+    hash: '6cf27a4c41a03434',
+    hashBeforeLadder: '9fa08bad3041c97f',
+    runHash: '7cd00b0f85112d93',
   },
   {
     label: 'H2 seed 4242',
     seed: 4242,
     hollow: 2,
     level: 9,
-    hash: 'd1592d4da94beaed',
-    hashBeforeLadder: 'd64b2e4e0d093f30',
-    runHash: '430ec30780e72490',
+    hash: '2d88b5b628d94b99',
+    hashBeforeLadder: '60ba01cf717dfe60',
+    runHash: '5ce704fc13abe7cc',
   },
   {
     label: 'H3 seed 20261025',
     seed: 20261025,
     hollow: 3,
     level: 12,
-    hash: 'bd283277d68347c1',
-    hashBeforeLadder: 'bdd30a8a2515507a',
-    runHash: '0e7daa70e285b590',
+    hash: '159209ea396a1a86',
+    hashBeforeLadder: '2be7e07bbf317399',
+    runHash: '2bc037f5f3d738ad',
   },
 ];
 

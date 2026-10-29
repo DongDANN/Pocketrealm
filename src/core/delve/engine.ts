@@ -54,6 +54,12 @@ import type {
 } from './types';
 
 const CLEAR_BONUS: Record<HollowId, number> = { 1: 25, 2: 30, 3: 45 };
+/**
+ * What one fight room cleared inside a floor pays. Floors pay at their end, so without this a run that
+ * falls in the room after the last win would bank nothing — the one settlement "a faint costs a run,
+ * never progress" forbids.
+ */
+const ROOM_EMBER = 1;
 /** Hard boon slot cap; Gate 1.6 fusions free slots to make room. */
 const BOON_CAP = 8;
 /** The Lantern can only refine this many Embers per local day (anti-grind). */
@@ -433,6 +439,11 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
 
   const rows = next.floorPlan.rows.length;
   if (next.row + 1 < rows) {
+    // A room won pays on the spot. Floors pay at their end, so a companion that falls in the next
+    // room would otherwise leave a run that earned nothing at all — and a run that earns nothing is
+    // the one thing "a faint costs a run, never progress" forbids.
+    if (isFightRoom(currentRoom(next)))
+      next = { ...next, embersEarned: next.embersEarned + ROOM_EMBER };
     next = { ...next, row: next.row + 1 };
     return { run: next, meta, ledger, ended: false };
   }
@@ -578,7 +589,9 @@ function endRun(
     };
   }
   const pct = run.relics.includes('relic-safebox') ? 70 : 60;
-  const kept = Math.floor((next.embersEarned * pct) / 100);
+  // Rounded, not floored: a won room is worth one Ember, and truncating would turn the shortest faint
+  // into the zero-progress settlement the "a faint costs a run, never progress" rule forbids.
+  const kept = Math.round((next.embersEarned * pct) / 100);
   const { meta: m, banked } = bankEmbers(settled.meta, kept, today);
   m.runsFainted += 1;
   return {

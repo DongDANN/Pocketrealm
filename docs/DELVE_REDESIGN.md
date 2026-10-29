@@ -169,6 +169,45 @@ steps-per-day, and the pacing targets in SPEC 6.10 are re-stated as "days to cle
 the same bands (Trickle ~2–3 weeks, Casual ~5–8 days, Habit ~3–5 days, Optimizer at most ~2.5×
 Trickle in Embers/day).
 
+**As built (Gate 7f).** The personas now measure runs-per-day, and the headless player reads the same
+priced menu the battle panel renders (`personaOrder` in `scripts/sim-delve.ts`): it rests when the room
+actually heals, and braces only on the two rounds a person braces — the blow that would kill, and the
+blow large enough to be the mechanic the strip warned about. Re-measured over 5 seeds × 60 days:
+
+| Persona   | runs/day | Rootfall first clear   | Embers banked/day | faint rate |
+| --------- | -------- | ---------------------- | ----------------- | ---------- |
+| Trickle   | 1.00     | 16 d (5/5 seeds, 4–27) | 40.6              | 27%        |
+| Casual    | 1.50     | 6 d (5/5, 3–10)        | 48.4              | 9%         |
+| Habit     | 2.65     | 3 d (5/5, 1–5)         | 49.8              | 6%         |
+| Optimizer | 5.12     | 3 d (5/5, 2–4)         | 50.0              | 6%         |
+
+- **The bands are met.** Trickle's 16 days sits inside two-to-three weeks, Casual's 6 inside 5–8, Habit
+  and Optimizer at 3 inside 3–5, and no persona's mean clear is under 2 days (SPEC 6.10). Every seed of
+  every persona takes Rootfall inside the horizon. `tests/delve-economy.test.ts` pins the bands _and_
+  the all-seeds-clear count, because an average alone can hide a locked-out seed.
+- **The Embers ratio is 1.23× against a 2.5× cap, and the cap is the reason.** `EMBER_DAILY_CAP = 50`
+  clamps the top of the ladder: Habit and Optimizer both bank exactly 50 a day. Widening the spread
+  would mean raising an anti-grind limit, which is not a persona decision to make through balance.
+- **SPEC 6.10's faint clause is restated, not satisfied verbatim.** It asked for 25–40% fainting on a
+  Hollow's first clear attempts "for a sensibly configured Autopilot". The Autopilot was cut at 7b-6, so
+  the measure is now the whole run trail: 27% for the persona that never improves — Trickle logs
+  nothing, so it never levels and faces Rootfall with the stats it started with — and 6–9% for anyone
+  who plays more than one run a day. Habits pay in survival as well as in Embers.
+- **The first run into a Hollow is a scout, and it pays.** Measured, a fresh account's first Rootfall run
+  faints for 4–5 of 5 seeds: at level 1 with nothing equipped that is the only outcome the headless
+  floor of difficulty produces. Two settlement changes make the loss honest instead of empty. A fight
+  room won inside a floor pays its one Ember when the row steps forward — before, only floors paid, so a
+  run that fell in the room after its first win banked nothing at all, which is precisely the
+  zero-progress settlement "a faint costs a run, never progress" forbids. And the faint bank rounds
+  rather than truncates, because 60% of 1 used to be 0.
+- **Two taxes are off every opening floor.** `no-rest-heal` and `skills-cost-two` cannot be drawn on
+  floor 1 of any Hollow: a level-one account has no answer to a floor that refuses to heal and no energy
+  for a double-cost skill. Both still appear from floor 2, and the draw keeps its own salted stream, so
+  no layout moves.
+- **Breaker.** Every maxed build clears Hollow 3 at Heat 5 in one paid run (9/9 build × route sweeps),
+  and no empty account at the level-5 gate gets past floor 5 of 10 (0/9). See `runBreaker` in
+  `scripts/sim-delve.ts`.
+
 ---
 
 ## 7. Section D — the skill collection

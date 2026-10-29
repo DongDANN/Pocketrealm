@@ -22,12 +22,14 @@ import {
   type TurnOrder,
 } from '../../src/core/delve';
 import { recapOf, roomSwings, roomThreats } from '../../src/ui/lib/delveReadout';
-import { mkCtx, singleRowRun } from '../delve-helpers';
+import { mkCtx, NEUTRAL_RULE, singleRowRun } from '../delve-helpers';
 
 const BASIC: TurnOrder = { skillId: null, targetIndex: 0, guard: false };
 
 /** Enter a room and take one basic round; the pause carries the log of that exchange. */
-function firstRound(run: RunState = singleRowRun('skirmish')): CombatPause {
+function firstRound(
+  run: RunState = singleRowRun('skirmish', { floorRule: NEUTRAL_RULE }),
+): CombatPause {
   const entered = stepRun(run, mkCtx(emptyMeta()));
   return stepRun(entered.run, mkCtx(emptyMeta(), { order: BASIC })).pause!;
 }
@@ -48,6 +50,7 @@ function room(
   const base = newRun(11, 1, 3, emptyMeta());
   return {
     ...base,
+    floorRule: NEUTRAL_RULE,
     floorPlan: {
       floor: 1,
       rows: [[{ id: 'x0r0c0', kind, enemies, affixes, optionSeed: 0 }]],

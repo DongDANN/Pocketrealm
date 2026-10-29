@@ -49,6 +49,22 @@ describe('floor rule table', () => {
     expect(sampleRules().size).toBe(FLOOR_RULES.length);
   });
 
+  it('keeps the two taxes a first floor cannot answer off every Hollow’s opening floor', () => {
+    for (const hollow of STREAM) {
+      for (let seed = 1; seed <= 60; seed++) {
+        const first = floorRuleFor(seed, hollow, 1);
+        expect(first, `hollow ${hollow} seed ${seed}`).not.toBe('no-rest-heal');
+        expect(first, `hollow ${hollow} seed ${seed}`).not.toBe('skills-cost-two');
+      }
+    }
+    // Held back, not retired: the second floor already carries both.
+    const second = new Set<string>();
+    for (const hollow of STREAM)
+      for (let seed = 1; seed <= 60; seed++) second.add(floorRuleFor(seed, hollow, 2));
+    expect(second.has('no-rest-heal')).toBe(true);
+    expect(second.has('skills-cost-two')).toBe(true);
+  });
+
   it('is deterministic per seed, hollow and floor', () => {
     expect(floorRuleFor(12345, 1, 3)).toBe(floorRuleFor(12345, 1, 3));
     expect(floorRuleFor(12345, 1, 3)).not.toBe(floorRuleFor(12345, 1, 4));

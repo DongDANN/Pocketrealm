@@ -73,8 +73,13 @@ Last updated: 2026-10-28
 - [x] Gate 7a — Delve legibility, the first slice of `docs/DELVE_REDESIGN.md`: enemy intent on every
       enemy, one arithmetic function behind every damage number, the itemized sum panel and the recap
       under the canvas. **No mechanics changed — all five golden run hashes are byte-identical.**
-- [ ] Gate 7b–7f — the turn loop and the cut, the skill collection, floor rules and bosses, the
-      patience economy, balance/docs/ship. Defined in `docs/DELVE_REDESIGN.md` §14.
+- [x] Gate 7b–7f — the turn loop and the cut, the skill collection, floor rules and bosses, the
+      patience economy, balance/docs/ship. Defined in `docs/DELVE_REDESIGN.md` §14, built as
+      7b-1…7b-7, 7c-1…7c-6, 7d, 7e and 7f, each committed locally. **Gate 7f re-measured the personas
+      against §6, re-recorded the goldens, and rewrote the acceptance matrix in
+      `docs/FINAL_REPORT.md`.**
+- [x] Gate 7g — the cartridge look: battle HUD, dialog and command stack, the four-command grid,
+      bag/summary/codex menus and full battle juice, reduced-motion safe.
 
 ### SHOULD follow-up ideas (not part of MVP; shipped only if explicitly requested)
 
@@ -2448,3 +2453,90 @@ chooses either.
   terms read plainly before a player commits is open. The numbers (`1.8`, `8%`, cap `40`) are first
   picks with no play-test behind them; whether interest makes hoarding the obvious line, or the skip
   is ever worth taking, is 7f's tuning question.
+
+### Gate 7f — The balance is measured, and the report says what it measured (2026-10-29)
+
+- **Three core changes, all of them balance, all of them small.** (1) `ROOM_EMBER = 1`
+  (`src/core/delve/engine.ts:62`) is credited in `advanceAfterRoom` the moment a fight room is won
+  mid-floor (`src/core/delve/engine.ts:446`), so the walk pays as it goes instead of only at the
+  floor line. (2) A faint now banks `Math.round(embersEarned × pct)` rather than `Math.floor`
+  (`src/core/delve/engine.ts:594`): with the room credit in place the shortest possible faint is worth
+  one Ember, and 60 % of 1 floored to 0 — a zero-progress settlement, which the invariant "a faint
+  costs a run, never progress" forbids. (3) `FIRST_FLOOR_EXCLUDED = ['no-rest-heal',`
+  `'skills-cost-two']` (`src/core/delve/rules.ts:114`) keeps the two rules that tax a first step off
+  every Hollow's opening floor. The pool is filtered before the draw, and `floorRuleFor` draws on its
+  own salted stream, so room layouts did not move — only which rule is dealt, and the smaller
+  modulus moved it for four of the five golden seeds.
+- **Personas re-tuned around runs per day, not rooms per hour.** `scripts/sim-delve.ts` prices a run
+  with `RUN_COST` (20/24/28 oil by Hollow) against the daily trickle, so Trickle is exactly one run a
+  day; `personaOrder` is a sim-only bracing decider that reads the same `turnMenu` the battle panel
+  prices, so the sweep measures a player who acts on the number they were shown. `builtinDecider`
+  stays unbraced on purpose, because the goldens pin the unbraced decider.
+- **Every §6 band is met, and all five seeds clear Rootfall in all four personas** (5 seeds × 60 days,
+  averaged): runs/day 1.00 / 1.50 / 2.65 / 5.12; first Hollow 1 clear at 16 / 6 / 3 / 3 days against
+  bands of 14–21 / 5–8 / 3–5 / 3–5; Embers banked 40.6 / 48.4 / 49.8 / 50.0 per day.
+- **The Optimizer/Trickle Embers ratio is 1.23×, not 2.5×, and the reason is a cap, not a tune.**
+  Both personas sit under `EMBER_DAILY_CAP = 50` (`src/core/delve/engine.ts:66`), so more activity
+  buys more runs, not more Embers per day. The pacing test asserts the ratio stays inside 2.5× and
+  documents why it is far below it; raising the cap would change pacing without touching a single
+  reward number.
+- **SPEC's 25–40 % faint envelope is restated with measured numbers, because the clause names a thing
+  that no longer exists.** "A sensibly configured Autopilot" was cut at Gate 7b-6, so the sentence now
+  measures the passive trail: Trickle faints on 27 % of runs over 60 days — inside the old band — while
+  the kitted personas sit at 9 / 6 / 6 %. The first run into a Hollow is a scout: 4–5 of 5 seeds faint
+  on their first Rootfall attempt and every one of them banks Embers for it, so a faint costs a run and
+  never progress. `tests/delve-economy.test.ts` asserts both readings.
+- **"No persona clears faster than two days" is asserted on the mean, and the spread is written down
+  rather than hidden.** Habit and Optimizer average 3 days, but one Habit seed reaches Rootfall on day
+  1 and a Trickle seed takes 27. A band test on the mean is what a 60-day, 5-seed sweep can honestly
+  support; the per-seed range is printed by `npm run sim:delve` and recorded in
+  `docs/DELVE_REDESIGN.md` §6.
+- **Five new pacing assertions.** `tests/delve-economy.test.ts` replaces the old describe with tests
+  that the sweep is deterministic, that every seed clears inside its band, that runs and Embers per day
+  scale with activity without running away, that the faint rate sits in the envelope for the passive
+  persona and below it for the kitted ones, that the first run into a Hollow is a paid scout run, and
+  that Hollow 3 stays behind the whole run of it (Optimizer only; Trickle never reaches it in 60 days).
+- **The goldens were re-recorded, and the file says why.** Digests `89bb09156c949717`,
+  `e79aade157598cd8`, `6cf27a4c41a03434`, `2d88b5b628d94b99`, `159209ea396a1a86` (plus their
+  run-only and ladder-excluded pairs) all moved because of the three changes above. All five
+  scenarios still end in a faint, still never spend Dust, and still bank only under the Hollow they
+  walked — the invariants the digests exist to protect are unchanged; only the numbers are.
+- **Test infrastructure, not expected values, absorbed the rule change.** Sixteen tests across eight
+  suites failed the moment floor 1 stopped dealing `no-rest-heal`, because their fixtures were written
+  against whatever rule seed 11 happened to hand them. Each now pins
+  `NEUTRAL_RULE = 'no-ward-boons'` (`tests/delve-helpers.ts`) — a rule that touches only the boon
+  pool a fight room never offers — in `delve-turn-menu`, `delve-rule-outcomes`,
+  `delve-lv5-modifiers`, `delve-room`, `delve-turns`, `delve-intent`, `delve-affixes`,
+  `delve-patience` and `tests/ui/delve-readout`. `singleRowRun` deliberately still draws its rule,
+  because `delve-rule-outcomes` has to prove the drawn rule reaches the run. No expected number was
+  edited to make a test pass; a throwaway probe read the actual HP and energy deltas first.
+- **Two browser goldens were regenerated, diffs read first.** `delve-run` and `delve-turn-panel` both
+  lost 20 px of page height. The pixel diff shows the change starting at the `Floor rule:` paragraph
+  and nothing above it: that seed's opening floor now reads `guard-reflects` where the recorded image
+  carried a rule whose label wrapped one row longer, and everything below the paragraph reflows by
+  those 20 px. A probe over the draw confirmed the mechanism is the smaller floor-1 pool — the same
+  salted stream now indexes into eight rules instead of ten, so the dealt rule moves even for seeds
+  that never drew one of the two excluded ones. No other snapshot moved, and the full suite is green
+  against the two new images.
+- **Docs re-measured, not re-worded.** `docs/FINAL_REPORT.md` gains a Gate 7 re-verification table, a
+  Lighthouse table with the Gate 6 figures kept in brackets (0.91 / 0.93 performance, script transfer
+  236,026 B, CLS 0.00), and a bundle table with the measurement method spelled out: initial JS
+  197.09 kB over 7 chunks, initial CSS 8.44 kB, all lazy JS 100.23 kB over 25 chunks, the Delve set
+  54.99 kB over 15 chunks, precache 90 entries / 1013.98 KiB. Acceptance matrix rows 22, 29, 31 and 38
+  are rewritten against the Gate 7 Delve, and rows 47–52 are added for the mechanics Gates 7a–7g
+  introduced. `docs/MANUAL_TEST.md` §8 loses its catch-up step — the mechanic is gone — and gains the
+  cold-open check a hand-played run needs instead.
+- **The README is deliberately untouched.** The owner has an uncommitted rewrite in the working tree;
+  it carries no stale persona or pacing number, so Gate 7f left it alone and out of the commit.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 1068/1068 across 83 files**;
+  `npm run sim:delve` **verified** the bands above and the Breaker check (9/9 maxed-kit runs clear
+  Hollow 3 Heat 5 in one run, 0/9 fresh accounts get past floor 5); `npm run sim:golden` **verified**
+  the five re-recorded digests; `npm run build` **verified** clean at 90 precache entries, 1013.98 KiB;
+  `npm run lighthouse` **verified** with no assertion fired; `npx playwright test` **verified 69/69**
+  in Chromium against the production build.
+- **Not verified / still open:** nothing here was played on a phone, so whether a won room _feels_
+  paid is the owner's check, not the sim's. The 27 % Trickle trail counts faints with no retreats at
+  all, which is a persona choice as much as a difficulty reading. The Embers ratio is cap-bound, so
+  the honest knob for "the Optimizer should out-earn Trickle more" is `EMBER_DAILY_CAP`, and changing
+  it is a design decision rather than a tune.

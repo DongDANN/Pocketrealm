@@ -24,7 +24,7 @@ import {
   type StepOutcome,
   type TurnOrder,
 } from '../src/core/delve';
-import { answerChoice, mkCtx, singleRowRun, TODAY } from './delve-helpers';
+import { answerChoice, mkCtx, NEUTRAL_RULE, singleRowRun, TODAY } from './delve-helpers';
 
 const BASIC: TurnOrder = { skillId: null, targetIndex: 0, guard: false };
 
@@ -33,7 +33,7 @@ function openRoom(kind: 'skirmish' | 'elite' | 'boss' = 'skirmish'): {
   entry: StepOutcome;
 } {
   const meta = emptyMeta();
-  return { meta, entry: stepRun(singleRowRun(kind), mkCtx(meta)) };
+  return { meta, entry: stepRun(singleRowRun(kind, { floorRule: NEUTRAL_RULE }), mkCtx(meta)) };
 }
 
 /** Answer the room one order at a time until it finishes, and report every step taken. */
@@ -188,7 +188,7 @@ describe('the fight is rebuilt from the trail, so the run carries no outcome', (
   it('a consumable the room will need is spent once, when the room finishes', () => {
     const meta = emptyMeta();
     const run: RunState = {
-      ...singleRowRun('skirmish'),
+      ...singleRowRun('skirmish', { floorRule: NEUTRAL_RULE }),
       consumables: ['fire-oil'],
       consumablesUsed: {},
     };
@@ -235,7 +235,7 @@ describe('a finished room forgets its trail', () => {
 
   it('a faint clears them too, and the fight that caused it is in the log', () => {
     const meta = emptyMeta();
-    const base = singleRowRun('skirmish');
+    const base = singleRowRun('skirmish', { floorRule: NEUTRAL_RULE });
     const entry = stepRun(
       { ...base, companionLevel: 1, unit: { ...base.unit, hp: 1 } },
       mkCtx(meta),

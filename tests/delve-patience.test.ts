@@ -35,8 +35,8 @@ function planRun(
   const base = newRun(11, 1, 3, emptyMeta());
   return {
     ...base,
-    // Seed 11's floor-1 rule happens to be no-rest-heal; pin a rule that touches nothing here so a
-    // suite about patience is not also a suite about rest healing.
+    // Pinned rather than drawn: a suite about patience must not also be a suite about whichever rule
+    // seed 11 happens to deal to its opening floor.
     floorRule: 'mark-one-round',
     floorPlan: {
       floor: 1,

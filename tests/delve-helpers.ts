@@ -7,6 +7,7 @@ import {
   type BudgetSignals,
   type CombatPause,
   type DelveMeta,
+  type FloorRuleId,
   type HollowId,
   type RoomKind,
   type RunState,
@@ -24,6 +25,14 @@ export const NO_SIGNALS: BudgetSignals = {
   contributedToGoalLast7d: false,
   reviewedLast7d: false,
 };
+
+/**
+ * The floor rule a combat, menu or readout suite should stand on. Every floor carries a rule (§8 E.1)
+ * and the draw is seeded, so a suite that lets its own opening floor decide would also be a suite about
+ * initiative, energy costs or element signs — and would move whenever the pool moves. `no-ward-boons`
+ * touches only the boon pool a fight room never offers, so the numbers it leaves are the plain ones.
+ */
+export const NEUTRAL_RULE: FloorRuleId = 'no-ward-boons';
 
 export function mkCtx(meta: DelveMeta, over: Partial<StepContext> = {}): StepContext {
   return {

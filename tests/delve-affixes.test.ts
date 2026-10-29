@@ -11,13 +11,16 @@ import {
   type CombatResult,
   type RunState,
 } from '../src/core/delve';
+import { NEUTRAL_RULE } from './delve-helpers';
 
 function zeroBuffs() {
   return { wardHp: 0, luckBonus: 0 };
 }
 
 function runWith(over: Partial<RunState> = {}): RunState {
-  return { ...newRun(1, 1, 1, emptyMeta()), ...over };
+  // The rule is pinned because an affix suite measures the affix: a drawn floor rule would move
+  // initiative, energy and element signs underneath it.
+  return { ...newRun(1, 1, 1, emptyMeta()), floorRule: NEUTRAL_RULE, ...over };
 }
 
 function firstHitDamage(r: CombatResult): number {
@@ -199,7 +202,7 @@ describe('affixes in combat', () => {
   });
 
   it('splitting enemies spawn a half-HP copy when killed', () => {
-    const run = { ...newRun(1, 1, 6, emptyMeta()) };
+    const run = { ...newRun(1, 1, 6, emptyMeta()), floorRule: NEUTRAL_RULE };
     const r = runCombat(
       run,
       { enemies: ['tollbug'], affixes: ['splitting'] },

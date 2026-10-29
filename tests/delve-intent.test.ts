@@ -29,6 +29,7 @@ import {
   type IntentDefence,
   type IntentEnemy,
 } from '../src/core/delve';
+import { NEUTRAL_RULE } from './delve-helpers';
 
 const defence: IntentDefence = { def: 4, hp: 60 };
 
@@ -293,7 +294,7 @@ describe('statuses change the intent', () => {
 
 describe('the intent matches the fight the engine actually runs', () => {
   function fight(species: string, kind: string, seed: number) {
-    const run = newRun(seed, 1, 1, emptyMeta());
+    const run = { ...newRun(seed, 1, 1, emptyMeta()), floorRule: NEUTRAL_RULE };
     const mods = computeModifiers(run, {}, { wardHp: 0, luckBonus: 0 });
     return {
       run,

@@ -104,12 +104,25 @@ export function floorRuleById(id: string | null | undefined): FloorRuleDef | und
   return FLOOR_RULES.find((rule) => rule.id === id);
 }
 
+/**
+ * What a floor may draw. The first floor of a Hollow is where an under-kitted account walks in — a
+ * fresh companion at level 1 with no Forge, no boons and no relics — so the two rules that take away
+ * the resources it has no substitute for are held back: Rest is the only heal a first floor can offer,
+ * and energy is the only thing a hand-played round spends. Both rules stay live from the second floor
+ * on, where the run has had a room or two to earn a Shield, a relic or a cheaper skill.
+ */
+const FIRST_FLOOR_EXCLUDED: readonly FloorRuleId[] = ['no-rest-heal', 'skills-cost-two'];
+
 /** The rule a floor carries, drawn from its own stream so floor layouts never move. */
 export function floorRuleFor(userSeed: number, hollowId: HollowId, floor: number): FloorRuleId {
   const rng = mulberry32(
     hashCombine(floorSeed(userSeed, hollowId, floor), hashString('floor-rule')),
   );
-  return FLOOR_RULES[rng.int(FLOOR_RULES.length)]!.id;
+  const pool =
+    floor <= 1
+      ? FLOOR_RULES.filter((rule) => !FIRST_FLOOR_EXCLUDED.includes(rule.id))
+      : FLOOR_RULES.slice();
+  return pool[rng.int(pool.length)]!.id;
 }
 
 /** The rule the floor after this one carries, or null when this is the Hollow's last floor. */

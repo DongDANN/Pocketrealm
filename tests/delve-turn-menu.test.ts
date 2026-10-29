@@ -29,15 +29,15 @@ import {
   type TurnMenu,
   type TurnOrder,
 } from '../src/core/delve';
-import { mkCtx, NO_SIGNALS, singleRowRun } from './delve-helpers';
+import { mkCtx, NEUTRAL_RULE, NO_SIGNALS, singleRowRun } from './delve-helpers';
 
 const BASIC: TurnOrder = { skillId: null, targetIndex: 0, guard: false };
 const GUARD: TurnOrder = { skillId: null, targetIndex: 0, guard: true };
 const BASTION: TurnOrder = { skillId: 'warden-bastion', targetIndex: 0, guard: false };
 
-/** The one-row room from the helpers, with its roster replaced. */
+/** The one-row room from the helpers, with its roster replaced and its rule pinned neutral. */
 function roomWith(enemies: string[], over: Partial<RunState> = {}): RunState {
-  const base = singleRowRun('skirmish', over);
+  const base = singleRowRun('skirmish', { floorRule: NEUTRAL_RULE, ...over });
   const room = base.floorPlan.rows[0]![0]!;
   return { ...base, floorPlan: { ...base.floorPlan, rows: [[{ ...room, enemies }]] } };
 }

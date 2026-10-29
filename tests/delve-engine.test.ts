@@ -9,6 +9,7 @@ import {
   resolveChoice,
   stepRun,
   type DelveMeta,
+  type RoomKind,
   type RunState,
 } from '../src/core/delve';
 import { OIL_STORAGE_CAP } from '../src/core/rewards';
@@ -354,6 +355,47 @@ describe('ending runs and Ember banking', () => {
     expect(
       safebox.run.log.some((l) => l.text.includes('Faint: 28 of 28 Embers banked (70%)')),
     ).toBe(true);
+  });
+
+  it('pays a won fight room on the spot, so a faint in the next room banks something', () => {
+    const rows = (rooms: { kind: RoomKind; enemies: string[] }[]): RunState['floorPlan'] => ({
+      floor: 1,
+      rows: rooms.map((room, row) => [
+        { id: `x0r${row}c0`, kind: room.kind, enemies: room.enemies, optionSeed: row },
+      ]),
+    });
+    let state: PlayState = {
+      run: singleRowRun('rest', {
+        floorPlan: rows([
+          { kind: 'skirmish', enemies: ['tollbug'] },
+          { kind: 'skirmish', enemies: ['rootsnarl'] },
+        ]),
+      }),
+      meta: emptyMeta(),
+      pause: null,
+      ledger: [],
+      signals: NO_SIGNALS,
+    };
+    // Win the first room and stop at the second's door: the row has stepped forward, the floor's
+    // reward is still owed, and nothing has settled to the wallet yet.
+    let guard = 0;
+    while (state.run.row === 0 && state.run.result === 'active' && guard < 100) {
+      state = playOne(state);
+      guard += 1;
+    }
+    expect(state.run.row).toBe(1);
+    expect(state.run.embersEarned).toBe(1);
+    expect(state.meta.embers).toBe(0);
+
+    // Then fall in the next room: the run is over, and the one room it won is the progress it keeps.
+    let end: PlayState = { ...state, run: { ...state.run, unit: { ...state.run.unit, hp: 1 } } };
+    guard = 0;
+    while (end.run.result === 'active' && guard < 100) {
+      end = playOne(end);
+      guard += 1;
+    }
+    expect(end.run.result).toBe('fainted');
+    expect(end.meta.embers).toBeGreaterThan(0);
   });
 
   it('clamps daily Ember refinement to the cap and resets per local day', () => {

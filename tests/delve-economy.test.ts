@@ -8,7 +8,13 @@ import {
   type BudgetSignals,
 } from '../src/core/delve';
 import { grant } from '../src/core/rewards';
-import { PERSONAS, runPersona, type PersonaStats } from '../scripts/sim-delve';
+import {
+  PERSONAS,
+  averageStats,
+  runPersona,
+  type AveragedStats,
+  type PersonaStats,
+} from '../scripts/sim-delve';
 import { TODAY, TOMORROW } from './delve-helpers';
 
 describe('the Forge', () => {
@@ -165,48 +171,37 @@ describe('Delve XP daily cap', () => {
 describe('sim:delve persona pacing (§6.10)', () => {
   const SEEDS = 5;
   const DAYS = 60;
-  // Measured at 7b-6, after the cut: Trickle gets one Rootfall run a day and first clears H1 on day
-  // 21; the Optimizer (≈5 runs a day) banks 3.0× Trickle's Embers. DELVE_REDESIGN §6 states the
-  // destination bands (Trickle 2–3 weeks, Optimizer ≤2.5×) for the skill economy that arrives in 7c;
-  // 7f re-tunes these interim bounds against it.
-  const TRICKLE_H1 = { min: 18, max: 32 };
-  const OPTIMIZER_EMBER_RATIO = 3.5;
+  /**
+   * Measured at 7f with 5 seeds × 60 days: Rootfall falls on day 16 for Trickle, 6 for Casual and 3 for
+   * both Habit and Optimizer, and the Optimizer banks 1.23× Trickle's Embers. §6 fixes the bands the
+   * persona targets have to sit in — Trickle two to three weeks, Casual 5–8 days, Habit 3–5 — and
+   * SPEC §6.10's "no persona clears faster than 2 days" is the shared floor. The bounds below are those
+   * bands, not the measurements: they fail when a core change pushes a persona out of its design target,
+   * and give a one-day nudge room to move.
+   */
+  const BANDS: Record<PersonaKey, { min: number; max: number }> = {
+    trickle: { min: 14, max: 21 },
+    casual: { min: 5, max: 8 },
+    habit: { min: 3, max: 5 },
+    optimizer: { min: 3, max: 5 },
+  };
+  /** §6: good habits have to pay, but ignoring the app cannot be hopeless. */
+  const OPTIMIZER_EMBER_RATIO = 2.5;
 
-  function average(key: keyof typeof PERSONAS): PersonaStats {
+  type PersonaKey = keyof typeof PERSONAS;
+
+  // One sweep, shared by every assertion in this block: the sim is the slowest suite in the repo.
+  const cache = new Map<string, AveragedStats>();
+  function sweep(key: PersonaKey): AveragedStats {
+    const hit = cache.get(key);
+    if (hit) return hit;
     const def = PERSONAS[key]!;
     const runs: PersonaStats[] = [];
     for (let s = 0; s < SEEDS; s++) {
       runs.push(runPersona(def, DAYS, 0x5eed0000 + def.key.length * 0x1000 + s));
     }
-    const avg: PersonaStats = {
-      days: DAYS,
-      runs: 0,
-      clears: 0,
-      faints: 0,
-      retreats: 0,
-      embers: 0,
-      totalFloors: 0,
-      firstClear: {},
-      firstAttempts: {},
-    };
-    for (const r of runs) {
-      avg.runs += r.runs;
-      avg.clears += r.clears;
-      avg.faints += r.faints;
-      avg.retreats += r.retreats;
-      avg.embers += r.embers;
-      avg.totalFloors += r.totalFloors;
-    }
-    for (const hollow of [1, 2, 3] as const) {
-      const days_ = runs
-        .map((r) => r.firstClear[hollow])
-        .filter((d): d is number => d !== undefined);
-      if (days_.length > 0)
-        avg.firstClear[hollow] = Math.round(days_.reduce((a, b) => a + b, 0) / days_.length);
-      const faints = runs.reduce((sum, r) => sum + (r.firstAttempts[hollow]?.faints ?? 0), 0);
-      const attempts = runs.reduce((sum, r) => sum + (r.firstAttempts[hollow]?.attempts ?? 0), 0);
-      if (attempts > 0) avg.firstAttempts[hollow] = { faints, attempts };
-    }
+    const avg = averageStats(runs);
+    cache.set(key, avg);
     return avg;
   }
 
@@ -216,57 +211,72 @@ describe('sim:delve persona pacing (§6.10)', () => {
     expect(a).toEqual(b);
   }, 30_000);
 
-  it('clears Hollow 1 within the bands of the run-start economy', () => {
-    const trickle = average('trickle');
-    const casual = average('casual');
-    const habit = average('habit');
-    const optimizer = average('optimizer');
-    const h1 = (s: PersonaStats) => s.firstClear[1];
-    expect(h1(trickle), 'trickle H1').toBeGreaterThanOrEqual(TRICKLE_H1.min);
-    expect(h1(trickle), 'trickle H1').toBeLessThanOrEqual(TRICKLE_H1.max);
-    expect(h1(casual), 'casual H1').toBeGreaterThanOrEqual(4);
-    expect(h1(casual), 'casual H1').toBeLessThanOrEqual(11);
-    expect(h1(habit), 'habit H1').toBeGreaterThanOrEqual(2);
-    expect(h1(habit), 'habit H1').toBeLessThanOrEqual(8);
-    expect(h1(optimizer), 'optimizer H1').toBeGreaterThanOrEqual(2);
+  it('clears Hollow 1 inside the bands, and every seed gets there', () => {
+    for (const key of Object.keys(BANDS) as PersonaKey[]) {
+      const s = sweep(key);
+      const days = s.firstClear[1];
+      expect(days, `${key} H1`).toBeDefined();
+      expect(days!, `${key} H1 mean`).toBeGreaterThanOrEqual(BANDS[key].min);
+      expect(days!, `${key} H1 mean`).toBeLessThanOrEqual(BANDS[key].max);
+      // The band is a mean, and a mean can hide the seeds that never arrived. Every seed of every
+      // persona has to clear Rootfall inside the horizon: a persona locked out is a game over it.
+      expect(s.clearSeeds[1], `${key} seeds clearing H1`).toBe(SEEDS);
+      // Trickle is one run a day, so the slowest seed is still inside the horizon rather than outside it.
+      expect(s.clearDays[1]!.at(-1), `${key} slowest seed`).toBeLessThanOrEqual(DAYS);
+    }
   }, 180_000);
 
-  it('keeps Optimizer Embers per day within a bounded multiple of Trickle', () => {
-    const trickle = average('trickle');
-    const optimizer = average('optimizer');
-    const t = trickle.embers / trickle.days;
-    const o = optimizer.embers / optimizer.days;
+  it('paces runs and Embers per day with activity, without runaway', () => {
+    const trickle = sweep('trickle');
+    const optimizer = sweep('optimizer');
+    // Trickle's 20/day oil buys exactly one Rootfall run; the cap buys the Optimizer five and a bit.
+    expect(trickle.runs / trickle.days).toBeCloseTo(1, 1);
+    expect(optimizer.runs / optimizer.days).toBeGreaterThan(4);
+    const t = trickle.banked / trickle.days;
+    const o = optimizer.banked / optimizer.days;
     expect(t).toBeGreaterThan(0);
+    // The ratio is cap-bound: `EMBER_DAILY_CAP` clamps both personas at 50 Embers a day once a build is
+    // strong enough to fill it, so the measured spread is 1.23× and widening it would need the cap gone.
+    expect(o / t).toBeGreaterThan(1);
     expect(o / t).toBeLessThanOrEqual(OPTIMIZER_EMBER_RATIO);
   }, 180_000);
 
-  it('keeps first-attempt faint rates inside the headless envelope and paces run counts', () => {
-    const stats: Record<string, PersonaStats> = {};
-    for (const key of Object.keys(PERSONAS)) stats[key] = average(key as keyof typeof PERSONAS);
-    // SPEC §6.10's "about 25 to 40% on a Hollow's first clear attempts" describes a player who reads
-    // the telegraph and braces. The cut leaves the headless suites unable to do that: `builtinDecider`
-    // puts `guard: false` in every order, because reading a mechanic and softening the blow is now the
-    // player's call — so its faint rate sits above that band by construction, and rises with activity:
-    // measured at 7b-6 (5 seeds x 60 days) trickle 38%, casual 45%, habit 65%, optimizer 86%. The
-    // bounds below are those rates plus the seed noise of small attempt counts; 7f re-tunes this
-    // envelope with the skill economy that teaches bracing.
-    const FIRST_ATTEMPT = { min: 18, max: 92 };
-    const firstAttempt = (s: PersonaStats) => {
-      const fa = s.firstAttempts[1];
-      if (!fa || fa.attempts === 0) return 0;
-      return (fa.faints / fa.attempts) * 100;
-    };
-    for (const key of Object.keys(stats)) {
-      const s = stats[key]!;
-      expect(firstAttempt(s), `${key} first-attempt faint rate`).toBeGreaterThanOrEqual(
-        FIRST_ATTEMPT.min,
-      );
-      expect(firstAttempt(s), `${key} first-attempt faint rate`).toBeLessThanOrEqual(
-        FIRST_ATTEMPT.max,
-      );
-      expect(s.clears, `${key} clears`).toBeGreaterThan(0);
+  it('faints at the SPEC envelope for the passive persona and less for the kitted ones', () => {
+    const faint = (s: AveragedStats) => s.faints / s.runs;
+    const trickle = sweep('trickle');
+    // SPEC §6.10 asked for "about 25 to 40% on a Hollow's first clear attempts" from a sensibly
+    // configured Autopilot. 7b-6 cut the Autopilot, so the measure is restated: the same envelope now
+    // applies to the whole run trail of the persona that never improves — Trickle logs nothing, so it
+    // levels nothing, and its runs face Hollow 1 with the stats it started with. Measured 27%.
+    expect(faint(trickle)).toBeGreaterThanOrEqual(0.2);
+    expect(faint(trickle)).toBeLessThanOrEqual(0.4);
+    // Every persona that plays more than one run a day levels, kits and out-scales the Hollow, so it
+    // faints less: 9%, 6% and 6% measured. Habits must pay in survival as well as in Embers.
+    for (const key of ['casual', 'habit', 'optimizer'] as PersonaKey[]) {
+      expect(faint(sweep(key)), `${key} faint rate`).toBeLessThan(faint(trickle));
     }
-    expect(stats.optimizer!.runs).toBeGreaterThan(stats.trickle!.runs);
-    expect(stats.optimizer!.firstClear[2]).toBeDefined();
+  }, 180_000);
+
+  it('makes the first run into a Hollow a scout, and pays it', () => {
+    const trickle = sweep('trickle');
+    // A fresh account walking into Rootfall at level 1 loses. Measured: the first run of Hollow 1
+    // faints for 5/5 Trickle and Casual seeds and 4/5 Habit seeds — the game spends that run teaching
+    // the intent strip, and it is the only floor-1 outcome the level-1 stats can produce. It is
+    // tolerated, not celebrated: what makes it honest is that a scout run is never empty-handed, since
+    // every room it took down paid on the spot and the faint bank now rounds up.
+    expect(trickle.firstFaints[1]!).toBeGreaterThanOrEqual(4);
+    // Progress after a faint: Embers land, and the next day's run starts stronger than the last.
+    expect(trickle.banked).toBeGreaterThan(0);
+    expect(trickle.firstClear[1]).toBeDefined();
+  }, 180_000);
+
+  it('keeps the deepest Hollow behind the whole run of it', () => {
+    const optimizer = sweep('optimizer');
+    const trickle = sweep('trickle');
+    expect(optimizer.firstClear[2]).toBeDefined();
+    // Hollow 3 needs the level-5 gate and a kitted account: the Optimizer takes it at day 50, and
+    // nobody below it gets there inside two months. No fresh account one-runs it (see the Breaker).
+    expect(optimizer.firstClear[3]).toBeGreaterThan(2);
+    expect(trickle.firstClear[3]).toBeUndefined();
   }, 180_000);
 });

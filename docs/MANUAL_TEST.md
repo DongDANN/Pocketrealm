@@ -166,9 +166,9 @@ page. Record any edge-specific header differences.
 
 ## 8. Deployed Lighthouse and real-device performance
 
-**Status: not run.** Local Lighthouse on the production build through the policy emulator:
-performance 0.93 (`/`) and 0.94 (`/add`), accessibility 1.0, best practices 1.0, CLS 0.01/0.00.
-Lighthouse 12.6.1 has no PWA category.
+**Status: not run.** Local Lighthouse on the production build through the policy emulator, re-measured
+at Gate 7f: performance 0.91 (`/`) and 0.93 (`/add`), accessibility 1.0, best practices 1.0, CLS
+0.00/0.00. Lighthouse 12.6.1 has no PWA category.
 
 1. Run Lighthouse (Chrome DevTools → Lighthouse, mobile emulation) against the deployed URL with a
    cold cache. Record performance, accessibility and best-practices scores and FCP/LCP/TBT/CLS.
@@ -177,11 +177,13 @@ Lighthouse 12.6.1 has no PWA category.
 3. Log an expense and time the interaction; the aim is three taps and no wait for the game layer.
 4. Put the phone in low-power mode and repeat the Delve check. The app should remain usable, and
    reduced motion should be respected if enabled.
-5. Open the app after 12+ hours away. The catch-up should show a determinate progress bar, finish
-   without freezing, and produce a summary. Record the elapsed wall-clock time and device.
+5. Open the app after 12+ hours away. There is nothing to catch up on — Autopilot and catch-up were
+   removed at Gate 7b, so the app should open straight to Today, the oil meter should show the new
+   day's trickle, and an open run should still be waiting at the room it stopped in. Record how long
+   the cold open takes and whether any progress bar appears (it must not).
 
 Expected: 90+ accessibility and best practices; performance reported honestly even if below the
-local numbers. Real-device FPS and catch-up timing are not currently verified anywhere.
+local numbers. Real-device FPS and cold-open timing are not currently verified anywhere.
 
 ## 9. Haptics and reduced motion on a real phone
 
