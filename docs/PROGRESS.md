@@ -2213,3 +2213,42 @@ Marked`, the intent it is about to commit (`Bites for 4 (3–5)` plus the itemiz
   hand walk used a seeded IndexedDB meta, which is not part of the suite. The collection e2e that
   crafts, opens, learns, equips and buys dust through the real UI is Gate 7c-6. Touch targets were
   checked by the layout suite (every button ≥44px) but not by a human thumb at 360px.
+
+### Gate 7g-5 — The cartridge look earns its tests and its pages (2026-10-29)
+
+The GBA-style battle and menu layer is finished. This gate adds no pixels and no rules; it puts the
+new screens under the same automated scrutiny as the rest of the shell, writes down the checks that
+only a thumb can answer, and states in the design record that the whole layer is print, not logic.
+
+- **The collection screens join the control audit.** `e2e/a11y.spec.ts` now audits `/delve/workshop`
+  and `/delve/codex` alongside the other routes, and a new test walks all four Workshop tabs
+  (`Consumables`, `Capsules`, `Moveset`, `Skill Dust`) and both Codex tabs (`Species`, `Skills`),
+  asserting every visible control has an accessible name, a ≥44×44 target and an associated label.
+  That last test could not have existed before 7g-4: the three menus were static text with the old
+  print layer and had no controls to check. The battle screen stays out of the 44px sweep on
+  purpose — 7g-3 ships the 30px dialog skip arrow by design, and the box itself is the large target.
+- **Manual checks get a section.** `docs/MANUAL_TEST.md` gains §11, "The battle screen and the
+  collection menus": the dialog's type-out and skip, the HP label against the drained bar, the same
+  inputs under reduced motion, crafting/equipping until the pockets read `Full`, a consumable firing
+  and being spent, unequipping a move between runs without losing it, the unseen dex tile keeping its
+  name out of the page and off its accessible name until a sighting, high-contrast stripes, and
+  thumb-only reach at 360px. Nine steps, each one a thing a browser test cannot feel.
+- **The design record says the layer only prints.** `docs/DELVE_REDESIGN.md` §13 now states that
+  `battleHud`, `battleMenu` and `delveMenus` print what the engine already decided — prices, odds,
+  caps, mastery — and never compute a number the rules did not. The plates, dialog and dex change no
+  outcome; the engine stays the single source of every sum on screen.
+- **High contrast by eye.** The Summary, Bag and dex were captured under `data-contrast='high'` with
+  a seeded book and inspected by hand: cost lines stay legible on the dark plate, the element stripes
+  on the move cells and the pocket frames keep their contrast, the portrait keeps its hard grid, and
+  the unseen tile reads `?` with its group badge intact. These captures were scratch checks, not
+  committed goldens; the high-contrast suite itself is the Gate 6a automated pass.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 1017/1017 across 80 files**
+  (unchanged — this gate adds no unit tests); `npm run sim:golden` **verified all five digests
+  unchanged**; `npm run build` **verified** clean; `npx playwright test` **verified 68/68** in
+  Chromium against the production build (5.0m), the suite one test larger than 7g-4 and no golden
+  regenerated. `e2e/offline.spec.ts` stays parked and uncommitted.
+- **Not verified / still open:** the manual section is written but unplayed — the sign-off table has
+  no rows for it. Touch targets are audited at ≥44px and the six-viewport layout suite covers 360px,
+  but no human thumb has pressed the new menus yet. The bag, summary and dex still have no browser
+  test driving them through the real UI; that is Gate 7c-6.

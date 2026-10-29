@@ -370,6 +370,11 @@ sum computed; capsule odds and pity are on screen; a capsule cannot be rerolled 
 v2 save settles at 100% Embers. `docs/PROGRESS.md` gains the Gate 7 record; `docs/MANUAL_TEST.md`
 gains the tactile checks that cannot be automated.
 
+The Gate 7g battle and menu layer is presentational only: `battleHud`, `battleMenu` and
+`delveMenus` print what the engine already decided — prices, odds, caps, mastery — and never
+compute a number the rules did not. Nothing in the GBA-style plates, dialog or dex changes an
+outcome; the engine stays the single source of every sum on screen.
+
 ## 14. Gates
 
 Each gate ships green: typecheck, lint, format, the full Vitest suite, and Playwright against the

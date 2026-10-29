@@ -227,6 +227,43 @@ panel is usable with a thumb, in daylight, on a phone.
 Expected: the room waits for you, prices what it will charge, and charges exactly that. The panel is
 the game now, so its reachability and legibility are the checks that matter on a phone.
 
+## 11. The battle screen and the collection menus
+
+**Status: partially verified.** Chromium covers the layout at six viewports down to 360 px
+(`e2e/layout.spec.ts`), the controls are audited for names and thumb size on every Workshop and
+Codex tab (`e2e/a11y.spec.ts`), and the screens have goldens (`e2e/visual.spec.ts`). What Chromium
+cannot tell anyone is whether the GBA-style plates read in daylight, or whether the dialog and the
+bars feel right in the hand.
+
+1. Fight one round and read the dialog box aloud. The line should type itself out, and one press
+   anywhere on the box should finish it; a second press should advance. Confirm the arrow is the
+   only small control and that it is never the only way to advance — pressing the box must work.
+2. Compare the HP number with the bar. Drain a hit and check the bar steps down in hard blocks and
+   the label lands on the number the engine charged, not a rounded one. A bar that arrives before
+   the number, or a number that lags the bar, is a bug.
+3. Turn on reduced motion at the OS level and repeat the round. Nothing should slide or shake; the
+   numbers must still change in the same order, and the same inputs must produce the same recap.
+4. Open the Bag. Craft one consumable and confirm the price printed is the price charged (the
+   Workshop discount is already in the line), then equip it and watch a pocket fill. Fill all three
+   pockets and confirm the fourth item says `Full` rather than silently replacing a pocket.
+5. Start the next run and let the equipped item fire. Confirm it is spent, that the Bag shows the
+   stock it actually has, and that crafting it again costs what the line says.
+6. Between runs, open Summary. Unequip one move and confirm the slot reads
+   `Empty — equip a known active below.` and that the loss is not permanent — re-equip it and the
+   move is back. The grid holds four cells and never a fifth, whatever the level.
+7. Open the Codex while one species is still unseen. Its tile must say `???` and its group header
+   must be readable; a screen reader must announce it as `Entry N, not sighted` and must not leak
+   the name. Kill it once, reopen, and confirm the name, lore and numbers appear as the mastery
+   climbs — stat detail at 3, the weakness line at 2.
+8. In high contrast, repeat steps 4 and 7. The cost lines, the element stripe on each move cell and
+   the pocket frames must stay distinguishable; nothing should wash into the panel border.
+9. At 360 px wide, craft one item and unequip one move with a thumb only. Every button must be
+   reachable without horizontal scrolling and no label may clip.
+
+Expected: the shell looks like a handheld cartridge, but every number on it is the engine's. The
+type-out, the stepped bars and the dex reveal are decoration over decisions already made; if a
+number and the model ever disagree, the model is right and the screen is wrong.
+
 ## Sign-off
 
 | Date | Device / browser | Check | Result | Notes |

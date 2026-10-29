@@ -210,7 +210,17 @@ test('every visible control is named, large enough and carries image alternative
   page,
 }) => {
   await completeOnboarding(page);
-  const routes = ['/', '/add', '/envelopes', '/history', '/settings', '/insights', '/delve'];
+  const routes = [
+    '/',
+    '/add',
+    '/envelopes',
+    '/history',
+    '/settings',
+    '/insights',
+    '/delve',
+    '/delve/workshop',
+    '/delve/codex',
+  ];
   for (const route of routes) {
     await page.goto(route);
     await waitForScreen(page);
@@ -220,4 +230,38 @@ test('every visible control is named, large enough and carries image alternative
     expect(audit.unlabeledArt, `${route} art without a name or aria-hidden`).toEqual([]);
   }
   await expect(nav(page)).toBeVisible();
+});
+
+/**
+ * The collection menus swap their body with a tab, so auditing only the landing tab would miss the
+ * Bag's craft/equip pairs, the summary's move cells and every capsule row. Same contract as above,
+ * tab by tab; a scrollbar does not count as a control, so the panel can be tall.
+ */
+test('every Workshop and Codex tab keeps its controls named and thumb-sized', async ({ page }) => {
+  await completeOnboarding(page);
+  await page.goto('/delve');
+  await page.getByRole('button', { name: /^Descend into Rootfall Warren/ }).click();
+  await expect(page.getByRole('heading', { name: 'Kit' })).toBeVisible();
+
+  await page.goto('/delve/workshop');
+  await expect(page.getByRole('heading', { name: 'Workshop' })).toBeVisible();
+  for (const tab of ['Consumables', 'Capsules', 'Moveset', 'Skill Dust']) {
+    await page.getByRole('tab', { name: tab }).click();
+    await page.waitForTimeout(150);
+    const audit = await auditControls(page);
+    expect(audit.unnamed, `Workshop ${tab} unnamed controls`).toEqual([]);
+    expect(audit.small, `Workshop ${tab} controls under 44px`).toEqual([]);
+    expect(audit.unlabeledArt, `Workshop ${tab} art without a name or aria-hidden`).toEqual([]);
+  }
+
+  await page.goto('/delve/codex');
+  await expect(page.getByRole('heading', { name: 'Codex' })).toBeVisible();
+  for (const tab of ['Species', 'Skills']) {
+    await page.getByRole('tab', { name: tab, exact: true }).click();
+    await page.waitForTimeout(150);
+    const audit = await auditControls(page);
+    expect(audit.unnamed, `Codex ${tab} unnamed controls`).toEqual([]);
+    expect(audit.small, `Codex ${tab} controls under 44px`).toEqual([]);
+    expect(audit.unlabeledArt, `Codex ${tab} art without a name or aria-hidden`).toEqual([]);
+  }
 });
