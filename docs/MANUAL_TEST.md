@@ -7,7 +7,7 @@ the two are not confused.
 Status labels: **verified** (run and passed), **partially verified** (automated/Chromium evidence
 only), **not run** (no evidence), **blocked** (cannot be run until the app is deployed).
 
-Last updated: 2026-10-28.
+Last updated: 2026-10-29.
 
 ## Summary
 
@@ -23,6 +23,8 @@ Last updated: 2026-10-28.
 | 8   | Deployed Lighthouse and real-device performance     | **not run**            | local Lighthouse: 0.93–0.94 performance, 1.0 a11y/BP             |
 | 9   | Haptics and reduced motion on a real phone          | **not run**            | reduced-motion Canvas behavior is tested in Chromium             |
 | 10  | Playing a room by hand                              | **partially verified** | `e2e/delve.spec.ts` plays a whole run in Chromium; no phone run  |
+| 11  | The battle screen and the collection menus          | **partially verified** | goldens, layout and a11y sweeps in Chromium; no phone run        |
+| 12  | Floor rules and boss phases in hand                 | **not run**            | every rule has an engine outcome test; no phone run              |
 
 ## 1. Android Chrome: install and standalone launch
 
@@ -263,6 +265,29 @@ bars feel right in the hand.
 Expected: the shell looks like a handheld cartridge, but every number on it is the engine's. The
 type-out, the stepped bars and the dex reveal are decoration over decisions already made; if a
 number and the model ever disagree, the model is right and the screen is wrong.
+
+## 12. Floor rules and boss phases in hand
+
+**Status: not run.** Each of the ten floor rules and five boss rules has an engine outcome test
+(`tests/delve-rule-outcomes.test.ts`) and the data is pinned in `tests/delve-bosses.test.ts`. What
+no test can judge is whether the rule reads clearly at the moment it matters, or whether a boss's
+second phase feels like a change of behaviour rather than a damage spike.
+
+1. Start a run and read the two lines under the map: `Floor rule:` and `Next floor:`. The rule
+   under the map must be the one the run's log announced when the floor began.
+2. Turn the floor over (rest or clear it) and confirm the map header now names the rule that was
+   printed as "Next floor" before, and the log announced it again.
+3. Play a `leader-guarded` floor against two enemies. The first enemy must refuse an attack in the
+   menu with a reason that says it is guarded, and a stored order naming it must not be honoured.
+4. Play a `guard-reflects` floor and brace. The menu must show the reflected number before the
+   swing, and the log must give the enemy back the same 25% after it lands.
+5. Fight a boss across both thresholds. With the boss studied, each phase must print its name and
+   rule sentence; on an unstudied save it must print "shifts stance" and nothing more. Watch the
+   phase rule do something visible — thorns cutting each swing, a shield soaking the next hit, a
+   second blow, a Mark, or drained HP.
+
+Expected: the rule is known before the floor is committed to, and the boss's phase changes what the
+fight asks of the player rather than only how hard it hits.
 
 ## Sign-off
 

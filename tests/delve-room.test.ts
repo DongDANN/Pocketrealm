@@ -74,9 +74,9 @@ describe('a fight room opens instead of resolving', () => {
     expect(entry.run.pendingTurn).toBe(true);
     expect(entry.run.orders).toEqual([]);
     expect(entry.ended).toBe(false);
-    // The entry line is the only thing in the run: the fight has not happened yet.
-    expect(entry.run.log).toHaveLength(1);
-    expect(entry.run.log[0]!.type).toBe('room');
+    // Only the floor's rule announcement and the room entry: the fight has not happened yet.
+    expect(entry.run.log.map((line) => line.type)).toEqual(['info', 'room']);
+    expect(entry.run.log[0]!.text).toContain('rule:');
     // No partial anything is merged, so a later replay cannot double it.
     expect(entry.meta).toBe(meta);
     expect(entry.run.consumablesUsed).toEqual({});

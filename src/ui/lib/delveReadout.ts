@@ -13,13 +13,16 @@
 
 import {
   BOSSES,
+  RESIST_MULT,
   WEAKNESS_MULT,
   attackBreakdown,
   attackRange,
   companionBase,
   computeBuffs,
   computeModifiers,
+  critMultiplier,
   damageSumText,
+  elementsInverted,
   enemyIntent,
   forgeTotals,
   hitOf,
@@ -65,10 +68,10 @@ function roomView(run: RunState, meta: DelveMeta, signals: BudgetSignals): RoomV
   const knowledge = meta.bossKnowledge ?? [];
   return {
     run,
-    enemies: spawnEnemies(room, run.floor, run.heat),
+    enemies: spawnEnemies(room, run.floor, run.heat, run.floorRule),
     defence: openingDefence(run, mods, skillLevels(meta)),
     atk: base.atk + mods.atk,
-    critMult: mods.critDamageMult,
+    critMult: critMultiplier(run.floorRule, mods.critDamageMult),
     eliteBonus: mods.eliteDamageBonus,
     mastery: meta.mastery ?? {},
     studied: (enemy) => enemy.bossId !== undefined && knowledge.includes(enemy.bossId),
@@ -147,7 +150,7 @@ export function roomThreats(run: RunState, meta: DelveMeta, signals: BudgetSigna
 
   return view.enemies.map((enemy) => {
     const studied = view.studied(enemy);
-    const intent = enemyIntent(enemy, defence, { heat: run.heat, studied });
+    const intent = enemyIntent(enemy, defence, { studied });
     const next = intent.next;
     return {
       name: enemy.name,
@@ -209,12 +212,21 @@ export function roomSwings(run: RunState, meta: DelveMeta, signals: BudgetSignal
     const likely = attackBreakdown(input);
     const range = attackRange(input);
     const weaknessKnown = (meta.knownWeaknesses ?? []).includes(enemy.weakness);
-    const notes = [
-      weaknessKnown
-        ? `Weak to ${enemy.weakness} for +${Math.round((WEAKNESS_MULT - 1) * 100)}%`
-        : `Weak to ${enemy.weakness}`,
-      `Resists ${enemy.resistance}`,
-    ];
+    const inverted = elementsInverted(run.floorRule);
+    const notes = inverted
+      ? [
+          'Elements inverted',
+          weaknessKnown
+            ? `Weak to ${enemy.weakness}, but inverted: ×${RESIST_MULT}`
+            : `Weak to ${enemy.weakness}`,
+          `Resists ${enemy.resistance}, but inverted: ×${WEAKNESS_MULT}`,
+        ]
+      : [
+          weaknessKnown
+            ? `Weak to ${enemy.weakness} for +${Math.round((WEAKNESS_MULT - 1) * 100)}%`
+            : `Weak to ${enemy.weakness}`,
+          `Resists ${enemy.resistance}`,
+        ];
     const mastery = masteryLevel(view.mastery[enemy.species] ?? 0);
     if (mastery > 0) notes.push(`Mastery +${mastery}%`);
     if (input.shield > 0) notes.push(`${input.shield} Shield soaks it first`);

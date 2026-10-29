@@ -86,6 +86,11 @@ export interface IncomingInput {
   shield: number;
   /** The companion's HP before the hit. */
   hp: number;
+  /**
+   * Mark's damage-taken multiplier when the companion is the marked one (a `marks-you` boss phase,
+   * §8 E.2). Absent reads as 1, so every input written before the rule existed prices unchanged.
+   */
+  markMult?: number;
   /** A telegraphed boss mechanic: no variance, a flat +2, and a guard that halves it. */
   mechanic?: { multiplier: number; guard: boolean };
   /**
@@ -208,6 +213,11 @@ export function incomingBreakdown(input: IncomingInput): DamageBreakdown {
   if (m?.guard || input.guard) {
     damage = Math.round(damage / 2);
     terms.push({ label: 'Guard', op: 'mult', value: 0.5 });
+  }
+  const mark = input.markMult ?? 1;
+  if (mark !== 1) {
+    damage = Math.round(damage * mark);
+    terms.push({ label: 'Mark', op: 'mult', value: mark });
   }
   if (input.damageReduction > 0) {
     damage = Math.round((damage * (100 - input.damageReduction)) / 100);

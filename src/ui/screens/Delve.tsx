@@ -7,10 +7,12 @@ import {
   computeBuffs,
   consumableById,
   dailyHollow,
+  floorRuleById,
   heatUnlocked,
   hollowUnlocked,
   HOLLOW_FLOORS,
   movesetFor,
+  nextFloorRuleId,
   RUN_COST,
   turnMenu,
   anyBoonById,
@@ -114,6 +116,11 @@ export function Delve() {
   // A paused room has not merged its beats into the run log — they are the pause's own lines, and
   // they merge when the room closes. Reading `run.log` here would narrate the last finished room.
   const recap = run ? recapOf(delve.turn ? delve.turn.log : run.log) : { rows: [], omitted: 0 };
+  // §8 E.1: the floor being walked and the one being promised, both printed before the next door.
+  const floorRule = run ? floorRuleById(run.floorRule) : undefined;
+  const nextRule = run
+    ? floorRuleById(nextFloorRuleId(run.userSeed, run.hollowId, run.floor))
+    : undefined;
   /** The waiting room's live menu; the run's own HP only moves when the room finishes. */
   const turn =
     run?.pendingTurn && delve.turn ? turnMenu(run, meta, snapshot.signals, delve.turn) : null;
@@ -443,6 +450,26 @@ export function Delve() {
                 wrap={36}
               />
             </p>
+            {floorRule && (
+              <p className="panel-note">
+                <PixelText
+                  text={`Floor rule: ${floorRule.label} — ${floorRule.detail}.`}
+                  color={C.amber2}
+                  pixelScale={2}
+                  wrap={36}
+                />
+              </p>
+            )}
+            {nextRule && (
+              <p className="panel-note">
+                <PixelText
+                  text={`Next floor: ${nextRule.label} — ${nextRule.detail}.`}
+                  color={C.paper3}
+                  pixelScale={2}
+                  wrap={36}
+                />
+              </p>
+            )}
 
             {!turn && threats.length > 0 && (
               <div className="delve-readout">

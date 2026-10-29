@@ -43,18 +43,23 @@ function effectiveRarity(run: RunState, b: BoonLike): Rarity {
  * Weighted, distinct offer of `count` boons. Tag affinity boosts weights for tags already held;
  * bad-luck protection forces a top-tag boon in when two consecutive offers missed it. Held boons
  * below max level stay in the pool (level-up offers); maxed boons never appear. `salt` varies the
- * draw (used by Forge rerolls); the default salt keys off the step index.
+ * draw (used by Forge rerolls); the default salt keys off the step index. `allow` narrows the pool
+ * further — a floor rule can forbid a boon, and the offer has to respect the ban rather than price
+ * something the run cannot take.
  */
 export function buildBoonOffer(
   run: RunState,
   count: number,
   salt?: string,
+  allow?: (boon: BoonLike) => boolean,
 ): { offer: BoonLike[]; offerStreak: number } {
   const rng = offerRng(run, salt ?? `offer-${run.stepIndex}`);
   const pool: BoonLike[] = [...BOONS, ...FUSIONS].filter((b) => {
+    if (allow && !allow(b)) return false;
     if (!run.boons.includes(b.id)) return true;
     return (run.boonLevels[b.id] ?? 0) < MAX_BOON_LEVEL;
   });
+  if (pool.length === 0) return { offer: [], offerStreak: run.offerStreak };
   const tagCounts = new Map<BoonTag, number>();
   for (const id of run.boons) {
     const b = anyBoonById(id);

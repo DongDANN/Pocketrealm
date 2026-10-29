@@ -281,6 +281,8 @@ describe('choice flow', () => {
     const meta = emptyMeta();
     const ctx = mkCtx(meta);
     const hurt = singleRowRun('rest', {
+      // The seeded floor rule could be `no-rest-heal`; this test is about the ordinary rest.
+      floorRule: null,
       unit: {
         id: 'c',
         kind: 'companion',

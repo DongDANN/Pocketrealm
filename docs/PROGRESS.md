@@ -2304,3 +2304,79 @@ the real screens, against the production build, in one test that runs in 4.3 sec
   walks the same one of the two kinds — a passive and an active have not each been forced through the
   learn/equip path here, and the other kind rests on the board unit tests. The rungs' worth remains
   7f's question.
+
+### Gate 7d — Every floor declares its condition, and the bosses answer in rules (2026-10-29)
+
+The Hollow's ten floor rules and five boss rules are now one vocabulary each, printed before they
+bite. `src/core/delve/rules.ts` holds every rule as a sentence, an id the run stores, and a pure
+helper the engine calls at the exact place the sentence talks about. Nothing reimplements a
+subsystem: the helpers answer "how much" so the fight and the panels that price it cannot disagree.
+
+- **The rule table is the whole vocabulary.** `FLOOR_RULES` has the ten rules from §8 E.1, each with
+  a header label and the full sentence the run announces. Selection is
+  `floorRuleFor(userSeed, hollowId, floor)` on its own RNG stream
+  (`hashCombine(floorSeed(...), hashString('floor-rule'))`). Drawing from the map generator's stream
+  would have shuffled every room after it, so two builds would compare two different floors.
+- **Every rule is wired where it talks.** `skills-cost-two` feeds `TurnState.energyCosts` and the
+  menu's cost line; `no-rest-heal` goes through `restHealPercent`; `market-flip` doubles shop rows
+  (`shopPriceMultiplier`) and material drops (`dropMultiplier`) together; `no-ward-boons` filters the
+  boon pool with `boonAllowed`; `crits-heal` keeps the crit roll but prices it at ×1 and heals the
+  enemy half the blow; `guard-reflects` returns 25% of what the brace took, minimum 1;
+  `elements-invert` swaps the multipliers inside `elementMultiplier`, the one function both a
+  preview and a landed hit read; `swift-weak` shifts the roster once, when it is spawned;
+  `mark-one-round` clamps at application in `landStatus`. The audit that closed the gate checked each
+  helper against a real call site, not just against the table.
+- **The leader rule was adapted to the hand-played turn, and the printed line says so.** §8 E.1's
+  "only the first action each round may target the leader" is inert when a round *is* one order, so
+  the rule keeps its intent instead: the leader cannot be targeted while any other enemy stands. The
+  menu prints `The leader is guarded while its escort stands.` and refuses the target; the engine
+  refuses a stored order against it; `TurnState.targets[].guarded` lets the headless deciders avoid
+  the illegal order without re-deriving the rule.
+- **Boss phases add rules, not multipliers.** The five `BossRuleId`s (`thorns`, `marks-you`,
+  `shields-itself`, `strikes-twice`, `drains`) replace phase stat inflation. Three attach the affix
+  the engine already owns — `frenzied`, `vampiric`, `thorned` — so a boss rule and an enemy affix can
+  never mean two different things; `shields-itself` enters behind 8 Shield; `marks-you` applies the
+  player-side Mark on every landed blow. `BossDef.mechanicMultiplier` remains the only boss swing
+  multiplier, and phases never touch it. The Heat-3 extra phase remains a third rule, not a stat
+  bump.
+- **A real gap was found and closed while testing.** `mark-one-round` reached boss-applied Marks but
+  not skill-applied ones: `landStatus` passed a skill rung's `fx.statusRounds` straight to
+  `applyStatus`. Every Mark route now goes through `markRounds`, which is what the rule's own doc
+  already claimed — the sentence is uniform because the path is.
+- **The rule is on screen before it bites.** Each floor's first log line reads
+  `Floor N rule: <label> — <detail>.`, and the map header prints `Floor rule:` for this floor and
+  `Next floor:` for the next (or nothing on a Hollow's last floor), so a player can skip a floor they
+  dislike or spend around it.
+- **New outcome suite.** `tests/delve-rule-outcomes.test.ts` adds fifteen tests, each pairing a ruled
+  run with an unruled one on the same seed so only the rule differs: the announcement and the
+  pre-printed next rule; rest healing 69 → 40; a skill priced at 2 and the brace leaving 3 energy
+  (round regen plus the swing's credit, not 2); `crits-heal` found by scanning seeds 1–120 at
+  `critChance: 100` for a player's early crit and then compared paired; the guarded leader refused by
+  the menu, by the engine, and avoided by `builtinDecider`; Mark gone when the rule clamps it; spawn
+  SPD +4 / ATK −2; shop heal 80 vs 40 with drops exactly doubled; reflected damage parsed from the log
+  and matched to the enemy's HP loss; frost against a frost-resistant enemy moving 0.75 → 1.25; and
+  all five boss phases observed in real fights, each after its studied phase line.
+- **The goldens were re-recorded because the descent moved on purpose.** Floor rules change fights,
+  shops and drops, and boss phases change fights, so all five digests moved; the layouts did not,
+  because the rule stream is separate. New values: `ea36f09c76303066`, `9dbe7a381db32a75`,
+  `f406d8727c5ad6db`, `d089edafe140f671`, `3bf1d07e50ccba70`. The two auxiliary hashes keep their
+  jobs — the run-only hash proves the run knows nothing of the meta it earned, and the
+  ladder-excluded hash proves Dust and provenance are the only meta fields removed.
+- **Two browser goldens were regenerated deliberately.** `delve-run` and `delve-turn-panel` grew by
+  the two header notes, and the diffs were read before regenerating: only the rule notes and the
+  reflow they cause, no broken panel or stray text. No other snapshot moved.
+- **Docs follow the code.** §8 E.1 no longer claims the rules ride `CombatModifiers`; it documents
+  the rule table, the pure helpers, the `TurnState` fields that carry costs and refusals, and the
+  leader adaptation. §8 E.2 documents the five phase rules, the affix reuse, the 8 Shield, the Mark
+  clamp and that `mechanicMultiplier` is out of the phases' reach. `docs/MANUAL_TEST.md` gains §12,
+  five hand steps for rules and boss phases, and rows 11–12 in the summary table.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 1046/1046 across 82 files**
+  (fifteen new, all passing); `npm run sim:golden` **verified** the five re-recorded digests above;
+  `npm run build` **verified** clean; `npx playwright test` **verified 69/69** in Chromium against the
+  production build (5.3m), with the two regenerated goldens matching on the full second run.
+- **Not verified / still open:** the §12 hand walk has not been played on a phone; the rule
+  distribution is uniform per floor with no tuning, and whether a roll like `crits-heal` lands as
+  hardship or as noise is 7f's question, as is whether the boss phase rules make the three bosses
+  harder in the way they should. `leader-guarded` exists only as a floor rule; an escort that guards
+  its leader on some other floor is not a mechanic the game has.

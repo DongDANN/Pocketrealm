@@ -86,20 +86,25 @@ export interface MenuRow {
 }
 
 function targetRows(action: TurnAction): MenuRow[] {
-  return action.targets.map((target) => ({
-    id: `target:${target.targetIndex}`,
-    label: target.name,
-    detail: `likely ${target.likely} (${target.min}–${target.max}) · ${target.afterHp} HP after`,
-    sum: target.sumText,
-    notes: [...target.notes],
-    disabled: !action.ready,
-    aria: `${action.name} ${target.name}: likely ${target.likely}, ${target.sumText}`,
-    order: {
-      skillId: action.kind === 'skill' ? action.id : null,
-      targetIndex: target.targetIndex,
-      guard: false,
-    },
-  }));
+  return action.targets.map((target) => {
+    const refused = target.refused;
+    return {
+      id: `target:${target.targetIndex}`,
+      label: target.name,
+      detail:
+        (refused !== '' ? `${refused} · ` : '') +
+        `likely ${target.likely} (${target.min}–${target.max}) · ${target.afterHp} HP after`,
+      sum: target.sumText,
+      notes: [...target.notes],
+      disabled: !action.ready || refused !== '',
+      aria: `${action.name} ${target.name}: likely ${target.likely}, ${target.sumText}${refused !== '' ? ` — ${refused}` : ''}`,
+      order: {
+        skillId: action.kind === 'skill' ? action.id : null,
+        targetIndex: target.targetIndex,
+        guard: false,
+      },
+    };
+  });
 }
 
 /** The move row prices itself the way the old panel did: cost, refusal, and the likely number. */
@@ -160,19 +165,21 @@ export function viewRows(focus: BattleFocus, menu: TurnMenu): MenuRow[] {
       return action ? targetRows(action) : [];
     }
 
-    case 'guard':
+    case 'guard': {
+      const reflect = menu.guard.reflect > 0 ? ` · ${menu.guard.reflect} reflected` : '';
       return [
         {
           id: 'brace',
           label: 'Brace',
-          detail: `${menu.guard.unbraced} → ${menu.guard.braced} incoming`,
+          detail: `${menu.guard.unbraced} → ${menu.guard.braced} incoming${reflect}`,
           sum: menu.guard.lines.flatMap((line) => line.sums).join(' '),
           notes: [],
           disabled: false,
-          aria: `Brace: ${menu.guard.unbraced} damage becomes ${menu.guard.braced}`,
+          aria: `Brace: ${menu.guard.unbraced} damage becomes ${menu.guard.braced}${reflect}`,
           order: { skillId: null, targetIndex: 0, guard: true },
         },
       ];
+    }
 
     case 'items':
       if (menu.items.length === 0) {

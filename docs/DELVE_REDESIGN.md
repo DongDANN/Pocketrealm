@@ -253,14 +253,30 @@ doubling` · `only the first action each round may target the leader` · `Rest r
 `Mark expires in one round` · `enemy SPD +4, ATK −2` · `shop prices doubled, drops doubled` ·
 `Guard also reflects 25%` · `elements invert weakness and resistance`.
 
-Rules plug into `CombatModifiers`, which is already the channel Heat modifiers use
-(`src/core/delve/combat.ts:305` parameter list), so this is a data table plus one modifier.
+Rules live in `src/core/delve/rules.ts` as a table of label, sentence and one pure helper each,
+called at the exact site the rule talks about (energy, rest, shop, drops, boon pool, crits, Guard,
+elements, spawn stats, Mark duration, targeting). The turn menu prices from a `TurnState` that
+carries the rule's energy costs and target refusals, so the number shown and the number the engine
+resolves cannot disagree.
+
+One rule is adapted to the hand-played turn model: "only the first action each round may target the
+leader" would allow every order in a one-order round, so `leader-guarded` instead refuses the
+leader while any other enemy stands — the same intent, that the leader is shielded by its escort.
+The printed sentence says exactly that, and an unstudied decider is shown the refusal.
 
 ### E.2 Bosses
 
 Bosses keep their art, their intro sequence and their telegraphs. Phases are cut to two, and each
 phase **adds a rule** rather than raising stats — phase 2 is "now marks you every round", not
 "+20% ATK". The Heat-3 extra phase remains as a third rule.
+
+The five phase rules are `thorns`, `marks-you`, `shields-itself`, `strikes-twice` and `drains`.
+Three attach an affix the enemy table already owns (`thorned`, `vampiric`, `frenzied`) instead of
+a second implementation of the same behaviour; `shields-itself` grants 8 Shield on entry;
+`marks-you` applies the same Mark the companion's skills use, clamped by the floor rule's Mark
+duration. A studied boss prints the phase name and the rule's sentence; an unstudied one prints
+only that it shifted stance. The mechanic keeps `BossDef.mechanicMultiplier` — the one place a
+boss's swing is still multiplied — and phases never touch it.
 
 Boss Study keeps its shape and its ethics: fainting to a boss permanently reveals its weakness and
 its tell. It reveals information only; bosses never gain stats from failure.

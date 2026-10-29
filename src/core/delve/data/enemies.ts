@@ -4,6 +4,7 @@
  */
 
 import type { Element } from './elements';
+import type { BossRuleId } from '../rules';
 
 export interface EnemyDef {
   id: string;
@@ -34,8 +35,11 @@ export interface BossPhase {
   name: string;
   /** Study-only detail: shown in the phase log once the boss is studied. */
   detail: string;
-  /** Mechanic damage multiplier while in this phase. */
-  mechanicMultiplier: number;
+  /**
+   * What the new stance adds (§8 E.2). A phase changes behaviour, not a hidden damage number: the
+   * mechanic keeps `BossDef.mechanicMultiplier`, and the rule is announced where it starts to matter.
+   */
+  rule: BossRuleId;
 }
 
 export interface BossDef extends EnemyDef {
@@ -44,6 +48,7 @@ export interface BossDef extends EnemyDef {
   mechanic: string;
   /** Every N rounds the boss uses its heavy mechanic attack. */
   mechanicEvery: number;
+  /** How hard the mechanic lands; phases add rules rather than raising this number. */
   mechanicMultiplier: number;
   /** HP-threshold phases, first to last. */
   phases?: BossPhase[];
@@ -258,21 +263,21 @@ export const BOSSES: readonly BossDef[] = [
       {
         hpPercent: 66,
         name: 'Bramble Armor',
-        detail: 'her thorns thicken and the barrage hits harder.',
-        mechanicMultiplier: 1.5,
+        detail: 'her thorns thicken — every strike you land cuts you for 2 in return.',
+        rule: 'thorns',
       },
       {
         hpPercent: 33,
         name: 'Thorn Frenzy',
-        detail: 'she throws everything left; the barrage hits much harder.',
-        mechanicMultiplier: 1.8,
+        detail: 'every blow she lands leaves you Marked, taking 25% more until it fades.',
+        rule: 'marks-you',
       },
     ],
     heatPhase: {
       hpPercent: 25,
       name: 'Lantern Eater',
-      detail: 'the crown of thorns reaches for the lantern itself; the barrage hits brutally hard.',
-      mechanicMultiplier: 2.1,
+      detail: 'the crown drinks back a share of every blow that lands on you.',
+      rule: 'drains',
     },
   },
   {
@@ -296,21 +301,21 @@ export const BOSSES: readonly BossDef[] = [
       {
         hpPercent: 66,
         name: 'Molten Shell',
-        detail: 'its plating runs bright; the slam hits harder.',
-        mechanicMultiplier: 1.6,
+        detail: 'its plating runs bright — it enters the phase behind 8 Shield.',
+        rule: 'shields-itself',
       },
       {
         hpPercent: 33,
         name: 'Cold Forge',
-        detail: 'the dead fire stokes one last time; the slam hits much harder.',
-        mechanicMultiplier: 1.9,
+        detail: 'the dead fire stokes one last time and swings twice for every action.',
+        rule: 'strikes-twice',
       },
     ],
     heatPhase: {
       hpPercent: 25,
       name: 'Ash Reign',
-      detail: 'every cinder in the vault answers its call; the slam hits brutally hard.',
-      mechanicMultiplier: 2.2,
+      detail: 'every cinder in the vault answers its call — striking it cuts you for 2.',
+      rule: 'thorns',
     },
   },
   {
@@ -334,21 +339,21 @@ export const BOSSES: readonly BossDef[] = [
       {
         hpPercent: 66,
         name: 'Starless Crown',
-        detail: 'the crown closes; the siphon pulls harder.',
-        mechanicMultiplier: 1.6,
+        detail: 'the crown closes — every blow it lands leaves you Marked, taking 25% more.',
+        rule: 'marks-you',
       },
       {
         hpPercent: 33,
         name: 'Devouring Dark',
-        detail: 'the dark between floors opens wide; the siphon pulls much harder.',
-        mechanicMultiplier: 1.9,
+        detail: 'the dark opens wide and drinks back a share of every blow that lands on you.',
+        rule: 'drains',
       },
     ],
     heatPhase: {
       hpPercent: 25,
       name: 'Eclipse',
-      detail: 'the dead stars gutter out; the siphon pulls brutally hard.',
-      mechanicMultiplier: 2.2,
+      detail: 'the dead stars gutter out and swing twice for every action.',
+      rule: 'strikes-twice',
     },
   },
 ];
@@ -381,10 +386,4 @@ export function enemyById(id: string): EnemyDef | undefined {
 export function bossPhases(boss: BossDef, heat: number): BossPhase[] {
   const base = boss.phases ?? [];
   return heat >= 3 && boss.heatPhase ? [...base, boss.heatPhase] : base;
-}
-
-/** The mechanic multiplier for the phase the boss has already entered (0 = phase 1). */
-export function mechanicMultiplier(boss: BossDef, phaseIndex: number, heat: number): number {
-  const phase = phaseIndex > 0 ? bossPhases(boss, heat)[phaseIndex - 1] : undefined;
-  return phase?.mechanicMultiplier ?? boss.mechanicMultiplier;
 }

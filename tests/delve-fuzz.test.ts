@@ -50,11 +50,19 @@ const KINDS: RoomKind[] = ['skirmish', 'elite', 'treasure', 'rest', 'shop', 'eve
 function randomOrder(rng: ReturnType<typeof mulberry32>, state: TurnState): TurnOrder {
   const living = state.targets.length;
   const ready = state.actives.filter(
-    (sk) => (state.cooldowns[sk.id] ?? 0) <= 0 && state.energy >= (sk.energyCost ?? 1),
+    (sk) =>
+      (state.cooldowns[sk.id] ?? 0) <= 0 &&
+      state.energy >= (state.energyCosts?.[sk.id] ?? sk.energyCost ?? 1),
   );
   if (living === 0 || rng.int(10) === 0) return { skillId: null, targetIndex: 0, guard: true };
+  const legal = state.targets.flatMap((target, index) => (target.guarded ? [] : [index]));
+  if (legal.length === 0) return { skillId: null, targetIndex: 0, guard: true };
   const skill = ready.length > 0 && rng.int(2) === 0 ? ready[rng.int(ready.length)]! : null;
-  return { skillId: skill?.id ?? null, targetIndex: rng.int(living), guard: false };
+  return {
+    skillId: skill?.id ?? null,
+    targetIndex: legal[rng.int(legal.length)]!,
+    guard: false,
+  };
 }
 
 function randomDecider(rng: ReturnType<typeof mulberry32>): TurnDecider {

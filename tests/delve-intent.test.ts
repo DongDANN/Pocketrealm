@@ -219,17 +219,15 @@ describe('boss cadence', () => {
     expect(braced.next.damage!.likely).toBe(5);
   });
 
-  it('uses the multiplier of the phase the boss has entered', () => {
-    const phase1 = enemyIntent(foe('thorncrown', { turn: 7, phaseIndex: 1 }), defence);
-    expect(phase1.next.input!.mechanic!.multiplier).toBe(1.5);
-    expect(phase1.next.damage!.likely).toBe(12);
+  it('prices the mechanic from the boss, because a phase adds a rule rather than a multiplier', () => {
     const phase2 = enemyIntent(foe('thorncrown', { turn: 7, phaseIndex: 2 }), defence);
-    expect(phase2.next.input!.mechanic!.multiplier).toBe(1.8);
+    expect(phase2.next.input!.mechanic!.multiplier).toBe(thorncrown.mechanicMultiplier);
+    expect(phase2.next.damage!.likely).toBe(10);
   });
 
-  it('appends the Heat 3 phase to the cadence', () => {
-    const intent = enemyIntent(foe('thorncrown', { turn: 7, phaseIndex: 3 }), defence, { heat: 3 });
-    expect(intent.next.input!.mechanic!.multiplier).toBe(2.1);
+  it('keeps the Heat 3 phase on the same mechanic price', () => {
+    const intent = enemyIntent(foe('thorncrown', { turn: 7, phaseIndex: 3 }), defence);
+    expect(intent.next.input!.mechanic!.multiplier).toBe(thorncrown.mechanicMultiplier);
   });
 
   it('names the mechanic for a studied boss and hides it otherwise', () => {

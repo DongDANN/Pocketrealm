@@ -41,15 +41,21 @@ import {
   THORN_DAMAGE,
   VAMPIRIC_DRAIN_DIVISOR,
 } from './data/affixes';
-import {
-  BOSSES,
-  ELITES,
-  bossPhases,
-  enemyById,
-  mechanicMultiplier,
-  scaledStats,
-} from './data/enemies';
+import { BOSSES, ELITES, bossPhases, enemyById, scaledStats } from './data/enemies';
 import { elementMultiplier, type Element } from './data/elements';
+import {
+  BOSS_RULE_AFFIX,
+  BOSS_RULE_SHIELD,
+  type BossRuleId,
+  critMultiplier,
+  critsHeal,
+  elementsInverted,
+  enemyStatShift,
+  guardReflect,
+  leaderGuarded,
+  markRounds,
+  skillEnergyCost,
+} from './rules';
 import {
   attackBreakdown,
   damageSumText,
@@ -460,15 +466,18 @@ export interface EnemyState {
 
 /**
  * The roster a room opens with. Split out of `runCombat` so the on-screen threat readout prices the
- * same enemies the fight actually spawns.
+ * same enemies the fight actually spawns. The floor rule is part of the spawn: the readout and the
+ * fight must both see a `swift-weak` roster, or the numbers the player was shown would be wrong.
  */
 export function spawnEnemies(
   room: { enemies: readonly string[]; affixes?: string[] },
   floor: number,
   heat: number,
+  rule: string | null | undefined = null,
 ): EnemyState[] {
   const roomAffixes = room.affixes ?? [];
   const heatAtk = heat >= 1 ? 1.1 : 1; // Heat 1+: stronger enemies
+  const shift = enemyStatShift(rule);
   return room.enemies.map((id, i) => {
     const def = enemyById(id)!;
     const elite = ELITES.some((e) => e.id === id);
@@ -482,9 +491,9 @@ export function spawnEnemies(
       name: def.name,
       hp: s.hp,
       maxHp: s.hp,
-      atk: Math.round(s.atk * heatAtk),
+      atk: Math.max(1, Math.round(s.atk * heatAtk) + shift.atk),
       def: armored ? s.def + Math.max(1, Math.round(s.def * 0.3)) : s.def,
-      spd: s.spd + (affixes.includes('swift') ? 2 : 0),
+      spd: s.spd + (affixes.includes('swift') ? 2 : 0) + shift.spd,
       elite,
       bossId: boss?.id,
       turn: 0,
@@ -562,6 +571,7 @@ function skillMultiplier(
   target: EnemyState,
   skill: SkillDef,
   knownWeaknesses: readonly Element[],
+  inverted = false,
 ): number {
   const elem = skill.element;
   if (!elem) return 1;
@@ -570,6 +580,7 @@ function skillMultiplier(
     target.weakness,
     target.resistance,
     knownWeaknesses.includes(elem),
+    inverted,
   );
 }
 
@@ -586,6 +597,8 @@ export interface AttackContext {
   mastery: Record<string, number>;
   /** Dust levels by skill id (§7 D.6). A skill that is not in here is LV1 and prices unchanged. */
   skillLevels: Record<string, number>;
+  /** The `elements-invert` floor rule (§8 E.1), so a preview prices the same swap the fight uses. */
+  elementInverted?: boolean;
 }
 
 /** The exact inputs one companion attack resolves with; `roll` is the only part a preview guesses. */
@@ -609,7 +622,9 @@ export function attackInputFor(
     burningBonus: fx?.burningBonus ?? 0,
     targetBurning: hasStatus(target.statuses, 'burn'),
     markMult: markDamageMult(target),
-    elementMult: skill ? skillMultiplier(target, skill, ctx.knownWeaknesses) : 1,
+    elementMult: skill
+      ? skillMultiplier(target, skill, ctx.knownWeaknesses, ctx.elementInverted)
+      : 1,
     masteryLvl: masteryLevel(ctx.mastery[target.species] ?? 0),
     eliteBonus: ctx.eliteBonus,
     targetElite: target.elite,
@@ -643,6 +658,7 @@ export function runCombat(
   skillLevels: Record<string, number> = {},
 ): CombatResult {
   const rng = combatRng(run.runId, run.stepIndex);
+  const rule = run.floorRule;
   const log: RunLogEntry[] = [];
   const step = run.stepIndex;
   const logLine = (text: string, data?: Record<string, unknown>): void => {
@@ -685,7 +701,9 @@ export function runCombat(
     logLine('Fire Oil: enemies start Burning.');
   }
 
-  const enemies = spawnEnemies(room, floor, run.heat);
+  const enemies = spawnEnemies(room, floor, run.heat, rule);
+  /** Boss phase rules this fight has added (§8 E.2). Affix-backed rules also attach their affix. */
+  const bossRules = new Set<BossRuleId>();
   if (fireOil) {
     for (const e of enemies) e.statuses = applyStatus(e.statuses, 'burn', rng, {});
   }
@@ -705,6 +723,21 @@ export function runCombat(
       const p = phases[e.phaseIndex]!;
       if (e.hp > Math.floor((e.maxHp * p.hpPercent) / 100)) break;
       e.phaseIndex += 1;
+      if (!bossRules.has(p.rule)) {
+        bossRules.add(p.rule);
+        const affix = BOSS_RULE_AFFIX[p.rule];
+        if (affix && !e.affixes.includes(affix)) e.affixes = [...e.affixes, affix];
+        if (p.rule === 'shields-itself') {
+          e.statuses = [
+            ...e.statuses,
+            {
+              id: 'shield',
+              stacks: BOSS_RULE_SHIELD,
+              duration: Number.POSITIVE_INFINITY,
+            },
+          ];
+        }
+      }
       logLine(
         studied(boss.id) ? `${e.name} enters ${p.name} — ${p.detail}!` : `${e.name} shifts stance!`,
       );
@@ -726,6 +759,39 @@ export function runCombat(
       split: false,
     });
     logLine(`${e.name} splits into a lesser copy!`);
+  }
+
+  /** The `marks-you` phase rule (§8 E.2): every blow a phased boss lands leaves the companion Marked. */
+  function markPlayer(e: EnemyState): void {
+    if (!e.bossId || !bossRules.has('marks-you') || e.hp <= 0) return;
+    statuses = applyStatus(statuses, 'mark', rng, {
+      rounds: markRounds(rule, statusById('mark')?.duration ?? 2),
+    });
+    logLine(`${e.name} marks you.`);
+  }
+
+  /** The `guard-reflects` floor rule: a braced blow gives a quarter of its damage back. */
+  function reflectGuard(e: EnemyState, dealt: number): void {
+    if (e.hp <= 0) return;
+    const reflected = guardReflect(rule, dealt);
+    if (reflected <= 0) return;
+    e.hp -= reflected;
+    logLine(`${e.name} takes ${reflected} from your guard.`);
+    if (e.hp <= 0) {
+      logLine(`${e.name} falls.`);
+      maybeSplit(e);
+    }
+  }
+
+  /** Mark on the companion is paid by every blow that lands on it, the same 25% enemies pay. */
+  function playerMarkMult(): number {
+    return hasStatus(statuses, 'mark') ? (statusById('mark')!.perRound!.dmgTakenMult ?? 1) : 1;
+  }
+
+  /** Written only when the companion is Marked, so an unmarked hit stays the forecast's own object. */
+  function markField(): { markMult?: number } {
+    const mark = playerMarkMult();
+    return mark !== 1 ? { markMult: mark } : {};
   }
 
   /** Attach the itemization to the line the recap and the text log both read from. */
@@ -767,7 +833,9 @@ export function runCombat(
       const out = applyStatus(enemy.statuses, id, rng, {
         isBoss: enemy.bossId !== undefined,
         roundsSinceStun: enemy.turnsSinceStun,
-        rounds: fx.statusRounds,
+        // The `mark-one-round` floor rule clamps every route that applies Mark, not only a boss's.
+        rounds:
+          id === 'mark' ? markRounds(rule, fx.statusRounds ?? statusDef.duration) : fx.statusRounds,
       });
       if (out !== enemy.statuses) {
         enemy.statuses = out;
@@ -792,6 +860,12 @@ export function runCombat(
       logLine(`${target.name}'s shield absorbs ${absorbed}.`);
     }
     target.hp -= dmg;
+    if (sum.crit && critsHeal(rule) && dmg > 0 && target.hp > 0) {
+      // The `crits-heal` floor rule: a critical pays the enemy instead of doubling (§8 E.1).
+      const heal = Math.max(1, Math.round(dmg / 2));
+      target.hp = Math.min(target.maxHp, target.hp + heal);
+      logLine(`${target.name} drinks back ${heal} from the critical.`);
+    }
     const label = skill ? `use ${skill.name} (${skill.element}) and hit` : 'hit';
     const line = `${sum.crit ? 'CRIT! ' : ''}You ${label} ${target.name} for ${dmg}.`;
     logLine(
@@ -799,8 +873,11 @@ export function runCombat(
       hitRecord('player', 'You', target.name, input, sum, skill?.id),
     );
     if (skill?.element) {
-      const mult = skillMultiplier(target, skill, knownWeaknesses);
-      if (mult > 1) logLine(`Weakness! +25% ${skill.element} damage.`);
+      const mult = skillMultiplier(target, skill, knownWeaknesses, elementsInverted(rule));
+      if (mult > 1)
+        logLine(
+          `${elementsInverted(rule) ? 'Inverted elements' : 'Weakness'}! +25% ${skill.element} damage.`,
+        );
     }
     if (fx?.shieldPercent) {
       const gain = Math.round(dmg * fx.shieldPercent);
@@ -841,17 +918,23 @@ export function runCombat(
     energy,
     hp,
     maxHp,
+    /** A phased boss's `marks-you` rule raises every blow on the companion by 25%. */
+    marked: hasStatus(statuses, 'mark'),
     // Copies, not the live maps: a decider that keeps the menu it was handed must not watch the fight
     // rewrite it after the fact.
     cooldowns: { ...cooldowns },
     actives,
+    energyCosts: Object.fromEntries(
+      actives.map((skill) => [skill.id, skillEnergyCost(rule, skill)]),
+    ),
     targets: enemies
       .filter((e) => e.hp > 0)
-      .map((e) => ({
+      .map((e, index, living) => ({
         hp: e.hp,
         maxHp: e.maxHp,
         marked: hasStatus(e.statuses, 'mark'),
         weakness: e.weakness,
+        guarded: leaderGuarded(rule) && living.length > 1 && index === 0,
       })),
   });
 
@@ -876,11 +959,14 @@ export function runCombat(
         ? living[order.targetIndex]
         : undefined;
     if (!target) return null;
+    // The leader is shielded by its escort under the `leader-guarded` floor rule (§8 E.1). The
+    // menu never offers this order; refusing it here is what keeps a stale menu from slipping it in.
+    if (leaderGuarded(rule) && living.length > 1 && target === living[0]) return null;
     if (order.skillId === null) return { brace: false, target };
     const skill = actives.find((s) => s.id === order.skillId);
     if (!skill) return null;
     if ((cooldowns[skill.id] ?? 0) > 0) return null;
-    if (energy < (skill.energyCost ?? 1)) return null;
+    if (energy < skillEnergyCost(rule, skill)) return null;
     return { brace: false, skill, target };
   };
 
@@ -961,7 +1047,7 @@ export function runCombat(
         const target = acted.target;
         const fx = chosen ? fxAtLevel(chosen, skillLevels[chosen.id]) : undefined;
         if (chosen) {
-          energy -= chosen.energyCost ?? 1;
+          energy -= skillEnergyCost(rule, chosen);
           cooldowns[chosen.id] = chosen.cooldown ?? 1;
           if (bossTelegraph && chosen.role === 'guard') {
             guardActive = true;
@@ -974,11 +1060,12 @@ export function runCombat(
           chosen ?? null,
           {
             atk,
-            critMult: modifiers.critDamageMult,
+            critMult: critMultiplier(rule, modifiers.critDamageMult),
             eliteBonus: modifiers.eliteDamageBonus,
             knownWeaknesses,
             mastery,
             skillLevels,
+            elementInverted: elementsInverted(rule),
           },
           roll,
         );
@@ -1005,7 +1092,7 @@ export function runCombat(
       const boss = e.bossId ? BOSSES.find((b) => b.id === e.bossId) : undefined;
       if (boss && e.turn % boss.mechanicEvery === 0) {
         if (bossTelegraph) {
-          const mult = mechanicMultiplier(boss, e.phaseIndex, run.heat);
+          const mult = boss.mechanicMultiplier;
           const guard = guardActive || bracedRound === round;
           if (guard) logLine('Your guard softens the blow.');
           guardActive = false;
@@ -1016,6 +1103,7 @@ export function runCombat(
             damageReduction: modifiers.damageReduction,
             shield,
             hp,
+            ...markField(),
             mechanic: { multiplier: mult, guard },
           };
           const sum = incomingBreakdown(input);
@@ -1025,6 +1113,13 @@ export function runCombat(
             `${e.name} unleashes its mechanic! ${sum.absorbed > 0 ? `Shield absorbs ${sum.absorbed}. ` : ''}You take ${sum.dealt}. (${damageSumText(sum)})`,
             hitRecord('enemy', e.name, 'You', input, sum),
           );
+          if (e.hp > 0 && bossRules.has('drains') && sum.dealt > 0) {
+            const drain = Math.max(1, Math.round(sum.dealt / VAMPIRIC_DRAIN_DIVISOR));
+            e.hp = Math.min(e.maxHp, e.hp + drain);
+            logLine(`${e.name} drains ${drain} HP.`);
+          }
+          if (bracedRound === round) reflectGuard(e, sum.dealt);
+          markPlayer(e);
           bossTelegraph = false;
         } else {
           bossTelegraph = true;
@@ -1046,6 +1141,7 @@ export function runCombat(
         damageReduction: modifiers.damageReduction,
         shield,
         hp,
+        ...markField(),
         // A brace is the player's choice, so it is recorded only when it actually happened: an
         // unbraced hit stays the exact object the intent forecast predicts.
         ...(bracedRound === round ? { guard: true } : {}),
@@ -1058,7 +1154,8 @@ export function runCombat(
         `${e.name} hits for ${sum.dealt}${sum.absorbed > 0 ? ` (shield absorbs ${sum.absorbed})` : ''}. (${damageSumText(sum)})`,
         hitRecord('enemy', e.name, 'You', input, sum),
       );
-      if (e.affixes.includes('vampiric') && sum.dealt > 0) {
+      if (bracedRound === round) reflectGuard(e, sum.dealt);
+      if (e.affixes.includes('vampiric') && sum.dealt > 0 && e.hp > 0) {
         const drain = Math.max(1, Math.round(sum.dealt / VAMPIRIC_DRAIN_DIVISOR));
         e.hp = Math.min(e.maxHp, e.hp + drain);
         logLine(`${e.name} drains ${drain} HP.`);
@@ -1072,6 +1169,7 @@ export function runCombat(
           damageReduction: modifiers.damageReduction,
           shield,
           hp,
+          ...markField(),
           ...(bracedRound === round ? { guard: true } : {}),
         };
         const sum2 = incomingBreakdown(input2);
@@ -1082,7 +1180,9 @@ export function runCombat(
           `${e.name} strikes again for ${sum2.dealt}${sum2.absorbed > 0 ? ` (shield absorbs ${sum2.absorbed})` : ''}. (${damageSumText(sum2)})`,
           hitRecord('enemy', e.name, 'You', input2, sum2),
         );
+        if (bracedRound === round) reflectGuard(e, sum2.dealt);
       }
+      markPlayer(e);
       // Smoke Scroll: a killing blow outside a boss room becomes a 1-HP escape.
       if (hp <= 0 && room.kind !== 'boss' && hasConsumable('smoke-scroll')) {
         hp = 1;

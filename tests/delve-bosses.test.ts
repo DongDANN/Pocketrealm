@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BOSSES,
+  BOSS_RULES,
   builtinDecider,
   computeModifiers,
   emptyMeta,
@@ -32,10 +33,14 @@ describe('boss phase data', () => {
     }
   });
 
-  it('each phase hits harder than the last', () => {
+  it('every phase adds one rule from the shared vocabulary, never a hidden multiplier', () => {
     for (const b of BOSSES) {
-      expect(b.phases![0]!.mechanicMultiplier).toBeGreaterThan(b.mechanicMultiplier);
-      expect(b.phases![1]!.mechanicMultiplier).toBeGreaterThan(b.phases![0]!.mechanicMultiplier);
+      const rules = b.phases!.map((p) => p.rule);
+      for (const rule of rules) expect(BOSS_RULES[rule]).toBeDefined();
+      expect(new Set(rules).size).toBe(rules.length);
+      expect(b.heatPhase).toBeDefined();
+      expect(BOSS_RULES[b.heatPhase!.rule]).toBeDefined();
+      expect(b.mechanicMultiplier).toBeGreaterThan(1);
     }
   });
 });

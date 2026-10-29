@@ -112,6 +112,7 @@ function action(over: Partial<TurnAction> = {}): TurnAction {
         sum: BREAKDOWN,
         sumText: SUM,
         notes: [],
+        refused: '',
       },
     ],
     ...over,
@@ -129,7 +130,7 @@ function menu(over: Partial<TurnMenu> = {}): TurnMenu {
     intents: [intent()],
     skills: [action()],
     attack: action({ kind: 'attack', id: null, name: 'Strike', cost: 'free' }),
-    guard: { lines: [], unbraced: 5, braced: 3 },
+    guard: { lines: [], unbraced: 5, braced: 3, reflect: 0 },
     items: [],
     ...over,
   };

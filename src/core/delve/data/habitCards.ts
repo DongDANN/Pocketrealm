@@ -99,7 +99,8 @@ function conditionReason(c: CardCondition, s: TurnState): string | null {
 
 function readySkills(s: TurnState): SkillDef[] {
   return s.actives.filter(
-    (sk) => (s.cooldowns[sk.id] ?? 0) <= 0 && s.energy >= (sk.energyCost ?? 1),
+    (sk) =>
+      (s.cooldowns[sk.id] ?? 0) <= 0 && s.energy >= (s.energyCosts?.[sk.id] ?? sk.energyCost ?? 1),
   );
 }
 
@@ -167,10 +168,15 @@ export function evaluateCards(cards: readonly CardDef[], state: TurnState): Card
 export function builtinDecider(state: TurnState): TurnOrder {
   const decision = evaluateCards(BUILTIN_DECK, state);
   const action = decision.fired ? resolveCardAction(decision.fired.action, state) : { basic: true };
-  const marked = state.targets.findIndex((t) => t.marked);
+  // A guarded leader is not a legal order (§8 E.1), so the fallback is the first target the rules
+  // allow rather than an index that would stop the room and ask again.
+  const legal = state.targets
+    .map((target, index) => ({ target, index }))
+    .filter(({ target }) => !target.guarded);
+  const marked = legal.find(({ target }) => target.marked)?.index ?? -1;
   return {
     skillId: action.skill?.id ?? null,
-    targetIndex: action.attackMarked && marked >= 0 ? marked : 0,
+    targetIndex: action.attackMarked && marked >= 0 ? marked : (legal[0]?.index ?? 0),
     guard: false,
   };
 }

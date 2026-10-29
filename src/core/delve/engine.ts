@@ -19,6 +19,14 @@ import { generateFloor, HOLLOW_FLOORS } from './map';
 import { settleSkillUses, skillLevels, usesFromLog } from './levels';
 import { movesetSnapshot } from './moveset';
 import { computeBuffs } from './signals';
+import {
+  boonAllowed,
+  dropMultiplier,
+  floorRuleById,
+  floorRuleFor,
+  restHealPercent,
+  shopPriceMultiplier,
+} from './rules';
 import { lookaheadRows, masteryMult } from './buildings';
 import { gainMastery } from './mastery';
 import { addMaterials, bankMaterials } from './materials';
@@ -124,7 +132,7 @@ export function newRun(
   const plan = generateFloor(userSeed, hollowId, 1, h);
   const smithy = meta.buildingLevels?.['smithy'] ?? 0;
   const smithyAtk = smithy > 0 ? Math.round((base.atk + build.profile.atkAdd) * 0.03 * smithy) : 0;
-  return {
+  const start: RunState = {
     runId: `d${hollowId}-${userSeed.toString(16)}-${meta.runsStarted + 1}`,
     userSeed,
     hollowId,
@@ -167,9 +175,10 @@ export function newRun(
     log: [],
     roomsVisited: [],
     orders: [],
-    floorRule: null,
+    floorRule: floorRuleFor(userSeed, hollowId, 1),
     skipOutstanding: false,
   };
+  return announceRule(start);
 }
 
 interface EconomyMods {
@@ -226,6 +235,13 @@ function pushLog(
   data?: Record<string, unknown>,
 ): RunState {
   return { ...run, log: [...run.log, { step: run.stepIndex, type, text, data }] };
+}
+
+/** Announce the rule the floor is under the moment the floor begins (§8 E.1). */
+function announceRule(run: RunState): RunState {
+  const def = floorRuleById(run.floorRule);
+  if (!def) return run;
+  return pushLog(run, 'info', `Floor ${run.floor} rule: ${def.label} — ${def.detail}.`);
 }
 
 function currentRoom(run: RunState): RoomDef {
@@ -346,7 +362,15 @@ function grantBoonOffer(run: RunState): { run: RunState; pending: boolean } {
   const { offer, offerStreak } = buildBoonOffer(
     run,
     3 + (run.relics.includes('relic-ledgerlace') ? 1 : 0),
+    undefined,
+    (b) => boonAllowed(run.floorRule, b),
   );
+  if (offer.length === 0) {
+    return {
+      run: pushLog(run, 'info', "The floor's rule leaves no boon to offer."),
+      pending: false,
+    };
+  }
   const next = { ...run, offerStreak };
   return {
     run: {
@@ -469,8 +493,10 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
     row: 0,
     path: [],
     floorPlan: generateFloor(next.userSeed, next.hollowId, newFloor, next.heat),
+    floorRule: floorRuleFor(next.userSeed, next.hollowId, newFloor),
     glint: next.glint + glintGain,
   };
+  next = announceRule(next);
   if (next.relics.includes('relic-trailmix')) next = healHp(next, 8);
   return { run: next, meta, ledger, ended: false };
 }
@@ -557,8 +583,9 @@ function shopItems(
 ): { id: string; label: string; cost: number; detail: string }[] {
   const discount = economyMods(run, forge).shopDiscount;
   const heatPrice = run.heat >= 5 ? 1.25 : 1; // Heat 5: pricier shops
+  const rulePrice = shopPriceMultiplier(run.floorRule);
   const price = (base: number) =>
-    Math.max(1, Math.round(((base * (100 - discount)) / 100) * heatPrice));
+    Math.max(1, Math.round(((base * (100 - discount)) / 100) * heatPrice * rulePrice));
   return [
     { id: 'heal', label: 'Poultice (heal 30%)', cost: price(40), detail: 'Heal 30% HP' },
     // A full boon shelf cannot take another, so the seller does not offer one: a priced row the run
@@ -692,8 +719,14 @@ function fightRoom(
   }
   next = { ...next, unit: { ...next.unit, hp: result.hpAfter } };
   stepMeta = gainMastery(stepMeta, result.kills, masteryMult(stepMeta));
-  // Won fights drop materials, deterministic per run and room.
-  const drops = dropMaterials(next, room);
+  // Won fights drop materials, deterministic per run and room; a market-flip floor pays double.
+  const baseDrops = dropMaterials(next, room);
+  const dropMult = dropMultiplier(next.floorRule);
+  const drops = {
+    ore: baseDrops.ore * dropMult,
+    herb: baseDrops.herb * dropMult,
+    echo: baseDrops.echo * dropMult,
+  };
   if (drops.ore + drops.herb + drops.echo > 0) {
     next = { ...next, materials: addMaterials(next.materials, drops) };
     const parts = [
@@ -856,12 +889,20 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
     };
     return { run: next, meta: ctx.meta, ledger, ended: false };
   } else if (room.kind === 'rest') {
+    const restPct = restHealPercent(
+      next.floorRule,
+      40 + (next.relics.includes('relic-nightlight') ? 15 : 0),
+    );
     next = {
       ...next,
       pendingChoice: {
         kind: 'rest',
         options: [
-          { id: 'rest', label: 'Rest and recover', detail: 'Heal 40% HP' },
+          {
+            id: 'rest',
+            label: 'Rest and recover',
+            detail: restPct > 0 ? `Heal ${restPct}% HP` : 'This floor does not heal',
+          },
           { id: 'retreat', label: 'Retreat to camp', detail: `Bank ${next.embersEarned} Embers` },
           ...fusionRecipesFor(next).map((f) => fuseOption(f)),
         ],
@@ -899,9 +940,10 @@ function applyShopPurchase(
     };
   } else if (itemId === 'boon') {
     if (next.boons.length >= BOON_CAP) return { run };
-    const { offer } = buildBoonOffer(next, 1);
+    const { offer } = buildBoonOffer(next, 1, undefined, (b) => boonAllowed(next.floorRule, b));
     const boon = offer[0];
-    if (boon) next = applyBoonPick(next, boon);
+    if (!boon) return { run };
+    next = applyBoonPick(next, boon);
   } else if (itemId === 'relic') {
     const pool = RELICS.filter((r) => !next.relics.includes(r.id));
     if (pool.length > 0) {
@@ -958,7 +1000,9 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
           next,
           count,
           `offer-${next.stepIndex}-reroll-${next.rerollsLeft}`,
+          (b) => boonAllowed(next.floorRule, b),
         );
+        if (offer.length === 0) return empty;
         const rerollsLeft = next.rerollsLeft - 1;
         next = {
           ...next,
@@ -1041,11 +1085,14 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
         break;
       }
       if (optionId !== 'rest') return empty;
-      const healPct = 40 + (next.relics.includes('relic-nightlight') ? 15 : 0);
+      const healPct = restHealPercent(
+        next.floorRule,
+        40 + (next.relics.includes('relic-nightlight') ? 15 : 0),
+      );
       next = pushLog(
         { ...healHp(next, healPct), pendingChoice: null },
         'choice',
-        'Rested and recovered.',
+        healPct > 0 ? 'Rested and recovered.' : 'Rested, but this floor offers no healing.',
       );
       break;
     }

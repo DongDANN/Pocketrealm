@@ -31,6 +31,16 @@
  * with `materialsFrom` still deleted and all five return the Gate 7b-6 digests verbatim. Every golden
  * skill sits at LV1, because a golden run never spends the dust it earns, so the +8%-per-rung potency
  * multiplier is never applied and the damage sums are the same numbers they were before the ladder.
+ *
+ * Gate 7d re-recorded all five because the descent itself moved on purpose, not the shape: every
+ * floor now carries one of ten rules (§8 E.1) that changes what the fight will honour — energy costs,
+ * guard reflection, inverted elements, critical healing, shop prices, rest, drops, the boon pool,
+ * spawn stats, Mark duration, or who may be targeted — and every boss phase now adds a named
+ * behaviour (§8 E.2) instead of a damage multiplier. Rules are drawn from their own RNG stream, so
+ * floor layouts sit exactly where they did in 7c; the replays diverge because the fights and the
+ * rooms around them are priced differently. The auxiliary hashes keep their old jobs: one proves the
+ * run knows nothing of the meta it earned, the other proves the Dust ladder and the provenance
+ * ledger are the only meta fields excluded from it.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -46,7 +56,7 @@ interface GoldenCase {
   hash: string;
   /** The same replay with `materialsFrom` and the whole Dust ladder taken back out of the meta. */
   hashBeforeLadder: string;
-  /** The replay with the meta excluded entirely — Gate 7c-3's proof that combat math is untouched. */
+  /** The replay with the meta excluded entirely: the run's own book, independent of what it earned. */
   runHash: string;
 }
 
@@ -56,45 +66,45 @@ const CASES: GoldenCase[] = [
     seed: 12345,
     hollow: 1,
     level: 5,
-    hash: '94a4734277595fe7',
-    hashBeforeLadder: '837106532b87b6aa',
-    runHash: '0cb18781235f7864',
+    hash: 'ea36f09c76303066',
+    hashBeforeLadder: 'ea944880eff571b8',
+    runHash: '43193c3187931973',
   },
   {
     label: 'H2 golden-ratio seed',
     seed: 0x9e3779b1,
     hollow: 2,
     level: 6,
-    hash: '3576928019daf46e',
-    hashBeforeLadder: '7fbf913c7da7c523',
-    runHash: 'dd27f7c33c69fd70',
+    hash: '9dbe7a381db32a75',
+    hashBeforeLadder: 'f8b95caa8cb9167b',
+    runHash: 'aa759235348099ed',
   },
   {
     label: 'H3 seed 777',
     seed: 777,
     hollow: 3,
     level: 8,
-    hash: 'ead747a9c3dee2e7',
-    hashBeforeLadder: '317ae9b8898d8b8b',
-    runHash: '635549aee6dbf24c',
+    hash: 'f406d8727c5ad6db',
+    hashBeforeLadder: 'bd56434330c705d6',
+    runHash: '89bc81c98fc91b3b',
   },
   {
     label: 'H2 seed 4242',
     seed: 4242,
     hollow: 2,
     level: 9,
-    hash: '9b13691c4c130d6e',
-    hashBeforeLadder: '5491625f617eb6e9',
-    runHash: '5a0d2a0fe8fcda6e',
+    hash: 'd089edafe140f671',
+    hashBeforeLadder: '021f511857984cc5',
+    runHash: '36dafa35850a8c6a',
   },
   {
     label: 'H3 seed 20261025',
     seed: 20261025,
     hollow: 3,
     level: 12,
-    hash: 'bcc6e6e8a66ebb11',
-    hashBeforeLadder: 'fd1fa46095a964c5',
-    runHash: '93fbd3a3d5d3052c',
+    hash: '3bf1d07e50ccba70',
+    hashBeforeLadder: '68aece87d895bd0e',
+    runHash: '2cda5cf9012a8215',
   },
 ];
 
@@ -138,14 +148,14 @@ describe('golden runs', () => {
     for (const c of CASES) expect(hashOf(c), c.label).toBe(c.hash);
   });
 
-  it('left the descent itself exactly as it was before the ladder', () => {
+  it('hashes the run without the meta it earned', () => {
     for (const c of CASES) {
       const { run } = stateOf(c);
       expect(stateHash({ run: { ...run, log: [] } }), c.label).toBe(c.runHash);
     }
   });
 
-  it('moved only because the Dust ladder joined the shape', () => {
+  it('hashes the meta with the Dust ladder and provenance ledger taken back out', () => {
     for (const c of CASES) {
       const { run, meta } = stateOf(c);
       const beforeLadder = { ...meta, dust: 0, skills: {} };

@@ -203,7 +203,8 @@ const V3_RUN_FIELDS = ['orders', 'floorRule', 'skipOutstanding'];
 
 /** A run state as v2 would have stored it: none of the v3 keys at all, plus whatever the case overrides. */
 function v2Run(over: Partial<RunState> = {}): RunState {
-  return { ...asV2(newRun(0xa11ce, 1, 5, emptyMeta()), V3_RUN_FIELDS), ...over };
+  // `newRun` now prints the floor rule; a v2 book was stored before rules existed.
+  return { ...asV2(newRun(0xa11ce, 1, 5, emptyMeta()), V3_RUN_FIELDS), log: [], ...over };
 }
 
 const V2_ACTIVE = v2Run({

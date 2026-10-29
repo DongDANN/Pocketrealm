@@ -125,6 +125,8 @@ export interface TurnTarget {
   maxHp: number;
   marked: boolean;
   weakness: Element;
+  /** True when a floor rule forbids targeting it this round (the guarded leader). */
+  guarded?: boolean;
 }
 
 /**
@@ -137,8 +139,18 @@ export interface TurnState {
   energy: number;
   hp: number;
   maxHp: number;
+  /**
+   * True while the companion is Marked (a `marks-you` boss phase). Optional so a hand-built menu in
+   * a test, and any decider that only reads the old fields, still answers.
+   */
+  marked?: boolean;
   cooldowns: Record<string, number>;
   actives: SkillDef[];
+  /**
+   * What each active costs this round, after any floor rule. A decider that priced a skill from the
+   * card's printed cost would spend an energy the engine then refuses, so the menu carries the price.
+   */
+  energyCosts?: Record<string, number>;
   /** Living enemies in the companion's priority order (first living first). */
   targets: TurnTarget[];
 }

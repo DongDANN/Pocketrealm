@@ -2,6 +2,7 @@
 
 export * from './types';
 export * from './map';
+export * from './rules';
 export * from './damage';
 export * from './intent';
 export * from './combat';
@@ -49,7 +50,6 @@ export {
   enemyById,
   scaledStats,
   bossPhases,
-  mechanicMultiplier,
   type EnemyDef,
   type BossDef,
   type BossPhase,

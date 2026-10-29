@@ -23,6 +23,8 @@ import { forgeTotals } from './forge';
 import { enemyIntent, type IntentDefence, type IntentLine } from './intent';
 import { isLeveled, potencyPercent, skillLevels } from './levels';
 import { computeBuffs } from './signals';
+import { critMultiplier, elementsInverted, guardReflect, skillEnergyCost } from './rules';
+import { statusById } from './data/statuses';
 import type { SkillDef } from './data/builds';
 import type { BudgetSignals, DelveMeta, RunState } from './types';
 import { consumableById } from './workshop';
@@ -63,6 +65,8 @@ export interface PricedTarget {
   sum: DamageBreakdown;
   sumText: string;
   notes: string[];
+  /** Why the rules refuse this target right now; empty when it can be hit. */
+  refused: string;
 }
 
 /** One of the four actions, priced against every living enemy. */
@@ -85,6 +89,8 @@ export interface GuardLine {
   detail: string;
   unbraced: number;
   braced: number;
+  /** Damage the brace gives back under a `guard-reflects` floor; 0 everywhere else. */
+  reflect: number;
   /** One braced sum per incoming hit, so the halving is visible. */
   sums: string[];
 }
@@ -93,6 +99,7 @@ export interface GuardView {
   lines: GuardLine[];
   unbraced: number;
   braced: number;
+  reflect: number;
 }
 
 export interface TurnMenu {
@@ -122,12 +129,15 @@ function priceTarget(
   targetIndex: number,
   skill: SkillDef | null,
   ctx: AttackContext,
+  refused = '',
 ): PricedTarget {
   const input = attackInputFor(target, skill, ctx, { variance: 0, crit: false });
   const sum = attackBreakdown(input);
   const range = attackRange(input);
   const notes: string[] = [];
+  if (refused !== '') notes.push(refused);
   if (skill?.element) {
+    if (ctx.elementInverted) notes.push('Elements inverted');
     if (input.elementMult > 1) notes.push(`Weakness ×${input.elementMult}`);
     else if (input.elementMult < 1) notes.push(`Resist ×${input.elementMult}`);
     else if (skill.element === target.weakness) notes.push(`Weak to ${target.weakness}`);
@@ -149,6 +159,7 @@ function priceTarget(
     sum,
     sumText: damageSumText(sum),
     notes,
+    refused,
   };
 }
 
@@ -166,11 +177,12 @@ function attackContext(
   return {
     ctx: {
       atk: base.atk + mods.atk,
-      critMult: mods.critDamageMult,
+      critMult: critMultiplier(run.floorRule, mods.critDamageMult),
       eliteBonus: mods.eliteDamageBonus,
       knownWeaknesses: meta.knownWeaknesses ?? [],
       mastery: meta.mastery ?? {},
       skillLevels: levels,
+      elementInverted: elementsInverted(run.floorRule),
     },
     def: opening.def,
     damageReduction: opening.damageReduction,
@@ -180,18 +192,21 @@ function attackContext(
 function guardLine(
   enemy: EnemyState,
   defence: IntentDefence,
-  options: { heat: number; studied: boolean; telegraphArmed: boolean },
+  rule: string | null,
+  options: { studied: boolean; telegraphArmed: boolean },
 ): GuardLine {
   const intent = enemyIntent(enemy, defence, options);
   const hits = [intent.next, intent.then].filter((l): l is IntentLine => !!l && l.input !== null);
   let unbraced = 0;
   let braced = 0;
+  let reflect = 0;
   const sums: string[] = [];
   for (const hit of hits) {
     const raw = hit.sum ?? incomingBreakdown(hit.input!);
     const held = incomingBreakdown({ ...hit.input!, guard: true });
     unbraced += raw.dealt;
     braced += held.dealt;
+    reflect += guardReflect(rule, held.dealt);
     sums.push(damageSumText(held));
   }
   return {
@@ -199,6 +214,7 @@ function guardLine(
     detail: hits.map((hit) => hit.label).join(' + ') || 'Nothing lands this round',
     unbraced,
     braced,
+    reflect,
     sums,
   };
 }
@@ -215,11 +231,20 @@ export function turnMenu(
 ): TurnMenu {
   const { ctx, def, damageReduction } = attackContext(run, meta, signals);
   const stateHp = pause.state.hp;
-  const live: IntentDefence = { def, damageReduction, hp: stateHp, shield: pause.shield };
+  const live: IntentDefence = {
+    def,
+    damageReduction,
+    hp: stateHp,
+    shield: pause.shield,
+    ...(pause.state.marked ? { markMult: statusById('mark')?.perRound?.dmgTakenMult ?? 1 } : {}),
+  };
   const living = pause.enemies.filter((e) => e.hp > 0);
   const studied = (enemy: EnemyState): boolean =>
     enemy.bossId !== undefined && (meta.bossKnowledge ?? []).includes(enemy.bossId);
-  const intentOptions = { heat: run.heat, telegraphArmed: pause.telegraphArmed };
+  const intentOptions = { telegraphArmed: pause.telegraphArmed };
+  /** The leader rule refuses the first living enemy while an escort still stands. */
+  const refusedAt = (index: number): string =>
+    pause.state.targets[index]?.guarded ? 'The leader is guarded while its escort stands.' : '';
 
   const targets: TurnTargetView[] = living.map((enemy, index) => ({
     index,
@@ -244,7 +269,7 @@ export function turnMenu(
   });
 
   const skills: TurnAction[] = pause.state.actives.map((skill) => {
-    const cost = skill.energyCost ?? 1;
+    const cost = pause.state.energyCosts?.[skill.id] ?? skillEnergyCost(run.floorRule, skill);
     const cooldown = pause.state.cooldowns[skill.id] ?? 0;
     const ready = cooldown <= 0 && pause.state.energy >= cost;
     const reason =
@@ -260,7 +285,9 @@ export function turnMenu(
       cost: `${cost} energy`,
       ready,
       reason,
-      targets: living.map((enemy, index) => priceTarget(enemy, index, skill, ctx)),
+      targets: living.map((enemy, index) =>
+        priceTarget(enemy, index, skill, ctx, refusedAt(index)),
+      ),
     };
   });
 
@@ -271,16 +298,17 @@ export function turnMenu(
     cost: 'free',
     ready: true,
     reason: '',
-    targets: living.map((enemy, index) => priceTarget(enemy, index, null, ctx)),
+    targets: living.map((enemy, index) => priceTarget(enemy, index, null, ctx, refusedAt(index))),
   };
 
   const lines = living.map((enemy) =>
-    guardLine(enemy, live, { ...intentOptions, studied: studied(enemy) }),
+    guardLine(enemy, live, run.floorRule, { ...intentOptions, studied: studied(enemy) }),
   );
   const guard: GuardView = {
     lines,
     unbraced: lines.reduce((total, line) => total + line.unbraced, 0),
     braced: lines.reduce((total, line) => total + line.braced, 0),
+    reflect: lines.reduce((total, line) => total + line.reflect, 0),
   };
 
   const items: TurnAction[] = run.consumables

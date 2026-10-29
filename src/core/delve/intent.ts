@@ -20,7 +20,7 @@ import {
   THORN_DAMAGE,
   VAMPIRIC_DRAIN_DIVISOR,
 } from './data/affixes';
-import { BOSSES, mechanicMultiplier, type BossDef } from './data/enemies';
+import { BOSSES, type BossDef } from './data/enemies';
 import { incomingBreakdown, type DamageBreakdown, type IncomingInput } from './damage';
 import type { StatusInstance } from './types';
 
@@ -86,13 +86,13 @@ export interface IntentDefence {
   hp: number;
   damageReduction?: number;
   shield?: number;
+  /** Mark on the companion: every inbound blow is multiplied by this while it lasts. */
+  markMult?: number;
   /** True when a guard skill is braced for the next mechanic. */
   guard?: boolean;
 }
 
 export interface IntentOptions {
-  /** Run heat — Heat 3+ appends a boss's extra final phase, which changes its mechanic multiplier. */
-  heat?: number;
   /** Boss Study reveals the mechanic's name and tell; unstudied bosses keep them hidden. */
   studied?: boolean;
   /**
@@ -178,6 +178,7 @@ function makePricer(target: IntentEnemy, defence: IntentDefence) {
     damageReduction: defence.damageReduction ?? 0,
     shield: defence.shield ?? 0,
     hp: defence.hp,
+    ...(defence.markMult && defence.markMult !== 1 ? { markMult: defence.markMult } : {}),
     ...(mechanic ? { mechanic } : {}),
   });
 
@@ -211,7 +212,6 @@ export function enemyIntent(
   defence: IntentDefence,
   options: IntentOptions = {},
 ): EnemyIntent {
-  const heat = options.heat ?? 0;
   const studied = options.studied ?? false;
   const statuses = target.statuses ?? [];
   const boss = target.bossId ? BOSSES.find((b) => b.id === target.bossId) : undefined;
@@ -240,10 +240,7 @@ export function enemyIntent(
   }
 
   if (boss && mechanicBeat(action, boss)) {
-    const mechanic = {
-      multiplier: mechanicMultiplier(boss, target.phaseIndex ?? 0, heat),
-      guard: defence.guard ?? false,
-    };
+    const mechanic = { multiplier: boss.mechanicMultiplier, guard: defence.guard ?? false };
     const name = mechanicName(boss, studied);
     const landed: IntentLine = {
       kind: 'mechanic',
