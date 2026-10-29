@@ -166,11 +166,16 @@ test('the room prices itself before the player commits to it', async ({ page }) 
   // Committing opens the room for hand play, and every option is priced by the resolving arithmetic.
   await page.getByRole('button', { name: /Open the next room/ }).click();
   await expect(page.locator('.turn-panel')).toBeVisible();
-  const options = await allText(page, '.turn-panel [data-kind="attack"] .turn-target');
+  // The strike is the always-ready swing, so its target window is the one every room can price.
+  await page.locator('.turn-panel[data-view="root"] [data-kind="strike"]').click();
+  await expect(page.locator('.turn-panel')).toHaveAttribute('data-view', 'targets');
+  const options = await allText(page, '.turn-panel [data-kind="attack"]');
   expect(options.length).toBeGreaterThan(0);
   for (const line of options) {
     expect(line, `an attack option with no itemized sum: ${line}`).toMatch(/−\d+ DEF .*= \d+/);
   }
+  await page.locator('.turn-panel [data-kind="back"]').click();
+  await expect(page.locator('.turn-panel')).toHaveAttribute('data-view', 'root');
 
   // Finishing the room merges its fight into the run, so the recap is the log's own arithmetic.
   await resolveTurn(page);
@@ -207,7 +212,8 @@ test('a reload reopens the room the run is waiting in, at the same round', async
   await expect(page.locator('.turn-panel')).toBeVisible();
   for (let round = 0; round < 2; round += 1) {
     const shown = await turnRound(page);
-    await page.locator('[data-kind="attack"] .turn-target:not([disabled])').first().click();
+    await page.locator('.turn-panel[data-view="root"] [data-kind="strike"]').click();
+    await page.locator('.turn-panel [data-kind="attack"]:not([disabled])').first().click();
     await expect.poll(() => turnRound(page), `round ${shown} to resolve`).not.toBe(shown);
   }
   const round = await turnRound(page);

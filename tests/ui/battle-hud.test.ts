@@ -346,6 +346,17 @@ describe('the command window', () => {
     expect(rows[0]!.order).toEqual({ skillId: 'ember-jab', targetIndex: 0, guard: false });
   });
 
+  it('carries the notes that explain a price, without rewriting the sum', () => {
+    const target = action().targets[0]!;
+    const noted = action({
+      targets: [{ ...target, notes: ['Weakness ×1.5', '2 Shield first'] }],
+    });
+    const rows = viewRows({ view: 'targets', skillId: 'ember-jab' }, menu({ skills: [noted] }));
+    expect(rows[0]!.notes).toEqual(['Weakness ×1.5', '2 Shield first']);
+    // The notes say why the number is what it is; the number stays the engine's own string.
+    expect(rows[0]!.sum).toBe(SUM);
+  });
+
   it('names the strike as the attack when the targets belong to it', () => {
     const strike = openCommand(initialFocus(), 'strike');
     const rows = viewRows(strike, menu());

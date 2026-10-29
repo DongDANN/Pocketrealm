@@ -78,6 +78,8 @@ export interface MenuRow {
   detail: string;
   /** The engine's own arithmetic, empty on rows that price nothing. */
   sum: string;
+  /** What explains the price — weakness, a mark, a shield — in the engine's words. */
+  notes: string[];
   disabled: boolean;
   aria: string;
   order: TurnOrder | null;
@@ -89,6 +91,7 @@ function targetRows(action: TurnAction): MenuRow[] {
     label: target.name,
     detail: `likely ${target.likely} (${target.min}–${target.max}) · ${target.afterHp} HP after`,
     sum: target.sumText,
+    notes: [...target.notes],
     disabled: !action.ready,
     aria: `${action.name} ${target.name}: likely ${target.likely}, ${target.sumText}`,
     order: {
@@ -117,6 +120,7 @@ export function viewRows(focus: BattleFocus, menu: TurnMenu): MenuRow[] {
         label: command.label,
         detail: command.hint,
         sum: '',
+        notes: [],
         disabled: false,
         aria: command.label,
         order: null,
@@ -130,6 +134,7 @@ export function viewRows(focus: BattleFocus, menu: TurnMenu): MenuRow[] {
             label: 'No skills equipped.',
             detail: 'The run swings a basic attack and the brace.',
             sum: '',
+            notes: [],
             disabled: true,
             aria: 'No skills equipped.',
             order: null,
@@ -141,6 +146,7 @@ export function viewRows(focus: BattleFocus, menu: TurnMenu): MenuRow[] {
         label: action.name,
         detail: moveDetail(action),
         sum: '',
+        notes: [],
         disabled: !action.ready,
         aria: `${action.name}${action.ready ? '' : ` — ${action.reason}`}`,
         order: null,
@@ -161,6 +167,7 @@ export function viewRows(focus: BattleFocus, menu: TurnMenu): MenuRow[] {
           label: 'Brace',
           detail: `${menu.guard.unbraced} → ${menu.guard.braced} incoming`,
           sum: menu.guard.lines.flatMap((line) => line.sums).join(' '),
+          notes: [],
           disabled: false,
           aria: `Brace: ${menu.guard.unbraced} damage becomes ${menu.guard.braced}`,
           order: { skillId: null, targetIndex: 0, guard: true },
@@ -175,6 +182,7 @@ export function viewRows(focus: BattleFocus, menu: TurnMenu): MenuRow[] {
             label: 'The bag is empty.',
             detail: 'Craft consumables in the Workshop.',
             sum: '',
+            notes: [],
             disabled: true,
             aria: 'The bag is empty.',
             order: null,
@@ -186,6 +194,7 @@ export function viewRows(focus: BattleFocus, menu: TurnMenu): MenuRow[] {
         label: item.name,
         detail: item.reason,
         sum: '',
+        notes: [],
         disabled: true,
         aria: `${item.name}: ${item.reason}`,
         order: null,

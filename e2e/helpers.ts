@@ -143,65 +143,131 @@ export async function turnRound(page: Page): Promise<number> {
 }
 
 /**
- * What the open menu is offering this round, read the way a player reads it: the panel's own numbers.
- * `likely` and `0 HP after` are the printed price and the printed kill, and the Brace row prints the
- * incoming total it would halve.
+ * ── Walking the command windows ─────────────────────────────────────────────────────────────
+ *
+ * Since the reskin the room asks its question one window at a time: the four commands, then a
+ * move, then a target. The hand opens the same windows a player does and reads each window's own
+ * printed numbers; nothing here re-derives a price the screen did not show.
  */
-interface TurnOffer {
-  /** Index into every `.turn-target` in the panel, so the read and the click name one button. */
+
+/** Which window each root command opens. */
+const WINDOW_OF = {
+  skills: 'moves',
+  strike: 'targets',
+  guard: 'guard',
+  items: 'items',
+} as const;
+
+type Command = keyof typeof WINDOW_OF;
+
+function panelView(page: Page): Promise<string> {
+  return page
+    .locator('.turn-panel')
+    .getAttribute('data-view')
+    .then((view) => view ?? '');
+}
+
+async function openWindow(page: Page, command: Command): Promise<void> {
+  await page.locator(`.turn-panel[data-view="root"] [data-kind="${command}"]`).click();
+  await expect(page.locator('.turn-panel')).toHaveAttribute('data-view', WINDOW_OF[command]);
+}
+
+/** B out of every open window, in the same round. Committing an order resets to the root itself. */
+async function backOut(page: Page): Promise<void> {
+  for (let step = 0; step < 3 && (await panelView(page)) !== 'root'; step += 1) {
+    await page.locator('.turn-panel [data-kind="back"]').click();
+  }
+  await expect(page.locator('.turn-panel')).toHaveAttribute('data-view', 'root');
+}
+
+/** A row of the open window, as the DOM carries it. */
+interface RowRead {
+  /** The move a row belongs to; null on the strike's target rows. */
+  skill: string | null;
+  target: number;
+  label: string;
+  disabled: boolean;
+}
+
+function readRows(page: Page): Promise<RowRead[]> {
+  return page.locator('.turn-panel .battle-row').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const button = node as HTMLButtonElement;
+      const labels = Array.from(button.querySelectorAll('[aria-label]')).map(
+        (element) => element.getAttribute('aria-label') ?? '',
+      );
+      return {
+        skill: button.dataset.skill ?? null,
+        target: Number(button.dataset.target ?? -1),
+        label: [button.getAttribute('aria-label') ?? '', ...labels].join(' '),
+        disabled: button.disabled,
+      };
+    }),
+  );
+}
+
+/** One priced swing the open room offers: a move (or the free strike) aimed at one enemy. */
+interface Swing {
+  skill: string | null;
   target: number;
   likely: number;
   kills: boolean;
-  ready: boolean;
 }
 
-async function readTurn(
-  page: Page,
-): Promise<{ offers: TurnOffer[]; hp: number; incoming: number }> {
-  return page.evaluate(() => {
-    const panel = document.querySelector('.turn-panel');
-    if (!panel) return { offers: [], hp: 0, incoming: 0 };
-    const copy = (root: Element) =>
-      Array.from(root.querySelectorAll('[aria-label]'))
-        .map((node) => node.getAttribute('aria-label') ?? '')
-        .join(' ');
-    const offers = Array.from(panel.querySelectorAll<HTMLButtonElement>('.turn-target')).map(
-      (button, target) => {
-        const kind = button.closest('.turn-action')?.getAttribute('data-kind');
-        const label = button.getAttribute('aria-label') ?? '';
-        return {
-          target,
-          likely: Number(/likely (\d+)/.exec(label)?.[1] ?? 0),
-          kills: /(^|\D)0 HP after/.test(copy(button)),
-          // Item options are always rendered and always disabled until the action has rules.
-          ready: kind !== 'item' && !button.disabled,
-        };
-      },
-    );
-    const stats = panel.querySelector('.stat-grid');
-    const brace = panel.querySelector('[data-kind="guard"] button');
-    return {
-      offers,
-      hp: Number(/(\d+)\/\d+ HP/.exec(stats ? copy(stats) : '')?.[1] ?? 0),
-      incoming: Number(
-        /Brace: (\d+) damage/.exec(brace?.getAttribute('aria-label') ?? '')?.[1] ?? 0,
-      ),
-    };
-  });
+function swingOf(row: RowRead, skill: string | null): Swing {
+  return {
+    skill,
+    target: row.target,
+    likely: Number(/likely (\d+)/.exec(row.label)?.[1] ?? 0),
+    kills: /(^|\D)0 HP after/.test(row.label),
+  };
+}
+
+/** The living companion's HP, printed on the ally plate's own bar. */
+async function readHp(page: Page): Promise<number> {
+  const label = await page.locator('.battle-plate.ally .hp-bar').getAttribute('aria-label');
+  return Number(/(\d+)\/\d+ HP/.exec(label ?? '')?.[1] ?? 0);
 }
 
 /**
- * The play a readable panel invites: finish anything the swing can finish, brace when the round's
+ * What the open menu is offering this round, read the way a player reads it: `likely` and `0 HP
+ * after` are the printed price and the printed kill, and the Brace row prints the incoming total it
+ * would halve. Leaves the first ready move's target window open, so the chosen row is one click
+ * away; the strike window when the moveset is empty.
+ */
+async function readTurn(page: Page): Promise<{ swings: Swing[]; hp: number; incoming: number }> {
+  const hp = await readHp(page);
+
+  await openWindow(page, 'guard');
+  const brace = await page.locator('.turn-panel [data-kind="guard"]').getAttribute('aria-label');
+  const incoming = Number(/Brace: (\d+) damage/.exec(brace ?? '')?.[1] ?? 0);
+  await backOut(page);
+
+  await openWindow(page, 'skills');
+  const move = (await readRows(page)).find((row) => row.skill !== null && !row.disabled);
+  if (move) {
+    await page.locator(`.turn-panel [data-skill="${move.skill}"]`).click();
+    await expect(page.locator('.turn-panel')).toHaveAttribute('data-view', 'targets');
+    const rows = await readRows(page);
+    return { swings: rows.map((row) => swingOf(row, move.skill)), hp, incoming };
+  }
+
+  await backOut(page);
+  await openWindow(page, 'strike');
+  const rows = await readRows(page);
+  return { swings: rows.map((row) => swingOf(row, null)), hp, incoming };
+}
+
+/**
+ * The play a readable room invites: finish anything the swing can finish, brace when the round's
  * incoming damage would kill the run, and otherwise take the largest printed number.
  */
-function pickTurn(offer: Awaited<ReturnType<typeof readTurn>>): { brace: boolean; target: number } {
-  const live = offer.offers.filter((o) => o.ready);
-  const best = (list: TurnOffer[]) => list.sort((a, b) => b.likely - a.likely)[0];
-  const kill = best(live.filter((o) => o.kills));
-  if (kill) return { brace: false, target: kill.target };
-  if (offer.incoming >= offer.hp) return { brace: true, target: -1 };
-  const swing = best(live);
-  return swing ? { brace: false, target: swing.target } : { brace: true, target: -1 };
+function pickTurn(offer: Awaited<ReturnType<typeof readTurn>>): Swing | 'brace' {
+  const byLikely = (a: Swing, b: Swing) => b.likely - a.likely;
+  const kill = offer.swings.filter((swing) => swing.kills).sort(byLikely)[0];
+  if (kill) return kill;
+  if (offer.incoming >= offer.hp) return 'brace';
+  return [...offer.swings].sort(byLikely)[0] ?? 'brace';
 }
 
 /**
@@ -213,12 +279,16 @@ export async function resolveTurn(page: Page): Promise<Played> {
   for (let round = 0; round < 40; round += 1) {
     const shown = await turnRound(page);
     if (shown === 0) return played;
+    // Committing an order reopens the next round at the root; a menu still in a window is a bug.
+    await expect(page.locator('.turn-panel')).toHaveAttribute('data-view', 'root');
     const play = pickTurn(await readTurn(page));
-    if (play.brace) {
-      await page.locator('.turn-panel [data-kind="guard"] button').click();
+    if (play === 'brace') {
+      await backOut(page);
+      await openWindow(page, 'guard');
+      await page.locator('.turn-panel [data-kind="guard"]').click();
       played.braces += 1;
     } else {
-      await page.locator('.turn-panel .turn-target').nth(play.target).click();
+      await page.locator(`.turn-panel [data-target="${play.target}"]`).click();
       played.swings += 1;
     }
     await expect

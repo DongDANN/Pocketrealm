@@ -2029,3 +2029,84 @@ dealt.` is 0.35 because Bark Wall prints 0.2 and the rung adds 0.15, and the tes
   the pre-7c panel; it shares the wallet header but was not redesigned. And the rungs' _worth_ remains
   7f's question: 90 Dust for +32% potency and a modifier is a pacing claim no persona sim yet exercises
   at LV5.
+
+### Gate 7g-1 — The battle screen's arithmetic becomes a model (2026-10-29)
+
+- **What shipped.** Two pure modules, `src/ui/lib/battleHud.ts` and `src/ui/lib/battleMenu.ts`, and 37
+  tests in `tests/ui/battle-hud.test.ts` that pin the strings the coming screen will print. Nothing
+  renders yet; the point of splitting first is that the reskin cannot invent a number, only place one.
+- **Bars are whole cells, never a fraction of one.** `hpBar(hp, maxHp, cells = 10)` floors the filled
+  count, so a bar can never draw more health than the engine holds, and prints the same value it draws
+  (`label` is `12/20 HP`). Zones follow the classic thresholds: `danger` below 20%, `warn` below 50%.
+  `0/0` is a legal readout (an empty room) and draws nothing, not `NaN`.
+- **Plates are printer functions, not components.** `enemyPlate` composes name, `DEF n · Weak to X ·
+Marked`, the intent it is about to commit (`Bites for 4 (3–5)` plus the itemized sum), and a `BOSS`
+  tag that grows the frame rather than renaming the foe. `allyPlate` prints name, `Lv n`, the HP bar and
+  the round's resources as chips (`Shield 4`, `1 energy`). `dialogQueue` turns the run's recap rows into
+  the dialog's lines — actor, target, and the same sum the log carries — and `typedShown` gives the
+  typewriter whole characters only, with an empty line always already done.
+- **The command stack is a table of transitions.** `openCommand` / `backFocus` are pure: SKILL opens the
+  move list, a move opens its target list, STRIKE opens the basic attack's targets, GUARD the brace,
+  ITEM the bag, and B walks back one window. Move rows carry no order — choosing a move is two steps.
+  Target rows carry the engine's own `TurnOrder`, so the component never assembles one from loose
+  strings. A refused move is still printed, with the engine's reason (`Needs 2 energy`).
+- **The aria contract is pinned, not assumed.** The e2e hand reads the screen through aria labels, so the
+  37 tests assert the exact shapes it greps: `Ember Jab Tollbug: likely 9, …`, `… 0 HP after`,
+  `Brace: 5 damage becomes 3`, and the refusal `Ember Jab — Needs 2 energy`. A copy edit now fails in
+  200ms instead of five minutes into a Playwright run.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 992/992 across 79 files** (955/78
+  before, plus this suite's 37). No engine, data or style file changed.
+
+### Gate 7g-2 — The room asks its question one window at a time (2026-10-29)
+
+- **What shipped.** `src/ui/components/BattleHud.tsx` replaces the old flat `TurnPanel` when a room is
+  waiting for orders. The run panel now reads top to bottom the way a GBA battle trained players to:
+  a field (the existing Canvas scene under a row of foe plates, with the ally plate on the floor), a
+  dialog window that narrates the last step, the 2×2 command pad (SKILL / STRIKE / GUARD / ITEM), and a
+  folded transcript of the recap. Choosing a command swaps the window's contents in place; ◀ BACK walks
+  out one window.
+- **Every plate and window line is placed, not written.** The component holds no prices. Names, bars,
+  intents, sums and chip text come from `enemyPlate` / `allyPlate`; rows, labels, details and the
+  `TurnOrder` a click commits come from `viewRows`. That is what keeps the reskin honest: the numbers on
+  the plate are the numbers the round will bill.
+- **Pixel chrome, integer everywhere.** 2px frames and hard 2px drop shadows, no radius, no gradients,
+  no fractional geometry. HP bars are rows of whole cells tinted by zone (moss / amber / rose) rather
+  than a width percentage — the model already floors the fill, so the picture and the printed `n/m HP`
+  cannot disagree. The `.battle-row` buttons extend the old `.turn-target` base, so 44px targets,
+  disabled styling and the focus ring survived the reskin unchanged.
+- **A price lost its explanation in the first pass.** The old flat panel printed `target.notes` under
+  each sum — `Weakness ×1.5`, `Marked ×1.3`, `2 Shield first`, `LV3 +8% potency`. The first `MenuRow`
+  draft kept the sum and dropped the notes, which would have left the reskin printing a number with no
+  reason behind it. `MenuRow` carries `notes` now and the row prints them; the test also pins that the
+  sum itself is untouched, so an explanation can never quietly become a second arithmetic.
+- **The duplicate HP bar is gone while a room is open.** The old `Gauge` sat above the stat grid and
+  repeated what the ally plate now owns; it renders only between rooms, where no plate is on screen.
+  The numeric `n/m HP` stays in the stat strip.
+- **The transcript keeps the recap test alive.** The old `.delve-recap` list moved inside a
+  `<details class="battle-transcript">` with the same rows, same `aria-label`s and the same omit line.
+  The log-reconciliation e2e reads it exactly as before, and a player can open the exchange without it
+  crowding the field.
+- **The Playwright hand learned to navigate.** `e2e/helpers.ts` used to read every target from one flat
+  panel. It now walks the same windows a player does: opens GUARD and reads the brace price, opens the
+  first ready move (or the strike when the moveset is empty) and reads its priced targets, then commits
+  the choice — a kill first, then a brace when the round's incoming total would kill the run, then the
+  largest printed number. Each round asserts the window reopened at the root; the hand never re-derives
+  a price the screen did not show.
+- **Two spec spots that assumed the flat panel.** `e2e/delve.spec.ts` now opens the STRIKE window to
+  check that every attack option carries its itemized sum (the strike is the one swing every room can
+  price), and the reload test plays its first two rounds through the same window. No other spec needed
+  a change.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 993/993 across 79 files**
+  (the 992 above plus a test that a target row carries the engine's notes — the reskin had dropped
+  them, and `Weakness ×1.5` explains a price rather than decorating it);
+  `npm run sim:golden` **verified all five digests unchanged**; `npm run build` **verified** clean;
+  `npm run test:e2e` **verified 67/67** in Chromium against the production build (4.6m). One visual
+  golden regenerated and inspected: `delve-turn-panel`, which this gate redesigned on purpose; the
+  other fourteen still passed without touching them. `e2e/offline.spec.ts` stays parked and
+  uncommitted.
+- **Not verified / still open:** the screen is still static. The typewriter, the bar drain, the shake and
+  the crit flash are 7g-3, gated on `prefers-reduced-motion`; the bag list, the party summary and the
+  Pokédex grid are 7g-4. The dialog currently shows the newest recap line and leaves the rest to the
+  transcript, which is the queue 7g-3 will play.
