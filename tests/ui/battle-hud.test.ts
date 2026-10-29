@@ -23,11 +23,18 @@ import {
 import type { RecapRow } from '../../src/ui/lib/delveReadout';
 import {
   allyPlate,
+  barAt,
+  dialogPlayback,
   dialogQueue,
+  dialogSettled,
+  dialogSkip,
   enemyPlate,
   hpBar,
   hpZone,
+  stepDrain,
+  stepDrains,
   typedShown,
+  type DialogLine,
 } from '../../src/ui/lib/battleHud';
 import {
   BATTLE_COMMANDS,
@@ -163,6 +170,54 @@ describe('the HP bar', () => {
   });
 });
 
+describe('the HP bar drain', () => {
+  it('steps toward the engine and never past it', () => {
+    expect(stepDrain(10, 4)).toBe(9);
+    expect(stepDrain(5, 9)).toBe(6);
+    expect(stepDrain(5, 5)).toBe(5);
+    // The last step lands exactly on the number rather than stepping over it.
+    expect(stepDrain(1, 0)).toBe(0);
+    expect(stepDrain(0, 3, 2)).toBe(2);
+    expect(stepDrain(3, 0, 2)).toBe(1);
+  });
+
+  it('starts a bar it has never seen at its true value, and leaves a settled room untouched', () => {
+    const values = new Map([['ally', 12]]);
+    const first = stepDrains(new Map(), values);
+    expect(first.get('ally')).toEqual({ shown: 12, target: 12 });
+    // Same reference, so the screen can stop its timer instead of redrawing forever.
+    expect(stepDrains(first, values)).toBe(first);
+  });
+
+  it('moves every bar toward its number and drops the foe that left', () => {
+    const drains = new Map([
+      ['ally', { shown: 18, target: 18 }],
+      ['foe:0', { shown: 12, target: 12 }],
+      ['foe:1', { shown: 9, target: 9 }],
+    ]);
+    const next = stepDrains(
+      drains,
+      new Map([
+        ['ally', 14],
+        ['foe:0', 7],
+      ]),
+    );
+    expect([...next.keys()]).toEqual(['ally', 'foe:0']);
+    expect(next.get('ally')).toEqual({ shown: 17, target: 14 });
+    expect(next.get('foe:0')).toEqual({ shown: 11, target: 7 });
+  });
+
+  it('draws the drain while the label keeps the engine truth', () => {
+    const truth = hpBar(7, 20);
+    const drawn = barAt(truth, 11, 20);
+    expect(drawn.label).toBe('7/20 HP');
+    expect(drawn.filled).toBe(5);
+    expect(drawn.zone).toBe('ok');
+    expect(truth.filled).toBe(3);
+    expect(drawn.cells).toBe(truth.cells);
+  });
+});
+
 describe('the enemy plate', () => {
   it('prints the name, the HP bar and the defence line the fight priced', () => {
     const plate = enemyPlate(target(), intent(), false);
@@ -260,6 +315,101 @@ describe('the dialog queue', () => {
 
   it('is empty when nothing has landed yet', () => {
     expect(dialogQueue({ rows: [], omitted: 0 })).toEqual([]);
+  });
+
+  it('speaks only the round that just resolved, leaving older beats to the transcript', () => {
+    const rows = [
+      row({ round: 2 }),
+      row({ round: 3, actor: 'Tollbug', target: 'Warden', side: 'enemy' }),
+      row({ round: 3 }),
+    ];
+    const queue = dialogQueue({ rows, omitted: 0 }, 3);
+    expect(queue).toHaveLength(2);
+    expect(
+      queue.every((line) => line.text.startsWith('Tollbug') || line.text.startsWith('Warden')),
+    ).toBe(true);
+  });
+
+  it('says nothing about a round that produced no beats', () => {
+    expect(dialogQueue({ rows: [row({ round: 2 })], omitted: 0 }, 1)).toEqual([]);
+  });
+});
+
+describe('the dialog playback', () => {
+  // Two short lines at 10 chars per second and a half-second hold: line 0 types 0–200ms, holds to
+  // 700ms; line 1 types 700–900ms, holds to 1400ms.
+  const lines: DialogLine[] = [
+    { text: 'AB', tone: 'player' },
+    { text: 'CD', tone: 'enemy' },
+  ];
+
+  it('has nothing to say for an empty queue', () => {
+    expect(dialogPlayback([], 0)).toEqual({
+      index: -1,
+      text: '',
+      typed: true,
+      more: false,
+      done: true,
+    });
+  });
+
+  it('types the first line, then waits its hold before the second', () => {
+    expect(dialogPlayback(lines, 0, 10, 500)).toMatchObject({
+      index: 0,
+      text: '',
+      typed: false,
+      more: true,
+      done: false,
+    });
+    expect(dialogPlayback(lines, 100, 10, 500).text).toBe('A');
+    expect(dialogPlayback(lines, 200, 10, 500)).toMatchObject({
+      index: 0,
+      text: 'AB',
+      typed: true,
+      done: false,
+    });
+    expect(dialogPlayback(lines, 700, 10, 500)).toMatchObject({ index: 1, text: '' });
+  });
+
+  it('is done only after the last line has held, and never claims more lines', () => {
+    expect(dialogPlayback(lines, 900, 10, 500)).toMatchObject({
+      index: 1,
+      text: 'CD',
+      typed: true,
+      more: false,
+      done: false,
+    });
+    expect(dialogPlayback(lines, 1400, 10, 500).done).toBe(true);
+    expect(dialogPlayback(lines, 99999, 10, 500)).toMatchObject({
+      index: 1,
+      text: 'CD',
+      done: true,
+    });
+  });
+
+  it('advances exactly one stop per press, and stays put at the end', () => {
+    expect(dialogSkip(lines, 0, 10, 500)).toBe(200);
+    expect(dialogSkip(lines, 200, 10, 500)).toBe(700);
+    expect(dialogSkip(lines, 700, 10, 500)).toBe(900);
+    expect(dialogSkip(lines, 900, 10, 500)).toBe(1400);
+    expect(dialogSkip(lines, 5000, 10, 500)).toBe(1400);
+  });
+
+  it('reads as the last line once nothing is still typing, which is what reduced motion shows', () => {
+    expect(dialogSettled(lines)).toEqual({
+      index: 1,
+      text: 'CD',
+      typed: true,
+      more: false,
+      done: true,
+    });
+    expect(dialogSettled([])).toEqual({
+      index: -1,
+      text: '',
+      typed: true,
+      more: false,
+      done: true,
+    });
   });
 });
 

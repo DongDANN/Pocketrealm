@@ -111,7 +111,9 @@ export function Delve() {
    */
   const threats = run ? roomThreats(run, meta, snapshot.signals) : [];
   const swings = run ? roomSwings(run, meta, snapshot.signals) : [];
-  const recap = run ? recapOf(run.log) : { rows: [], omitted: 0 };
+  // A paused room has not merged its beats into the run log — they are the pause's own lines, and
+  // they merge when the room closes. Reading `run.log` here would narrate the last finished room.
+  const recap = run ? recapOf(delve.turn ? delve.turn.log : run.log) : { rows: [], omitted: 0 };
   /** The waiting room's live menu; the run's own HP only moves when the room finishes. */
   const turn =
     run?.pendingTurn && delve.turn ? turnMenu(run, meta, snapshot.signals, delve.turn) : null;

@@ -2110,3 +2110,55 @@ Marked`, the intent it is about to commit (`Bites for 4 (3–5)` plus the itemiz
   the crit flash are 7g-3, gated on `prefers-reduced-motion`; the bag list, the party summary and the
   Pokédex grid are 7g-4. The dialog currently shows the newest recap line and leaves the rest to the
   transcript, which is the queue 7g-3 will play.
+
+### Gate 7g-3 — The battle starts moving, and holds still when asked (2026-10-29)
+
+- **What shipped.** The battle screen moves. The dialog plays the round that just resolved line by line —
+  one glyph every 40 ms, a 600 ms hold, then the next — with a `▼` button that appears once a line is
+  fully typed, blinks as the GBA arrow did, and skips ahead on click or Enter. HP bars drain cell by
+  cell at one cell per 60 ms tick. Struck plates flash (foes) or shake (the ally), a critical round
+  flashes the field's border, and each command window slides in over 120 ms in three hard steps. Every
+  one of these is driven by JS timers or CSS keyframes that `prefers-reduced-motion` (and the in-app
+  Motion setting) switch off together — with motion reduced the dialog shows the round's last line
+  whole, the bars sit at the engine's numbers, and no FX class is ever applied.
+- **The dialog narrates the pause log, not the run log.** The first pass read `recapOf(run.log)` in
+  `Delve.tsx`, and the dialog stayed silent at round 2 even while HP moved. A paused room has not
+  merged its beats into `run.log` — they live on `CombatPause.log` and merge only when the room
+  closes. The recap now reads `delve.turn.log` while a room is open, which also corrects the in-room
+  transcript: it had been narrating the previous room's fight. `dialogQueue`'s optional `round` keeps
+  the filter honest — a new round only speaks its own beats, and the "N earlier blows not shown" line
+  is printed in whole-window mode only.
+- **A drain is arithmetic, not a picture.** `Drain` / `stepDrain` / `stepDrains` step a shown value
+  toward the engine's number and never past it; a bar with no prior value starts at truth rather than
+  animating in from zero, and a settled map returns the same reference so the tick interval can stop
+  itself. `barAt` redraws an existing bar at the drained value while keeping the truth's label — the
+  reader who asks the bar how much HP is left gets the engine's number, not the current frame. That
+  label is also what `e2e/helpers.ts` reads, so the drain cannot desynchronise the hand.
+- **Motion never steals focus or remounts a plate.** The FX is a class plus a timeout that clears it
+  (480 ms), not a keyed remount, so a keyboard player's focus survives the shake. The command window is
+  keyed by `${round}:${view}` because it is genuinely a new window; the plates are not. The drain
+  effect reads the live menu through a ref — `turnMenu` builds a fresh targets array each render, and
+  depending on it directly would have restarted the interval before it ever ticked.
+- **The live region holds the sentence, the canvas holds the performance.** The typewriter is
+  `aria-hidden`; the whole line is announced once through an `.sr-only` `role="status"` region. A screen
+  reader following each revealed glyph would stutter the same sentence forty times. The `▼` is a real
+  `<button>` with a 30 px target and a focus ring, not a painted decoration.
+- **Reduced motion is modelled, not branched.** `dialogSettled` is the same queue read at the end of
+  time, and the component asks it when motion is off — so there is no second dialog implementation to
+  drift. Motion checks go through `useReducedMotionPref()`, which combines the in-app setting with
+  `(prefers-reduced-motion: reduce)`; the Playwright visual suite runs with `reducedMotion: 'reduce'`
+  and still matched all fifteen goldens untouched.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 1004/1004 across 79 files**
+  (the 993 above plus eleven: drain stepping, map settling, `barAt`'s truth label, and the settled
+  playback); `npm run sim:golden` **verified all five digests unchanged**; `npm run build` **verified**
+  clean; `npm run test:e2e` **verified 67/67** in Chromium against the production build (4.9m), all
+  fifteen visual goldens unchanged and none regenerated. The dialogue was also walked by hand in a
+  production preview in both motion modes — typed lines, skipped lines, a guard round, a drain from a
+  struck foe — with no console errors. `e2e/offline.spec.ts` stays parked and uncommitted.
+- **Not verified / still open:** the critical-round field flash was never seen on a hand-played round —
+  the class toggle was read in the DOM and the keyframes in the computed style, but no crit landed while
+  a preview was open, so the flash has been checked in code and not by eye. There is no committed
+  browser test that drives the animation itself; what is pinned is the pure model and the
+  reduced-motion behaviour, which is the part that can drift silently. The bag list, the party summary
+  and the Pokédex grid remain 7g-4.

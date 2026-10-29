@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { C } from '../../art/palette';
 import type { TurnMenu, TurnOrder } from '../../core/delve';
+import { useReducedMotionPref } from '../app/hooks';
 import type { Recap } from '../lib/delveReadout';
 import {
   backFocus,
@@ -12,7 +13,19 @@ import {
   type BattleFocus,
   type MenuRow,
 } from '../lib/battleMenu';
-import { allyPlate, dialogQueue, enemyPlate, type HpBar } from '../lib/battleHud';
+import {
+  allyPlate,
+  barAt,
+  dialogPlayback,
+  dialogQueue,
+  dialogSettled,
+  dialogSkip,
+  enemyPlate,
+  stepDrains,
+  type DialogPlayback,
+  type Drain,
+  type HpBar,
+} from '../lib/battleHud';
 import { PixelText } from './PixelText';
 
 /**
@@ -38,7 +51,15 @@ interface Props {
 
 const TONE_COLOR = { player: C.moss1, enemy: C.rose1, system: C.paper3 } as const;
 
+/** One glyph every 40 ms — a GBA talk speed, not a wall of text. */
+const DIALOG_TICK_MS = 40;
+/** One HP cell per tick: a ten-cell bar falls in about two-thirds of a second. */
+const DRAIN_TICK_MS = 60;
+/** How long a plate keeps its hit flash after the round landed it. */
+const HIT_FX_MS = 480;
+
 export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }: Props) {
+  const reducedMotion = useReducedMotionPref();
   const [focus, setFocus] = useState<BattleFocus>(initialFocus);
   // A new round is a new menu: the window the last order left open is no longer the question.
   useEffect(() => {
@@ -47,8 +68,6 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
 
   const rows = viewRows(focus, menu);
   const title = viewTitle(focus, menu);
-  const dialog = dialogQueue(recap);
-  const line = dialog.length > 0 ? dialog[dialog.length - 1]! : null;
   const ally = allyPlate({
     name: companion.name,
     level: companion.level,
@@ -57,6 +76,81 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
     shield: menu.shield,
     energy: menu.energy,
   });
+
+  // ── The dialog: only this round's beats, typed out and held ──────────────
+  const lines = dialogQueue(recap, menu.round - 1);
+  // The clock belongs to one queue. A render caused by anything else — a busy latch, a drain tick —
+  // cannot restart the line, and a new round starts from the first glyph.
+  const linesKey = `${menu.round}|${lines.map((line) => line.text).join('|')}`;
+  const [clock, setClock] = useState({ key: linesKey, ms: 0 });
+  const elapsed = clock.key === linesKey ? clock.ms : 0;
+  const playback: DialogPlayback = reducedMotion
+    ? dialogSettled(lines)
+    : dialogPlayback(lines, elapsed);
+  const speaking = lines[playback.index] ?? null;
+
+  useEffect(() => {
+    if (reducedMotion || playback.done) return;
+    const id = window.setInterval(() => {
+      setClock((current) => ({
+        key: linesKey,
+        ms: (current.key === linesKey ? current.ms : 0) + DIALOG_TICK_MS,
+      }));
+    }, DIALOG_TICK_MS);
+    return () => window.clearInterval(id);
+  }, [linesKey, reducedMotion, playback.done]);
+
+  const advance = () => setClock({ key: linesKey, ms: dialogSkip(lines, elapsed) });
+
+  // ── The bars: stepped drains, read from the engine's numbers ─────────────
+  // A ref rather than a dependency: `turnMenu` builds a fresh target list on every render, and a
+  // timer that restarted on every render would never tick.
+  const latest = useRef({ hp: menu.hp, targets: menu.targets });
+  useEffect(() => {
+    latest.current = { hp: menu.hp, targets: menu.targets };
+  });
+
+  const [drains, setDrains] = useState<ReadonlyMap<string, Drain>>(() => new Map());
+  const drainKey = `${menu.hp}|${menu.targets.map((t) => `${t.index}:${t.hp}`).join(',')}`;
+
+  useEffect(() => {
+    if (reducedMotion) return;
+    const id = window.setInterval(() => {
+      setDrains((current) => {
+        const values = new Map<string, number>([['ally', latest.current.hp]]);
+        for (const target of latest.current.targets) values.set(`foe:${target.index}`, target.hp);
+        const next = stepDrains(current, values);
+        if (next === current) window.clearInterval(id);
+        return next;
+      });
+    }, DRAIN_TICK_MS);
+    return () => window.clearInterval(id);
+  }, [drainKey, reducedMotion]);
+
+  const shownHp = (key: string, truth: number) =>
+    reducedMotion ? truth : (drains.get(key)?.shown ?? truth);
+
+  // ── The beats this round landed, as the plates' motion ──────────────────
+  const beats = recap.rows.filter((row) => row.round === menu.round - 1);
+  const hasBeats = beats.length > 0;
+  const allyHit = beats.some((row) => row.side === 'enemy');
+  const crit = beats.some((row) => row.crit);
+  const hitFoes = new Set(beats.filter((row) => row.side === 'player').map((row) => row.target));
+  const hitKey = `${menu.round}|${allyHit ? 'ally' : ''}|${crit ? 'crit' : ''}|${[...hitFoes]
+    .sort()
+    .join(',')}`;
+
+  const [fxKey, setFxKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (reducedMotion || !hasBeats) {
+      setFxKey(null);
+      return;
+    }
+    setFxKey(hitKey);
+    const id = window.setTimeout(() => setFxKey(null), HIT_FX_MS);
+    return () => window.clearTimeout(id);
+  }, [hitKey, hasBeats, reducedMotion]);
+  const fx = fxKey === hitKey ? { allyHit, crit, hitFoes } : null;
 
   const choose = (row: MenuRow) => {
     if (row.order) {
@@ -68,7 +162,7 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
   };
 
   return (
-    <div className="battle-screen">
+    <div className={`battle-screen ${fx?.crit ? 'crit' : ''}`}>
       <div className="battle-field">
         {stage}
         <ul className="battle-foes" aria-label="What stands in the room">
@@ -78,8 +172,14 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
               menu.intents[position]!,
               boss && menu.targets.length === 1,
             );
+            const struck = fx?.hitFoes.has(target.name) ?? false;
             return (
-              <li key={target.index} className={`battle-plate foe ${plate.boss ? 'boss' : ''}`}>
+              <li
+                key={target.index}
+                className={['battle-plate', 'foe', plate.boss ? 'boss' : '', struck ? 'struck' : '']
+                  .filter(Boolean)
+                  .join(' ')}
+              >
                 <div className="plate-head">
                   <PixelText text={plate.name} color={C.paper0} pixelScale={2} wrap={24} />
                   {plate.tag !== '' && (
@@ -88,7 +188,11 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
                     </span>
                   )}
                 </div>
-                <HpView bar={plate.bar} />
+                <HpView
+                  bar={plate.bar}
+                  shown={shownHp(`foe:${target.index}`, target.hp)}
+                  maxHp={target.maxHp}
+                />
                 <PixelText text={plate.defLine} color={C.paper2} pixelScale={2} wrap={30} />
                 <PixelText text={plate.intent} color={C.rose1} pixelScale={2} wrap={30} />
                 {plate.sum !== '' && (
@@ -101,14 +205,14 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
             );
           })}
         </ul>
-        <div className="battle-plate ally">
+        <div className={`battle-plate ally ${fx?.allyHit ? 'struck' : ''}`}>
           <div className="plate-head">
             <PixelText text={ally.name} color={C.paper0} pixelScale={2} wrap={24} />
             <span className="plate-lv">
               <PixelText text={ally.levelLabel} color={C.paper2} pixelScale={2} />
             </span>
           </div>
-          <HpView bar={ally.bar} />
+          <HpView bar={ally.bar} shown={shownHp('ally', menu.hp)} maxHp={menu.maxHp} />
           <div className="plate-chips">
             {ally.chips.map((chip) => (
               <span key={chip} className="plate-chip">
@@ -119,17 +223,32 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
         </div>
       </div>
 
-      <div className="battle-dialog" role="status" aria-live="polite">
-        <PixelText
-          text={line ? line.text : 'The room is waiting for your order.'}
-          color={line ? TONE_COLOR[line.tone] : C.paper3}
-          pixelScale={2}
-          wrap={40}
-        />
-        {line && (
-          <span className="dialog-arrow" aria-hidden="true">
+      {/*
+        The live region holds the whole line, never the typewriter. A screen reader that followed
+        every revealed glyph would stutter the same sentence forty times; the drawn text is the
+        performance, the announcement is the line.
+      */}
+      <div className="battle-dialog">
+        <p className="sr-only" role="status" aria-live="polite">
+          {speaking ? speaking.text : 'The room is waiting for your order.'}
+        </p>
+        <div className="dialog-line" aria-hidden="true">
+          <PixelText
+            text={speaking ? playback.text : 'The room is waiting for your order.'}
+            color={speaking ? TONE_COLOR[speaking.tone] : C.paper3}
+            pixelScale={2}
+            wrap={40}
+          />
+        </div>
+        {speaking && !playback.done && (
+          <button
+            type="button"
+            className={`dialog-arrow ${playback.typed ? 'ready' : ''}`}
+            aria-label="Next line"
+            onClick={advance}
+          >
             ▼
-          </span>
+          </button>
         )}
       </div>
 
@@ -143,7 +262,12 @@ export function BattleHud({ menu, busy, boss, companion, recap, stage, onOrder }
         <h3 id="turn-title" className="delve-subtitle">
           <PixelText text={title} color={C.amber2} pixelScale={2} wrap={36} />
         </h3>
-        <div className="battle-window" data-layout={focus.view === 'root' ? 'grid' : 'list'}>
+        {/* Keyed by round and window: each question slides in instead of silently replacing the last. */}
+        <div
+          key={`${menu.round}:${focus.view}`}
+          className="battle-window"
+          data-layout={focus.view === 'root' ? 'grid' : 'list'}
+        >
           {rows.map((row) => (
             <button
               key={row.id}
@@ -229,11 +353,12 @@ function rowKind(focus: BattleFocus, row: MenuRow): string {
   return 'item';
 }
 
-function HpView({ bar }: { bar: HpBar }) {
+function HpView({ bar, shown, maxHp }: { bar: HpBar; shown: number; maxHp: number }) {
+  const drawn = barAt(bar, shown, maxHp);
   return (
-    <div className={`hp-bar ${bar.zone}`} role="img" aria-label={bar.label}>
-      {Array.from({ length: bar.cells }, (_, cell) => (
-        <span key={cell} className={cell < bar.filled ? 'hp-cell on' : 'hp-cell'} />
+    <div className={`hp-bar ${drawn.zone}`} role="img" aria-label={bar.label}>
+      {Array.from({ length: drawn.cells }, (_, cell) => (
+        <span key={cell} className={cell < drawn.filled ? 'hp-cell on' : 'hp-cell'} />
       ))}
     </div>
   );

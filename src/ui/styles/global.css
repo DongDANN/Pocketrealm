@@ -2928,7 +2928,7 @@ a {
 .battle-dialog {
   position: relative;
   min-height: 56px;
-  padding: 10px 26px 10px 10px;
+  padding: 10px 34px 10px 10px;
   background: var(--ink-800);
   border: 2px solid var(--paper-dim);
   box-shadow: 0 0 0 2px var(--ink-900);
@@ -2936,17 +2936,39 @@ a {
 
 .dialog-arrow {
   position: absolute;
-  right: 10px;
-  bottom: 6px;
+  right: 2px;
+  bottom: 2px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: 0;
   color: var(--paper-dim);
+  font-family: inherit;
   font-size: 12px;
   line-height: 1;
+  cursor: pointer;
+  /* Dim while the line is still typing; the prompt brightens once the beat can be skipped. */
+  opacity: 0.5;
+}
+
+.dialog-arrow.ready {
+  opacity: 1;
+  animation: dialog-blink 800ms steps(1, end) infinite;
+}
+
+.dialog-arrow:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
 }
 
 .battle-window {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  animation: battle-window-in 120ms steps(3, end);
 }
 
 /* The four commands are a pad, not a list: a thumb learns their corners once. */
@@ -3006,6 +3028,80 @@ a {
 .battle-transcript .delve-recap {
   border: 0;
   border-top: 2px solid var(--ink-600);
+}
+
+/* -------------------------------------------------------------------------------------------
+ * Gate 7g-3 — the juice. Every animation is a hard step, never an ease: a retro screen changes
+ * cell by cell. The global reduced-motion block collapses each of these to its end state; the JS
+ * timers behind the drain and the typewriter check the same preference and never start.
+ * ----------------------------------------------------------------------------------------- */
+
+@keyframes battle-window-in {
+  from {
+    transform: translateY(6px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes dialog-blink {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes plate-shake {
+  0% {
+    transform: translateX(0);
+  }
+  33% {
+    transform: translateX(-3px);
+  }
+  66% {
+    transform: translateX(3px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.battle-plate.ally.struck {
+  animation: plate-shake 240ms steps(1, end);
+}
+
+@keyframes plate-flash {
+  from {
+    filter: brightness(1.9);
+  }
+  to {
+    filter: brightness(1);
+  }
+}
+
+.battle-plate.foe.struck {
+  animation: plate-flash 260ms steps(2, end);
+}
+
+@keyframes field-crit {
+  0% {
+    box-shadow:
+      inset 0 0 0 2px var(--rose),
+      0 0 0 2px var(--rose);
+  }
+  100% {
+    box-shadow: inset 0 0 0 2px var(--ink-800);
+  }
+}
+
+.battle-screen.crit .battle-field {
+  animation: field-crit 420ms steps(2, end);
 }
 
 .shop-grid {
