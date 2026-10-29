@@ -16,6 +16,15 @@ import { eventsForHollow, type EventOutcome } from './data/events';
 import { anyBoonById, fusionById, fusionRecipesFor, type FusionDef } from './data/fusions';
 import { forgeTotals } from './forge';
 import { generateFloor, HOLLOW_FLOORS } from './map';
+import {
+  beginSkip,
+  interestOn,
+  payGlintReward,
+  SKIP_MULTIPLIER,
+  SKIP_REWARDS,
+  skipActive,
+  skipRewardsLeft,
+} from './patience';
 import { settleSkillUses, skillLevels, usesFromLog } from './levels';
 import { movesetSnapshot } from './moveset';
 import { computeBuffs } from './signals';
@@ -177,6 +186,7 @@ export function newRun(
     orders: [],
     floorRule: floorRuleFor(userSeed, hollowId, 1),
     skipOutstanding: false,
+    skipRewardsLeft: 0,
   };
   return announceRule(start);
 }
@@ -281,6 +291,11 @@ function forkOptions(row: readonly RoomDef[], lookahead?: string[]): ChoiceOptio
 
 function floorStartGlint(run: RunState, forge: Record<string, number>): number {
   return economyMods(run, forge).startGlint;
+}
+
+/** What a Treasure room's cache holds before any skip boost: 25 Glint, doubled by First Coin. */
+function treasureGlint(run: RunState): number {
+  return 25 * (run.relics.includes('relic-firstcoin') && run.row === 0 ? 2 : 1);
 }
 
 function healHp(run: RunState, percent: number): RunState {
@@ -444,6 +459,19 @@ function advanceAfterRoom(run: RunState, ctx: StepContext): AdvanceOutcome {
     'reward',
     `Floor ${floor} complete: +${gained} Embers${fatigue < 1 ? ' (fatigued)' : ''}.`,
   );
+
+  // Patience economy, second half (§9): Glint held while the floor was walked pays 8%, capped at 40.
+  // It is paid before the next floor's Forge grant, because that grant was not held during this floor.
+  const held = next.glint;
+  const interest = interestOn(held);
+  if (interest > 0) {
+    next = { ...next, glint: held + interest };
+    next = pushLog(
+      next,
+      'reward',
+      `Interest: +${interest} Glint on ${held} held (8% at floor's end, cap 40).`,
+    );
+  }
 
   if (floor >= HOLLOW_FLOORS[next.hollowId]) {
     const clearBonus = Math.max(
@@ -833,23 +861,34 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
   if (isFightRoom(room)) {
     return fightRoom(next, room, ctx, ledger);
   } else if (room.kind === 'treasure') {
-    const gain = 25 * (next.relics.includes('relic-firstcoin') && next.row === 0 ? 2 : 1);
-    next = { ...next, glint: next.glint + gain };
-    next = pushLog(next, 'reward', `Treasure: +${gain} Glint.`);
-    if (offerRng(next, 'treasure-offer').int(100) >= 60) {
-      const adv = advanceAfterRoom(next, ctx);
-      return {
-        run: adv.run,
-        meta: adv.meta,
-        ledger: [...ledger, ...adv.ledger],
-        ended: adv.ended,
-      };
-    }
-    const offer = grantBoonOffer(next);
-    if (offer.pending) {
-      return { run: offer.run, meta: ctx.meta, ledger, ended: false };
-    }
-    next = offer.run;
+    const gain = treasureGlint(next);
+    // The cache waits for an answer because declining it is the patience economy's opening move
+    // (§9). The possible boon offer still rolls after the Glint is answered, where it always did.
+    next = {
+      ...next,
+      pendingChoice: {
+        kind: 'treasure',
+        options: [
+          {
+            id: 'take',
+            label: `Take ${gain} Glint`,
+            detail: 'Glint buys shop wares and earns interest.',
+          },
+          ...(skipActive(next)
+            ? []
+            : [
+                {
+                  id: 'skip',
+                  label: 'Skip the reward',
+                  detail: `The next ${SKIP_REWARDS} Glint rewards pay ×${SKIP_MULTIPLIER} instead.`,
+                },
+              ]),
+        ],
+        reason: 'A cache of Glint.',
+        stepIndex: next.stepIndex,
+      },
+    };
+    return { run: next, meta: ctx.meta, ledger, ended: false };
   } else if (room.kind === 'shop') {
     next = {
       ...next,
@@ -904,6 +943,17 @@ export function stepRun(run: RunState, ctx: StepContext): StepOutcome {
             detail: restPct > 0 ? `Heal ${restPct}% HP` : 'This floor does not heal',
           },
           { id: 'retreat', label: 'Retreat to camp', detail: `Bank ${next.embersEarned} Embers` },
+          // Declining a heal that is already zero would be free upside, so the offer only exists when
+          // the room actually has a reward to give up (§9).
+          ...(restPct > 0 && !skipActive(next)
+            ? [
+                {
+                  id: 'skip',
+                  label: 'Skip the rest',
+                  detail: `The next ${SKIP_REWARDS} Glint rewards pay ×${SKIP_MULTIPLIER} instead.`,
+                },
+              ]
+            : []),
           ...fusionRecipesFor(next).map((f) => fuseOption(f)),
         ],
         reason: 'A safe room. Catch your breath, or head home.',
@@ -961,9 +1011,20 @@ function applyEventOutcome(run: RunState, outcome: EventOutcome): { run: RunStat
   else if (outcome.kind === 'damage') {
     const hp = Math.max(0, next.unit.hp - outcome.amount);
     next = { ...next, unit: { ...next.unit, hp } };
-  } else if (outcome.kind === 'glint')
-    next = { ...next, glint: Math.max(0, next.glint + outcome.amount) };
-  else if (outcome.kind === 'embers')
+  } else if (outcome.kind === 'glint') {
+    if (outcome.amount > 0) {
+      // A positive event payout is a Glint reward like the cache's, so an outstanding skip boosts it.
+      const paid = payGlintReward(next, outcome.amount);
+      next = { ...paid.run, glint: paid.run.glint + paid.amount };
+      if (paid.boosted) {
+        next = pushLog(
+          next,
+          'reward',
+          `Skip ×${SKIP_MULTIPLIER}: +${paid.amount} Glint (${skipRewardsLeft(next)} left).`,
+        );
+      }
+    } else next = { ...next, glint: Math.max(0, next.glint + outcome.amount) };
+  } else if (outcome.kind === 'embers')
     next = { ...next, embersEarned: next.embersEarned + outcome.amount };
   else if (outcome.kind === 'boon') {
     const offer = grantBoonOffer(next);
@@ -991,6 +1052,38 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
         `Chose the ${roomLabel(row[col]!)} room.`,
       );
       return { run: next, meta: ctx.meta, ledger, ended: false };
+    }
+    case 'treasure': {
+      if (optionId === 'take') {
+        const paid = payGlintReward(next, treasureGlint(next));
+        next = { ...paid.run, glint: paid.run.glint + paid.amount };
+        next = pushLog(
+          next,
+          'reward',
+          paid.boosted
+            ? `Treasure: +${paid.amount} Glint (skip ×${SKIP_MULTIPLIER}, ${skipRewardsLeft(next)} left).`
+            : `Treasure: +${paid.amount} Glint.`,
+        );
+      } else if (optionId === 'skip') {
+        if (skipActive(next)) return empty;
+        next = beginSkip(next);
+        next = pushLog(
+          next,
+          'reward',
+          `Skipped the cache: the next ${SKIP_REWARDS} Glint rewards pay ×${SKIP_MULTIPLIER}.`,
+        );
+      } else {
+        return empty;
+      }
+      next = pushLog(
+        { ...next, pendingChoice: null },
+        'choice',
+        optionId === 'take' ? 'Took the cache.' : 'Skipped the cache.',
+      );
+      // The cache's own boon offer still rolls, from the same runId-keyed stream it always used.
+      if (offerRng(next, 'treasure-offer').int(100) >= 60) break;
+      next = grantBoonOffer(next).run;
+      break;
     }
     case 'boon': {
       if (optionId === 'reroll') {
@@ -1082,6 +1175,20 @@ export function resolveChoice(run: RunState, ctx: StepContext, optionId: string)
         const fused = applyFusion(next, optionId.slice(5));
         if (!fused) return empty;
         next = { ...fused, pendingChoice: null };
+        break;
+      }
+      if (optionId === 'skip') {
+        const offered = restHealPercent(
+          next.floorRule,
+          40 + (next.relics.includes('relic-nightlight') ? 15 : 0),
+        );
+        if (skipActive(next) || offered === 0) return empty;
+        next = beginSkip(next);
+        next = pushLog(
+          { ...next, pendingChoice: null },
+          'reward',
+          `Skipped the rest: the next ${SKIP_REWARDS} Glint rewards pay ×${SKIP_MULTIPLIER}.`,
+        );
         break;
       }
       if (optionId !== 'rest') return empty;

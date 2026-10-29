@@ -200,9 +200,14 @@ describe('Forge rerolls', () => {
         },
       };
       const out = stepRun(run, mkCtx(meta));
-      if (out.run.pendingChoice?.kind === 'boon') {
+      // The cache asks take-or-skip first, then rolls its boon offer; both answers are the run's.
+      const after =
+        out.run.pendingChoice?.kind === 'treasure'
+          ? resolveChoice(out.run, mkCtx(meta), 'take').run
+          : out.run;
+      if (after.pendingChoice?.kind === 'boon') {
         found = true;
-        expect(out.run.pendingChoice.options.some((o) => o.id === 'reroll')).toBe(true);
+        expect(after.pendingChoice.options.some((o) => o.id === 'reroll')).toBe(true);
       }
     }
     expect(found).toBe(true);

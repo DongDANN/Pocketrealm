@@ -363,7 +363,7 @@ describe('importing a book written before the turn loop', () => {
       embersEarned: 34,
     };
     // A v2 file has none of the v3 run keys at all, which is the exact hole the settlement fills.
-    for (const key of ['orders', 'floorRule', 'skipOutstanding']) {
+    for (const key of ['orders', 'floorRule', 'skipOutstanding', 'skipRewardsLeft']) {
       delete (state as unknown as Record<string, unknown>)[key];
     }
     const text = payload(

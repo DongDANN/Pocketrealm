@@ -208,7 +208,9 @@ describe('choice flow', () => {
     const hurt = { ...entered.run, unit: { ...entered.run.unit, hp: 40 }, glint: 500 };
     const healed = resolveChoice(hurt, ctx, 'heal');
     expect(healed.run.unit.hp).toBe(62);
-    expect(healed.run.glint).toBe(460);
+    // The single-room fixture ends floor 1 on the purchase, so the patience economy pays 8% interest
+    // on what the shop left behind: 460 + 37.
+    expect(healed.run.glint).toBe(497);
   });
 
   it('keeps a boon it cannot sell off the shop shelf', () => {
@@ -373,12 +375,13 @@ describe('ending runs and Ember banking', () => {
   });
 
   it('pays a fatigued 25% floor reward on same-day re-clears', () => {
-    // A treasure room can hold a boon offer between the loot and the floor reward, so the reward is
-    // only on the run once the player has answered. One answer, then the same step advances.
+    // The cache first asks take-or-skip, then may hold a boon offer, and only then does the reward
+    // land. Play the treasure's questions the way a headless run does, all of them.
     const cleared = (meta: DelveMeta) => {
       const ctx = mkCtx(meta);
-      const entered = stepRun(singleRowRun('treasure'), ctx);
-      return entered.run.pendingChoice ? answerChoice(entered.run, ctx).run : entered.run;
+      let run = stepRun(singleRowRun('treasure'), ctx).run;
+      while (run.pendingChoice) run = answerChoice(run, ctx).run;
+      return run;
     };
     expect(cleared(emptyMeta()).embersEarned).toBe(5); // floor 1 reward, no fatigue
 

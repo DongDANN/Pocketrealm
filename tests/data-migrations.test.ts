@@ -198,8 +198,8 @@ const V3_META_FIELDS = [
   'capsuleTagStreak',
 ];
 
-/** The three run-state fields v3 adds: a v2 book has none of them, not even as undefined. */
-const V3_RUN_FIELDS = ['orders', 'floorRule', 'skipOutstanding'];
+/** The run-state fields v3 adds, including later additive patches: a v2 book has none of them. */
+const V3_RUN_FIELDS = ['orders', 'floorRule', 'skipOutstanding', 'skipRewardsLeft'];
 
 /** A run state as v2 would have stored it: none of the v3 keys at all, plus whatever the case overrides. */
 function v2Run(over: Partial<RunState> = {}): RunState {
@@ -384,6 +384,7 @@ describe('v3 settles a run the update leaves behind', () => {
       expect(run.state.orders).toEqual([]);
       expect(run.state.floorRule).toBeNull();
       expect(run.state.skipOutstanding).toBe(false);
+      expect(run.state.skipRewardsLeft).toBe(0);
     }
 
     const meta = await db.delveMeta.get('meta');
@@ -457,12 +458,14 @@ describe('upgradeDelveRowsToV3, the same code a v2 backup file goes through', ()
     const live = rows.runs.find((r) => r.runId === 'run-active')!;
     live.state.floorRule = 'guard-reflects';
     live.state.skipOutstanding = true;
+    live.state.skipRewardsLeft = 1;
 
     const settled = upgradeDelveRowsToV3(rows, TODAY).runs.find((r) => r.runId === 'run-active')!;
     // The settlement rewrites the run's result and log; a rule it was told to keep survives it.
     expect(settled.result).toBe('retreated');
     expect(settled.state.floorRule).toBe('guard-reflects');
     expect(settled.state.skipOutstanding).toBe(true);
+    expect(settled.state.skipRewardsLeft).toBe(1);
   });
 
   it('keeps the daily Embers cap honest about the date it is given', () => {

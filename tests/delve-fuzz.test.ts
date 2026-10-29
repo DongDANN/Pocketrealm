@@ -124,6 +124,11 @@ function checkInvariants(run: RunState, meta: DelveMeta, seed: number, step: num
     if (!(xp >= 0 && xp <= 100)) fail(seed, step, `mastery ${id} XP ${xp}`);
   if (run.buildings && Object.values(run.buildings).some((l) => !(l >= 1 && l <= 2)))
     fail(seed, step, `run building level out of range`);
+  // §9: one skip boosts at most two Glint rewards, and the flag is true exactly while one is owed.
+  const skipLeft = run.skipRewardsLeft ?? 0;
+  if (!(skipLeft >= 0 && skipLeft <= 2)) fail(seed, step, `skip rewards left ${skipLeft}`);
+  if (run.skipOutstanding !== skipLeft > 0)
+    fail(seed, step, `skip flag ${run.skipOutstanding} disagrees with ${skipLeft} left`);
 }
 
 /** One fuzzed run: random build, hollow, level, Heat, forks and choices, stepped to its end. */

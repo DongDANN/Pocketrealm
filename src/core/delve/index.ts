@@ -3,6 +3,7 @@
 export * from './types';
 export * from './map';
 export * from './rules';
+export * from './patience';
 export * from './damage';
 export * from './intent';
 export * from './combat';

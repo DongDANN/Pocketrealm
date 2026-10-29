@@ -41,6 +41,13 @@
  * rooms around them are priced differently. The auxiliary hashes keep their old jobs: one proves the
  * run knows nothing of the meta it earned, the other proves the Dust ladder and the provenance
  * ledger are the only meta fields excluded from it.
+ *
+ * Gate 7e re-recorded all five for both reasons at once. The hashed shape grew by `skipRewardsLeft`,
+ * and the money moved because a floor now pays 8% interest on the Glint held while it was walked
+ * (§9), credited at its end; the treasure cache also pauses to ask take-or-skip, though the Glint it
+ * pays and its runId-keyed boon roll are unchanged. A headless replay never skips, so no golden
+ * carries a boost — the skip's ×1.8 is pinned separately in tests/delve-patience.test.ts, and the
+ * difference between the 7d and 7e digests is interest plus the one new key.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -66,45 +73,45 @@ const CASES: GoldenCase[] = [
     seed: 12345,
     hollow: 1,
     level: 5,
-    hash: 'ea36f09c76303066',
-    hashBeforeLadder: 'ea944880eff571b8',
-    runHash: '43193c3187931973',
+    hash: 'c6e7c4907d92278c',
+    hashBeforeLadder: '2fbf210c5dc4ddec',
+    runHash: 'b66f6365bd5cf1a2',
   },
   {
     label: 'H2 golden-ratio seed',
     seed: 0x9e3779b1,
     hollow: 2,
     level: 6,
-    hash: '9dbe7a381db32a75',
-    hashBeforeLadder: 'f8b95caa8cb9167b',
-    runHash: 'aa759235348099ed',
+    hash: '1c2203bf0ccee3a8',
+    hashBeforeLadder: 'b1a7c9dd2fce8850',
+    runHash: '7a869dd2abd69ce2',
   },
   {
     label: 'H3 seed 777',
     seed: 777,
     hollow: 3,
     level: 8,
-    hash: 'f406d8727c5ad6db',
-    hashBeforeLadder: 'bd56434330c705d6',
-    runHash: '89bc81c98fc91b3b',
+    hash: '2e98f7ab412af353',
+    hashBeforeLadder: 'ecf3f0f23678821c',
+    runHash: '44bed27cc8d79f76',
   },
   {
     label: 'H2 seed 4242',
     seed: 4242,
     hollow: 2,
     level: 9,
-    hash: 'd089edafe140f671',
-    hashBeforeLadder: '021f511857984cc5',
-    runHash: '36dafa35850a8c6a',
+    hash: 'd1592d4da94beaed',
+    hashBeforeLadder: 'd64b2e4e0d093f30',
+    runHash: '430ec30780e72490',
   },
   {
     label: 'H3 seed 20261025',
     seed: 20261025,
     hollow: 3,
     level: 12,
-    hash: '3bf1d07e50ccba70',
-    hashBeforeLadder: '68aece87d895bd0e',
-    runHash: '2cda5cf9012a8215',
+    hash: 'bd283277d68347c1',
+    hashBeforeLadder: 'bdd30a8a2515507a',
+    runHash: '0e7daa70e285b590',
   },
 ];
 

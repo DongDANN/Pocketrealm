@@ -2327,7 +2327,7 @@ subsystem: the helpers answer "how much" so the fight and the panels that price 
   `mark-one-round` clamps at application in `landStatus`. The audit that closed the gate checked each
   helper against a real call site, not just against the table.
 - **The leader rule was adapted to the hand-played turn, and the printed line says so.** §8 E.1's
-  "only the first action each round may target the leader" is inert when a round *is* one order, so
+  "only the first action each round may target the leader" is inert when a round _is_ one order, so
   the rule keeps its intent instead: the leader cannot be targeted while any other enemy stands. The
   menu prints `The leader is guarded while its escort stands.` and refuses the target; the engine
   refuses a stored order against it; `TurnState.targets[].guarded` lets the headless deciders avoid
@@ -2380,3 +2380,71 @@ subsystem: the helpers answer "how much" so the fight and the panels that price 
   hardship or as noise is 7f's question, as is whether the boss phase rules make the three bosses
   harder in the way they should. `leader-guarded` exists only as a floor rule; an escort that guards
   its leader on some other floor is not a mechanic the game has.
+
+### Gate 7e — Declining a reward pays later, and held Glint works quietly (2026-10-29)
+
+The patience economy (§9) is two mechanics on one visible ledger: skip a Treasure or Rest reward and
+the next two Glint rewards pay ×1.8, or hold Glint across a floor and it pays 8% at the floor's end,
+capped at 40. Nothing is a gamble and nothing hides: both terms print in the Kit before the player
+chooses either.
+
+- **A "reward" means a Glint payout, and that is the whole definition.** `src/core/delve/patience.ts`
+  prices the treasure cache's Glint and a positive event payout, because Glint is what interest
+  compounds and what a shop prices. Boons, healing, materials and Embers are never multiplied by a
+  fraction: no second currency, no fractional pile, no skip that quietly inflates progression.
+- **Every seam is a pure call, and the ledger reads the same one.** `payGlintReward(run, base)`
+  returns the run, the amount and whether it was boosted; the engine logs the number it returned.
+  `interestOn(held)` and `patienceLedger(run)` are the same arithmetic the UI prints, so the promised
+  number and the paid number cannot drift.
+- **Skip.** The treasure cache now asks `take` / `skip` before it pays — the same runId-keyed boon
+  roll still happens after the answer, so the offer draw did not move. A Rest room offers `skip`
+  beside `rest` and `retreat`, but only when its heal is above zero: there must be a real reward to
+  decline. `beginSkip` sets `skipOutstanding` and `skipRewardsLeft = 2`; each boosted Glint reward
+  counts one down with `Math.round(base × 1.8)`; the flag clears with the last one. While a skip is
+  outstanding the option is hidden at both rooms and the engine refuses a forced skip, so skips
+  cannot stack.
+- **Interest.** `advanceAfterRoom` pays `min(40, round(held × 8%))` after the floor-complete Embers
+  line and **before** the next floor's Forge grant, so a Treasury Seed grant is not itself compounded
+  and the payout prices only the Glint the player actually held while walking the floor. Interest is
+  never boosted and never consumes a skip; spending just before a floor's end lowers the payout,
+  which is the opportunity cost §9 asks for.
+- **The ledger lives in the Kit.** A `Patience` block prints the skip's terms — "the next 2 Glint
+  rewards" or the remaining countdown — plus the interest percentage, held Glint, exact payout and
+  cap. Both sentences are visible from the first room, before either mechanic is reachable.
+- **Two engine bugs were found by the new suite and fixed.** The event-payout seam initially applied
+  the skip's countdown and multiplier but never added the paid amount to the purse, and the Rest
+  skip branch left its own question open so the room never advanced. Both now have direct tests
+  (35 Glint pays 63; a skipped rest closes the room and leaves HP untouched).
+- **Persistence stays a patch, not a migration.** `skipRewardsLeft` is optional on `RunState`; live
+  v3 runs predate it, every reader treats `undefined` as zero, `withV3RunFields` fills `0`, and the
+  v2 import path strips it with the other v3 keys. No schema bump.
+- **New suite and adapted invariants.** `tests/delve-patience.test.ts` adds eighteen tests: interest
+  round/cap values and its ordering against the Forge grant; the treasure question and its unchanged
+  boon roll across eight run ids; hidden and refused skips; the exact two-reward countdown (25 → 45
+  → 45 → 25); First Coin's double before the skip's ×1.8 (50 → 90); the Rest offer, its absence under
+  `no-rest-heal`, and a skip that leaves HP where it was; a positive event payout boosted while a
+  Glint cost stays a cost; interest neither boosted nor counting down; and the ledger strings. The
+  fuzz suite now asserts `skipRewardsLeft` in 0–2 and that `skipOutstanding` always agrees with it.
+  Four older suites needed their fixtures to answer the cache's new question or to account for
+  floor-end interest.
+- **The goldens were re-recorded for shape and money.** `RunState` grew `skipRewardsLeft`, and every
+  floor now pays interest, so all five digests moved: `c6e7c4907d92278c`, `1c2203bf0ccee3a8`,
+  `2e98f7ab412af353`, `d1592d4da94beaed`, `bd283277d68347c1`. The ladder-excluded and run-only
+  hashes moved too and keep their old jobs. A headless replay never skips, so no golden carries a
+  boost; the ×1.8 arithmetic is pinned in the new suite instead.
+- **Two browser goldens were regenerated, diffs read first.** `delve-run` and `delve-turn-panel` grew
+  from 390×3216 to 390×3390 because the Patience block now always prints in the Kit. The diffs showed
+  only that block and the reflow it causes; no other snapshot moved.
+- **Docs follow the code.** §9 gains an "As built" section defining the Glint-only reward, both
+  rooms' offers, the one-skip guard, the interest timing and cap, the ledger lines and the optional
+  field. `docs/MANUAL_TEST.md` gains §13, six hand steps for the ledger, and row 13 in the summary
+  table.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 1064/1064 across 83 files**
+  (eighteen new, all passing); `npm run sim:golden` **verified** the five re-recorded digests above;
+  `npm run build` **verified** clean; `npx playwright test` **verified 69/69** in Chromium against the
+  production build (5.5m), with the two regenerated goldens matching on the full second run.
+- **Not verified / still open:** the §13 hand walk has not been played on a phone, so whether both
+  terms read plainly before a player commits is open. The numbers (`1.8`, `8%`, cap `40`) are first
+  picks with no play-test behind them; whether interest makes hoarding the obvious line, or the skip
+  is ever worth taking, is 7f's tuning question.

@@ -222,7 +222,19 @@ describe('floor rules change what the engine does', () => {
   it('market-flip doubles the shop’s prices and a won fight’s material drops', () => {
     const shop = (rule: string | null) => {
       const meta = emptyMeta();
-      const run = singleRowRun('shop', { floorRule: rule, glint: 100 });
+      // A second row keeps the floor from ending on the purchase, so the price is the only thing the
+      // run's Glint loses; floor-end interest is a different mechanic's line.
+      const run = singleRowRun('shop', {
+        floorRule: rule,
+        glint: 100,
+        floorPlan: {
+          floor: 1,
+          rows: [
+            [{ id: 'x0r0c0', kind: 'shop', enemies: [], optionSeed: 0 }],
+            [{ id: 'x0r1c0', kind: 'rest', enemies: [], optionSeed: 0 }],
+          ],
+        },
+      });
       const entered = stepRun(run, mkCtx(meta));
       const bought = resolveChoice(entered.run, mkCtx(meta), 'heal');
       return 100 - bought.run.glint;

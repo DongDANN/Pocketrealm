@@ -78,7 +78,7 @@ export interface RelicDef {
   effect: string;
 }
 
-export type ChoiceKind = 'boon' | 'fork' | 'shop' | 'event' | 'rest';
+export type ChoiceKind = 'boon' | 'fork' | 'shop' | 'event' | 'rest' | 'treasure';
 
 export interface PendingChoice {
   kind: ChoiceKind;
@@ -247,6 +247,11 @@ export interface RunState {
    * outstanding at a time, which is what stops skipping from compounding into a required line (§9).
    */
   skipOutstanding: boolean;
+  /**
+   * Glint rewards still carrying a skip's ×1.8: two when the skip is taken, counting down to zero.
+   * Absent on a run stored before the patience economy, so every reader treats `undefined` as none.
+   */
+  skipRewardsLeft?: number;
 }
 
 export interface ForgeLevels {

@@ -298,6 +298,28 @@ Both are the app's actual thesis — delay a small reward, receive a larger one 
 currency. Guardrails: multipliers stay modest enough that skipping is never the only viable line,
 and no reward is ever withheld behind a timer.
 
+**As built (Gate 7e).** One currency keeps the ledger honest: a "reward" means a **Glint payout
+only** — the treasure cache and a positive event payout. Boons, healing, materials and Embers are
+never multiplied, so nothing fractional and no second currency enters the books.
+
+- **Skip.** The treasure cache now asks before it pays (`take` / `skip`); a Rest room offers `skip`
+  beside `rest` and `retreat`, but only when its heal is above zero, so there is always a real
+  reward to decline. Taking a skip sets `skipOutstanding` and `skipRewardsLeft = 2`; each Glint
+  reward pays `Math.round(base × 1.8)` and counts one down, and the flag clears with the last one.
+  While a skip is outstanding the offer is hidden and the engine refuses a forced skip, so one
+  cannot be stacked on another.
+- **Interest.** At a floor's end, after its completion Embers line and **before** the next floor's
+  Forge grant, Glint held during the floor pays `min(40, round(held × 8%))`. Interest is never
+  boosted by a skip and never consumes one; spending before the last room of a floor visibly lowers
+  the payout.
+- **Ledger.** The Kit panel carries a `Patience` block. Its skip line states the offer before any
+  is chosen (`… on the next 2 Glint rewards`) or the remaining boosted payouts; its interest line
+  states the percentage, the Glint held, the exact amount that will be paid at this floor's end and
+  the cap. Both numbers are visible before the player chooses either mechanic.
+- **Persistence.** `skipRewardsLeft` is optional on `RunState`: a v3 run stored before this gate
+  predates the field, every reader treats `undefined` as zero, and the v3 shape pass fills it with
+  `0`. No schema bump was needed.
+
 ---
 
 ## 10. Schema, persistence and existing players

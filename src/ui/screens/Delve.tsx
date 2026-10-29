@@ -13,6 +13,7 @@ import {
   HOLLOW_FLOORS,
   movesetFor,
   nextFloorRuleId,
+  patienceLedger,
   RUN_COST,
   turnMenu,
   anyBoonById,
@@ -121,6 +122,8 @@ export function Delve() {
   const nextRule = run
     ? floorRuleById(nextFloorRuleId(run.userSeed, run.hollowId, run.floor))
     : undefined;
+  /** §9: the two patience terms, printed together so their prices sit side by side. */
+  const patience = run ? patienceLedger(run) : null;
   /** The waiting room's live menu; the run's own HP only moves when the room finishes. */
   const turn =
     run?.pendingTurn && delve.turn ? turnMenu(run, meta, snapshot.signals, delve.turn) : null;
@@ -740,6 +743,29 @@ export function Delve() {
                 wrap={36}
               />
             </p>
+            {patience && (
+              <div aria-label="Patience ledger">
+                <p className="panel-note">
+                  <PixelText text="Patience" color={C.cyan2} pixelScale={2} />
+                </p>
+                <p className="panel-note">
+                  <PixelText
+                    text={patience.skipLine}
+                    color={patience.skipLeft > 0 ? C.amber2 : C.paper3}
+                    pixelScale={2}
+                    wrap={36}
+                  />
+                </p>
+                <p className="panel-note">
+                  <PixelText
+                    text={patience.interestLine}
+                    color={C.paper3}
+                    pixelScale={2}
+                    wrap={36}
+                  />
+                </p>
+              </div>
+            )}
           </PixelPanel>
 
           <PixelPanel className="delve-panel" aria-labelledby="log-title">

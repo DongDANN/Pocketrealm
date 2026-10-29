@@ -25,6 +25,7 @@ Last updated: 2026-10-29.
 | 10  | Playing a room by hand                              | **partially verified** | `e2e/delve.spec.ts` plays a whole run in Chromium; no phone run  |
 | 11  | The battle screen and the collection menus          | **partially verified** | goldens, layout and a11y sweeps in Chromium; no phone run        |
 | 12  | Floor rules and boss phases in hand                 | **not run**            | every rule has an engine outcome test; no phone run              |
+| 13  | The patience ledger in hand                         | **not run**            | `tests/delve-patience.test.ts` pins the terms; no phone run      |
 
 ## 1. Android Chrome: install and standalone launch
 
@@ -288,6 +289,34 @@ second phase feels like a change of behaviour rather than a damage spike.
 
 Expected: the rule is known before the floor is committed to, and the boss's phase changes what the
 fight asks of the player rather than only how hard it hits.
+
+## 13. The patience ledger in hand
+
+**Status: not run.** The arithmetic, the seams and the guardrails are pinned by
+`tests/delve-patience.test.ts` (interest math and its cap, skip ordering at the Forge grant, both
+rooms' offers, the two-reward countdown, costs and interest never boosted, the ledger strings). What
+no test can judge is whether the two terms read plainly on a phone before the player commits, or
+whether declining a reward feels like a reasonable trade rather than a trick.
+
+1. Open a run and expand the Kit. Under `Patience`, read both lines. The skip line must describe the
+   offer before any skip exists ("decline a Treasure or Rest reward for ×1.8 on the next 2 Glint
+   rewards"), and the interest line must name the exact Glint that will be paid at the current
+   floor's end and the 40 cap.
+2. Find a Treasure room. It must ask before paying, offering `Take N Glint` and `Skip the reward`
+   with the same ×1.8 terms. Take it once and confirm the Glint lands and no boost exists.
+3. In a later run, skip a Treasure reward. The Kit's skip line must count `2 more`, then `1 more`
+   after the next boosted Glint reward, then return to the offer line; every boosted payout must be
+   the base ×1.8 rounded and the log must say so.
+4. Watch interest across a floor boundary: take note of held Glint and the Kit's promised amount,
+   then finish the floor. The log must pay exactly that amount, and the camp's Glint must show it.
+   Spend Glint just before a floor's end and confirm the paid interest falls with it.
+5. On a `no-rest-heal` floor, a Rest room must not offer `Skip the rest`; on any floor, a room whose
+   resting heals must offer it.
+6. Confirm nothing else pays a multiplier: a skipped run must still heal, bank materials, earn
+   Embers and take boons at their printed values.
+
+Expected: a player can state both terms from the Kit before choosing either, and every boosted or
+interest number they see is the one the ledger promised.
 
 ## Sign-off
 

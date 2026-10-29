@@ -155,6 +155,8 @@ function withV3RunFields(stored: RunState): RunState {
     orders: stored.orders ?? [],
     floorRule: stored.floorRule ?? null,
     skipOutstanding: stored.skipOutstanding ?? false,
+    // No build before the patience economy could set a skip, so an old row owes none.
+    skipRewardsLeft: stored.skipRewardsLeft ?? 0,
   };
 }
 
