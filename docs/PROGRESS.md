@@ -2252,3 +2252,55 @@ only a thumb can answer, and states in the design record that the whole layer is
   no rows for it. Touch targets are audited at ≥44px and the six-viewport layout suite covers 360px,
   but no human thumb has pressed the new menus yet. The bag, summary and dex still have no browser
   test driving them through the real UI; that is Gate 7c-6.
+
+### Gate 7c-6 — A player's whole collection walk, committed as one browser test (2026-10-29)
+
+Everything 7c-5 proved by hand now has committed coverage. `e2e/collection.spec.ts` walks the path the
+gate asked for — craft → open → reload-cannot-reroll → dismiss → learn → equip → dust ladder — through
+the real screens, against the production build, in one test that runs in 4.3 seconds.
+
+- **Only the wallet is seeded; nothing else is simulated.** The test writes the meta row directly
+  (`materials`, `materialsFrom`, `dust`) because farming materials takes a played run and this gate is
+  about the Workshop's promises. Eight Ore, four Herb and 120 Dust, all attributed to Rootfall Warren,
+  so the capsule's ceiling is a fact the test can assert and not a lottery. Every later step is a real
+  button: Craft, Open, Put it in the book, Learn, Equip/Wear, Raise to LV2.
+- **The printed price and the charged price are the same number, read on screen.** The wallet shows
+  `Ore 8 · Herb 4 · Echo 0`; after Craft it must show `Ore 6 · Herb 3`, so the spend is asserted where
+  the player sees it rather than only in storage. The craft panel's own words are asserted first:
+  `Costs 2 Ore · 1 Herb`, `Rootfall Warren pays`, and `Rare make` — the provenance rule (§7 D.3)
+  printed before anything is taken.
+- **A reload cannot reroll, and the test proves it the way a player would.** The reveal is read off the
+  sheet (its own aria-labels), the hard-pity pips' accessible name is captured, the page is reloaded
+  mid-reveal, and the same skill, the same kind and the same pity spend must come back. The test also
+  pins the shelf: opening consumes the held capsule in the same transaction that grants the prize, so
+  the shelf reads `0 in the book` both before and after the reload — a bug that re-spent or
+  resurrected a capsule would show up there, not just in the skill name.
+- **The learned skill must reach the kit the run swings.** After dismissing, the row is found in
+  "Could learn" by the name the reveal printed, learned, then equipped — `Equip` for an actives,
+  `Wear` for a passive, distinguished by the reveal's own printed kind so the test does not assume
+  which one the seeded draw hands over. The known row must then read `· in play`, and for an active
+  the summary's four-cell move grid must print the name.
+- **The Dust ladder is pinned to the printed arithmetic.** The seeded 120 Dust makes the LV1 row read
+  `LV2 costs 5 Skill Dust · 120 held.`; after `Raise to LV2` the row must read `LV2 +8%` and
+  `LV3 costs 15 Skill Dust · 115 held.`, the wallet must read `Skill Dust 115`, and the button must
+  offer LV3. Those are `DUST_TO_LEVEL`'s own numbers, not copies, so a curve edit breaks the test
+  instead of passing it.
+- **Deterministic without hard-coding a prize.** `pinClockAndIds` fixes the companion id the book seed
+  derives from, so the draw repeats; the test still branches on the reveal's printed words rather than
+  naming a skill, which keeps the catalogue free to change without silently changing what is asserted.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 1017/1017 across 80 files**
+  (unchanged — this gate adds browser coverage); `npm run sim:golden` **verified all five digests
+  unchanged**; `npm run build` **verified** clean; the new spec alone **verified 1/1** (4.3s); the full
+  suite **verified 69/69** in Chromium against the production build (5.0m), one test larger than 7g-5
+  and no golden regenerated. `e2e/offline.spec.ts` stays parked and uncommitted.
+- **One expectation was wrong and was corrected against the engine.** The first run asserted the shelf
+  still read `1 in the book` after opening; it reads `0`, because `openCapsule` decrements the held
+  count in the same transaction that writes the grant and the reveal. The test now asserts the true
+  shape and comments why, rather than the app being changed to match the test.
+- **Not verified / still open:** the test seeds the wallet rather than farming it in a run, so the
+  room-to-Workshop path (materials actually dropping into the printed bank) is still covered only by
+  unit tests and the hand walk in 7c-5. Pinning the companion id fixes the draw, so this test always
+  walks the same one of the two kinds — a passive and an active have not each been forced through the
+  learn/equip path here, and the other kind rests on the board unit tests. The rungs' worth remains
+  7f's question.
