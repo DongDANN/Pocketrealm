@@ -336,6 +336,8 @@ export interface SlotRow {
   name: string;
   tierLabel: string;
   kind: string;
+  /** The element the move carries; empty for a build passive with none. */
+  element: string;
   effect: string;
   level: number;
   leveled: boolean;
@@ -495,6 +497,7 @@ export function movesetBoard(
         name: s.name,
         tierLabel: rarityLabel(skillById(s.id)?.rarity ?? null),
         kind: s.kind === 'active' ? 'Active' : 'Passive',
+        element: s.element ?? '',
         effect: s.effect,
         level,
         leveled: isLeveled(level),
@@ -509,6 +512,7 @@ export function movesetBoard(
           name: set.passive.name,
           tierLabel: rarityLabel(skillById(set.passive.id)?.rarity ?? null),
           kind: 'Passive',
+          element: set.passive.element ?? '',
           effect: set.passive.effect,
           level: meta.skills?.[set.passive.id]?.level ?? 1,
           leveled: isLeveled(meta.skills?.[set.passive.id]?.level ?? 1),

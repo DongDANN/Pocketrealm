@@ -13,6 +13,9 @@
   --moss: #7db56a;
   --rose: #d4719d;
   --gold: #ffe9a3;
+  --frost: #bcd0ff;
+  --teal: #45bda8;
+  --violet: #d3b0f2;
   --focus: #ffe9a3;
   --text-muted: #cba267;
   --text-faint: #a97c4d;
@@ -40,6 +43,9 @@
   --moss: #d9f0bf;
   --rose: #ffd6e6;
   --gold: #fff6c9;
+  --frost: #e8f0ff;
+  --teal: #7fe6cf;
+  --violet: #eedcff;
   --focus: #ffffff;
   --text-muted: #fff6dd;
   --text-faint: #ffe79a;
@@ -3102,6 +3108,252 @@ a {
 
 .battle-screen.crit .battle-field {
   animation: field-crit 420ms steps(2, end);
+}
+
+/* -------------------------------------------------------------------------------------------
+ * Gate 7g-4 — bag, summary and Pokédex. The same GBA menu grammar as the battle: flat plates,
+ * 2px frames, hard shadows, integer steps. No radius, no gradients.
+ * ----------------------------------------------------------------------------------------- */
+
+.bag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The icon leads, the copy takes the rest of the row, and the buttons drop beneath both on a
+   phone so neither of them has to shrink below its 44px target. */
+.bag-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 8px 10px;
+  padding: 10px;
+  background: var(--ink-700);
+  border: 2px solid var(--ink-400);
+}
+
+.bag-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  background: var(--ink-800);
+  border: 2px solid var(--ink-500);
+}
+
+.bag-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bag-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+}
+
+.bag-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pocket-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pocket-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 4px;
+  text-align: center;
+  background: var(--ink-800);
+  border: 2px solid var(--ink-500);
+}
+
+.pocket-slot.filled {
+  border-color: var(--amber);
+}
+
+.pocket-gap {
+  width: 32px;
+  height: 32px;
+  background: var(--ink-700);
+  border: 2px solid var(--ink-600);
+}
+
+.summary-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* The outline sits inside the canvas box, so the portrait keeps a 1:1 art pixel mapping. */
+.summary-portrait {
+  flex: 0 0 auto;
+  background: var(--ink-800);
+  outline: 2px solid var(--ink-500);
+  outline-offset: -2px;
+}
+
+.summary-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.move-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.move-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 8px 10px 10px;
+  background: var(--ink-800);
+  border: 2px solid var(--ink-500);
+  border-left-width: 6px;
+}
+
+.move-cell.elem-ember {
+  border-left-color: var(--amber);
+}
+
+.move-cell.elem-frost {
+  border-left-color: var(--frost);
+}
+
+.move-cell.elem-gale {
+  border-left-color: var(--teal);
+}
+
+.move-cell.elem-umbra {
+  border-left-color: var(--violet);
+}
+
+.move-cell.elem-none {
+  border-left-color: var(--ink-400);
+}
+
+.move-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.move-index {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  background: var(--ink-700);
+  border: 2px solid var(--ink-400);
+}
+
+.dex-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 2px solid var(--ink-500);
+}
+
+.dex-group:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.dex-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dex-group-title {
+  margin: 0;
+}
+
+.dex-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(80px, 100%), 1fr));
+  gap: 8px;
+}
+
+.dex-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 4px;
+  color: var(--paper);
+  background: var(--ink-700);
+  border: 2px solid var(--ink-400);
+  cursor: pointer;
+}
+
+.dex-cell:hover,
+.dex-cell:focus-visible {
+  border-color: var(--amber);
+}
+
+.dex-cell.on {
+  background: var(--ink-600);
+}
+
+.dex-cell.picked {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 2px var(--ink-900);
+}
+
+/* A 68px window leaves exactly 64px for the 32-art-pixel sprite at scale 2. */
+.dex-art-slot {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  background: var(--ink-800);
+  border: 2px solid var(--ink-500);
+}
+
+.dex-detail-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.dex-detail-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+@media (min-width: 620px) {
+  .move-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .shop-grid {

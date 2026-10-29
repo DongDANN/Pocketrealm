@@ -2162,3 +2162,54 @@ Marked`, the intent it is about to commit (`Bites for 4 (3–5)` plus the itemiz
   browser test that drives the animation itself; what is pinned is the pure model and the
   reduced-motion behaviour, which is the part that can drift silently. The bag list, the party summary
   and the Pokédex grid remain 7g-4.
+
+### Gate 7g-4 — The bag, the summary and the Pokédex become menus (2026-10-29)
+
+- **What shipped.** Three collection screens now read like GBA menus instead of stacked form rows. The
+  Workshop's consumables tab is a **Bag**: three pocket cells a run starts from, then one list holding
+  every item — icon, stock badge, effect, the engine's own price line, what the ledger is short of, and
+  a Craft/Equip pair per row. The Moveset tab opens on a **Summary** card: the Warden's portrait, its
+  build name and level, the know-cap lines, and a four-cell move grid numbered like a moveset, each cell
+  striped with its element, then the passive card and the existing Known / Could-learn panels. The
+  Codex species tab is a **Pokédex**: numbered tiles `#001`–`#016` in their five shelves — sprite, page
+  number and mastery badge once sighted, `???` and a question mark until then — above which the selected
+  page prints its name, weakness, lore and Boss Study note as the mastery allows.
+- **Every printed number still comes from the engine.** The new print layer is `delveMenus.ts`:
+  `bagBoard` prices each craft with `emberCraftCost` and lists exactly the pools `craftConsumable`
+  checks; `moveCells` pads the board to `EQUIP_SLOTS` so the grid cannot show a fifth door and trims a
+  board that somehow carries five; `dexBoard` numbers pages across the shelf and asks `masteryLevel`
+  what each page may reveal. Stock and equip are printed as the engine keeps them — equipping moves a
+  copy out of the stock, so a row reading `×0` while showing `Equipped` is telling the truth.
+- **An unseen species keeps its name off the page and off its accessible name.** The old shelves hid
+  unsighted rows entirely; the dex now shows every page as a numbered tile, but a tile the book has
+  never met prints `???` and its button's accessible name is exactly `Entry N, not sighted`. The tile's
+  own label (the species name) never reaches the DOM for that entry. The tile prints the page number,
+  the sprite and the mastery badge only — a 12-character name like "Brambleheart" is an unbreakable
+  bitmap word, and keeping it out of the 80px cell is what lets the grid hold three columns at 360px
+  without spilling. Names live on the selected page, which opens on the first sighted species.
+- **The element stripe is chrome, not a filter.** `SlotRow` now carries the move's `element`, and each
+  move cell gets a hard 6px left border in that element's ramp colour — amber for Ember, frost for
+  Frost, teal for Gale, violet for Umbra. Three CSS variables were added (and given brighter
+  high-contrast values alongside the existing ones) rather than reaching for new paints. Everything is
+  integer px, square corners and flat fill; no radius, no gradient, no CSS filter over sprite art.
+- **A portrait keeps its pixel grid.** `PixelImage` sizes its canvas 1:1 with device pixels, so the
+  summary portrait is framed with an inset `outline` instead of a border — a border would have shrunk
+  the content box and resampled the 64px art. The dex windows are plain spans sized 68px square, which
+  leaves the 32-art-pixel sprite at scale 2 exactly 64px inside a 2px frame.
+- **Verification:** `npx tsc --noEmit` **verified** clean; `npm run lint` **verified** clean;
+  `npm run format:check` **verified** clean; `npx vitest run` **verified 1017/1017 across 80 files**
+  (thirteen new: bag pricing and the Workshop discount, stock/equip moves, pocket order and the start
+  line, the padded and trimmed move grid, element labels and colours, dex numbering/groups/`???` names/
+  accessible names, mastery reveal strings, first-page selection, and Boss Study requiring a sighting);
+  `npm run sim:golden` **verified all five digests unchanged**; `npm run build` **verified** clean;
+  `npx playwright test layout.spec.ts` **verified 11/11**, including the 360px phone with no horizontal
+  overflow; `npm run test:e2e` **verified 67/67** in Chromium against the production build (4.8m), with
+  exactly two goldens regenerated — `delve-workshop` and `delve-codex` — and the other thirteen
+  untouched. A production preview was also walked by hand with a seeded book (five species sighted,
+  masteries 1–4, the Thorncrown studied): sighted tiles drew their sprites and badges, the unsighted
+  pages kept `???`, and the boss page printed its lore and study note. `e2e/offline.spec.ts` stays
+  parked and uncommitted.
+- **Not verified / still open:** no committed browser test drives the bag, summary or dex yet — the
+  hand walk used a seeded IndexedDB meta, which is not part of the suite. The collection e2e that
+  crafts, opens, learns, equips and buys dust through the real UI is Gate 7c-6. Touch targets were
+  checked by the layout suite (every button ≥44px) but not by a human thumb at 360px.

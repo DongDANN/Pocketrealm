@@ -1,17 +1,12 @@
 import { useState } from 'react';
 import { C } from '../../art/palette';
-import {
-  BUILDS,
-  CONSUMABLE_SLOTS,
-  CONSUMABLES,
-  DEFAULT_BUILD,
-  EQUIP_SLOTS,
-  buildUnlocked,
-  emberCraftCost,
-  type BuildId,
-} from '../../core/delve';
+import { buildWarden } from '../../art/companion';
+import { iconBurn, iconRegen, iconShield, iconSwift } from '../../art/ui';
+import type { Pixmap } from '../../art/px';
+import { BUILDS, DEFAULT_BUILD, buildUnlocked, type BuildId } from '../../core/delve';
 import { AppHeader } from '../components/AppHeader';
 import { PixelButton } from '../components/PixelButton';
+import { PixelImage } from '../components/PixelImage';
 import { PixelPanel } from '../components/PixelPanel';
 import { PixelText } from '../components/PixelText';
 import { FatalPanel, LoadingPanel } from '../app/gates';
@@ -29,6 +24,7 @@ import {
   type RelevanceLine,
   type TierOdds,
 } from '../lib/delveCollection';
+import { bagBoard, elementColor, moveCells, moveLine, type BagBoard } from '../lib/delveMenus';
 
 /**
  * The Workshop — where materials become capsules, capsules become skills, and skills become a moveset.
@@ -268,6 +264,124 @@ function CapsulePanels({ board, delve }: { board: CapsuleBoard; delve: Actions }
   );
 }
 
+/** The four consumables' icons, drawn once at module load. */
+const BAG_ICON: Record<string, Pixmap> = {
+  'healing-draught': iconRegen(),
+  'fire-oil': iconBurn(),
+  'smoke-scroll': iconSwift(),
+  'shield-charm': iconShield(),
+};
+
+const BAG_FALLBACK = BAG_ICON['healing-draught']!;
+const WARDEN_PORTRAIT = buildWarden().portrait;
+
+/**
+ * The bag: three pockets a run starts from, then one list where every item can be crafted and moved.
+ *
+ * The craft button is priced by the engine (Workshop discount included) and the equip button follows
+ * the same rules `equipConsumable` enforces — a full pocket row says so instead of failing silently.
+ */
+function BagPanel({ board, delve, busy }: { board: BagBoard; delve: Actions; busy: boolean }) {
+  const pocketsFull = board.equippedCount >= board.cap;
+  return (
+    <PixelPanel className="delve-panel" aria-labelledby="bag-title">
+      <div className="panel-head">
+        <h2 id="bag-title" className="panel-title">
+          <PixelText text="Bag" color={C.paper0} pixelScale={3} />
+        </h2>
+        <span className="delve-badge">
+          <PixelText text={`${board.equippedCount}/${board.cap}`} color={C.amber2} pixelScale={2} />
+        </span>
+      </div>
+      <p className="panel-note">
+        <PixelText text={board.startLine} color={C.paper3} pixelScale={2} wrap={38} />
+      </p>
+      <div className="pocket-grid">
+        {board.slots.map((slot, index) => (
+          <div className={slot.id ? 'pocket-slot filled' : 'pocket-slot'} key={`pocket-${index}`}>
+            <PixelText text={`#${index + 1}`} color={C.paper2} pixelScale={2} align="center" />
+            {slot.id ? (
+              <PixelImage pixmap={BAG_ICON[slot.id] ?? BAG_FALLBACK} scale={2} alt="" />
+            ) : (
+              <span className="pocket-gap" aria-hidden="true" />
+            )}
+            <PixelText
+              text={slot.id ? slot.name : 'Empty'}
+              color={slot.id ? C.amber1 : C.paper3}
+              pixelScale={2}
+              wrap={14}
+              align="center"
+            />
+          </div>
+        ))}
+      </div>
+      <div className="bag-list">
+        {board.rows.map((row) => {
+          const canEquip = !row.equipped && row.stock > 0 && !pocketsFull;
+          return (
+            <div className="bag-row" key={row.id}>
+              <span className="bag-icon">
+                <PixelImage pixmap={BAG_ICON[row.id] ?? BAG_FALLBACK} scale={2} alt="" />
+              </span>
+              <div className="bag-copy">
+                <div className="bag-head">
+                  <PixelText
+                    text={row.name}
+                    color={row.equipped ? C.moss1 : C.amber1}
+                    pixelScale={2}
+                    wrap={22}
+                  />
+                  <span className="delve-badge">
+                    <PixelText
+                      text={row.equipped ? 'Equipped' : `×${row.stock}`}
+                      color={row.equipped ? C.moss1 : C.paper2}
+                      pixelScale={2}
+                    />
+                  </span>
+                </div>
+                <PixelText text={row.effect} color={C.paper3} pixelScale={2} wrap={34} />
+                <PixelText text={row.costLine} color={C.paper2} pixelScale={2} wrap={34} />
+                {!row.canCraft && (
+                  <PixelText
+                    text={`Short of ${row.missing.join(', ')}.`}
+                    color={C.ember1}
+                    pixelScale={2}
+                    wrap={34}
+                  />
+                )}
+              </div>
+              <div className="bag-actions">
+                <PixelButton
+                  variant="secondary"
+                  disabled={!row.canCraft || busy}
+                  aria-label={`Craft ${row.name}`}
+                  onClick={() => void delve.craft(row.id)}
+                >
+                  <PixelText text="Craft" color={C.paper0} pixelScale={2} />
+                </PixelButton>
+                <PixelButton
+                  variant="secondary"
+                  disabled={busy || !(row.equipped || canEquip)}
+                  aria-label={`${row.equipped ? 'Unequip' : 'Equip'} ${row.name}`}
+                  onClick={() => void (row.equipped ? delve.unequip(row.id) : delve.equip(row.id))}
+                >
+                  <PixelText
+                    text={
+                      row.equipped ? 'Unequip' : pocketsFull && row.stock > 0 ? 'Full' : 'Equip'
+                    }
+                    color={C.paper0}
+                    pixelScale={2}
+                  />
+                </PixelButton>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </PixelPanel>
+  );
+}
+
 function KnownRow({
   row,
   buildId,
@@ -353,94 +467,141 @@ function LearnableRow({
   );
 }
 
+/** One cell of the four. The left stripe carries the move's element, so the grid reads at a glance. */
+function MoveCellCard({
+  cell,
+  buildId,
+  delve,
+  busy,
+}: {
+  cell: ReturnType<typeof moveCells>[number];
+  buildId: BuildId;
+  delve: Actions;
+  busy: boolean;
+}) {
+  const slot = cell.slot;
+  const stripe = slot && slot.element !== '' ? `elem-${slot.element}` : 'elem-none';
+  return (
+    <div className={['move-cell', stripe].filter(Boolean).join(' ')}>
+      <div className="move-head">
+        <span className="move-index">
+          <PixelText text={`${cell.index}`} color={C.paper1} pixelScale={2} />
+        </span>
+        <PixelText
+          text={slot ? slot.name : 'Empty'}
+          color={slot ? C.amber1 : C.paper2}
+          pixelScale={2}
+          wrap={18}
+        />
+      </div>
+      {slot ? (
+        <>
+          <PixelText
+            text={moveLine(slot)}
+            color={elementColor(slot.element)}
+            pixelScale={2}
+            wrap={20}
+          />
+          <PixelText text={slot.effect} color={C.paper3} pixelScale={2} wrap={30} />
+          {slot.innate ? (
+            <span className="delve-badge">
+              <PixelText text="Innate" color={C.paper2} pixelScale={2} />
+            </span>
+          ) : (
+            <PixelButton
+              variant="secondary"
+              disabled={busy || !slot.canUnequip}
+              aria-label={`Unequip ${slot.name}`}
+              onClick={() => void delve.unequipMove(slot.id, buildId)}
+            >
+              <PixelText text="Unequip" color={C.paper0} pixelScale={2} />
+            </PixelButton>
+          )}
+        </>
+      ) : (
+        <PixelText text={cell.emptyLine} color={C.paper3} pixelScale={2} wrap={28} />
+      )}
+    </div>
+  );
+}
+
 function MovesetPanel({
   board,
   buildId,
+  level,
   delve,
   busy,
 }: {
   board: MovesetBoard;
   buildId: BuildId;
+  level: number;
   delve: Actions;
   busy: boolean;
 }) {
+  const buildName = BUILDS.find((build) => build.id === buildId)?.name ?? 'Companion';
   return (
     <>
-      <PixelPanel className="delve-panel" aria-labelledby="slots-title">
+      <PixelPanel className="delve-panel" aria-labelledby="summary-title">
         <div className="panel-head">
-          <h2 id="slots-title" className="panel-title">
-            <PixelText text="Slots" color={C.paper0} pixelScale={3} />
+          <h2 id="summary-title" className="panel-title">
+            <PixelText text="Summary" color={C.paper0} pixelScale={3} />
           </h2>
           <span className="delve-badge">
-            <PixelText
-              text={`${board.slots.length}/${EQUIP_SLOTS}`}
-              color={C.amber2}
-              pixelScale={2}
-            />
+            <PixelText text={`Lv ${level}`} color={C.amber2} pixelScale={2} />
           </span>
         </div>
-        <p className="panel-note">
-          <PixelText text={board.capLine} color={C.paper3} pixelScale={2} wrap={38} />
-        </p>
-        <p className="panel-note">
-          <PixelText text={board.nextCapLine} color={C.paper2} pixelScale={2} wrap={38} />
-        </p>
+        <div className="summary-head">
+          <PixelImage
+            pixmap={WARDEN_PORTRAIT}
+            scale={1}
+            alt={`${buildName} portrait`}
+            className="summary-portrait"
+          />
+          <div className="summary-copy">
+            <PixelText text={buildName} color={C.amber1} pixelScale={3} />
+            <PixelText text={board.capLine} color={C.paper3} pixelScale={2} wrap={34} />
+            <PixelText text={board.nextCapLine} color={C.paper2} pixelScale={2} wrap={34} />
+          </div>
+        </div>
+        <div className="move-grid">
+          {moveCells(board).map((cell) => (
+            <MoveCellCard
+              key={`move-${cell.index}`}
+              cell={cell}
+              buildId={buildId}
+              delve={delve}
+              busy={busy}
+            />
+          ))}
+        </div>
         <p className="panel-note">
           <PixelText text={board.slotLine} color={C.paper3} pixelScale={2} wrap={38} />
         </p>
         <p className="field-note">
           <PixelText text={board.lockLine} color={C.paper2} pixelScale={2} wrap={38} />
         </p>
-        <div className="choice-stack">
-          {board.slots.map((slot) => (
-            <div className="delve-choice" key={`slot-${slot.id}`}>
-              <div className="delve-choice-copy">
-                <PixelText
-                  text={`${slot.name} · ${slot.tierLabel}${slot.leveled ? ` · LV${slot.level}` : ''}`}
-                  color={C.amber1}
-                  pixelScale={2}
-                  wrap={28}
-                />
-                <PixelText text={slot.effect} color={C.paper3} pixelScale={2} wrap={36} />
-              </div>
-              {slot.innate ? (
-                <span className="delve-badge">
-                  <PixelText text="Innate" color={C.paper2} pixelScale={2} />
-                </span>
-              ) : (
-                <PixelButton
-                  variant="secondary"
-                  disabled={busy || !slot.canUnequip}
-                  onClick={() => void delve.unequipMove(slot.id, buildId)}
-                >
-                  <PixelText text="Unequip" color={C.paper0} pixelScale={2} />
-                </PixelButton>
-              )}
-            </div>
-          ))}
-          <div className="delve-choice" key="passive">
-            <div className="delve-choice-copy">
-              <PixelText
-                text={`Passive · ${board.passive?.name ?? 'None'}`}
-                color={C.amber1}
-                pixelScale={2}
-                wrap={28}
-              />
-              <PixelText
-                text={`${board.passiveLine}${board.passive ? ` ${board.passive.effect}` : ''}`}
-                color={C.paper3}
-                pixelScale={2}
-                wrap={36}
-              />
-            </div>
-            <PixelButton
-              variant="secondary"
-              disabled={busy || !(board.passive?.canUnequip ?? false)}
-              onClick={() => void delve.clearPassive(buildId)}
-            >
-              <PixelText text="Reset" color={C.paper0} pixelScale={2} />
-            </PixelButton>
+        <div className="delve-choice">
+          <div className="delve-choice-copy">
+            <PixelText
+              text={`Passive · ${board.passive?.name ?? 'None'}`}
+              color={C.amber1}
+              pixelScale={2}
+              wrap={28}
+            />
+            <PixelText
+              text={`${board.passiveLine}${board.passive ? ` ${board.passive.effect}` : ''}`}
+              color={C.paper3}
+              pixelScale={2}
+              wrap={36}
+            />
           </div>
+          <PixelButton
+            variant="secondary"
+            disabled={busy || !(board.passive?.canUnequip ?? false)}
+            onClick={() => void delve.clearPassive(buildId)}
+          >
+            <PixelText text="Reset" color={C.paper0} pixelScale={2} />
+          </PixelButton>
         </div>
       </PixelPanel>
 
@@ -566,7 +727,7 @@ export function DelveWorkshop() {
   if (!snapshot) return <LoadingPanel label="Opening the crate" />;
 
   const meta = snapshot.meta;
-  const equipped = meta.equippedConsumables ?? [];
+  const bag = bagBoard(meta);
   const board = capsuleBoard(meta);
   const moves = movesetBoard(meta, snapshot.companionLevel, buildId, snapshot.active !== null);
   const ladder = dustRows(meta);
@@ -616,115 +777,7 @@ export function DelveWorkshop() {
         ))}
       </div>
 
-      {tab === 'kit' && (
-        <>
-          <PixelPanel className="delve-panel" aria-labelledby="craft-title">
-            <h2 id="craft-title" className="panel-title">
-              <PixelText text="Craft" color={C.paper0} pixelScale={3} />
-            </h2>
-            <div className="choice-stack">
-              {CONSUMABLES.map((def) => {
-                const embers = emberCraftCost(meta, def.cost.embers);
-                const missing: string[] = [];
-                if (meta.materials.ore < def.cost.ore) missing.push('Ore');
-                if (meta.materials.herb < def.cost.herb) missing.push('Herb');
-                if (meta.materials.echo < def.cost.echo) missing.push('Echo');
-                if (meta.embers < embers) missing.push('Embers');
-                const canCraft = missing.length === 0;
-                return (
-                  <div className="delve-choice" key={def.id}>
-                    <div className="delve-choice-copy">
-                      <PixelText
-                        text={`${def.name} · stock ${meta.consumableStock?.[def.id] ?? 0}`}
-                        color={C.amber1}
-                        pixelScale={2}
-                        wrap={22}
-                      />
-                      <PixelText text={def.effect} color={C.paper3} pixelScale={2} wrap={34} />
-                      <PixelText
-                        text={`Costs ${def.cost.ore} ore · ${def.cost.herb} herb · ${def.cost.echo} echo · ${embers} Embers.`}
-                        color={C.paper2}
-                        pixelScale={2}
-                        wrap={34}
-                      />
-                      {!canCraft && (
-                        <PixelText
-                          text={`Short of ${missing.join(', ')}.`}
-                          color={C.ember1}
-                          pixelScale={2}
-                          wrap={34}
-                        />
-                      )}
-                    </div>
-                    <PixelButton
-                      variant="secondary"
-                      disabled={!canCraft || delve.busy}
-                      onClick={() => void delve.craft(def.id)}
-                    >
-                      <PixelText text="Craft" color={C.paper0} pixelScale={2} />
-                    </PixelButton>
-                  </div>
-                );
-              })}
-            </div>
-          </PixelPanel>
-
-          <PixelPanel className="delve-panel" aria-labelledby="equip-title">
-            <div className="panel-head">
-              <h2 id="equip-title" className="panel-title">
-                <PixelText text="Loadout" color={C.paper0} pixelScale={3} />
-              </h2>
-              <span className="delve-badge">
-                <PixelText
-                  text={`${equipped.length}/${CONSUMABLE_SLOTS}`}
-                  color={C.amber2}
-                  pixelScale={2}
-                />
-              </span>
-            </div>
-            <p className="panel-note">
-              <PixelText
-                text="Equipped consumables start the next run with you. They are spent when they fire and must be crafted again."
-                color={C.paper3}
-                pixelScale={2}
-                wrap={38}
-              />
-            </p>
-            <div className="choice-stack">
-              {CONSUMABLES.map((def) => {
-                const stock = meta.consumableStock?.[def.id] ?? 0;
-                const isEquipped = equipped.includes(def.id);
-                const full = equipped.length >= CONSUMABLE_SLOTS;
-                return (
-                  <div className="delve-choice" key={`eq-${def.id}`}>
-                    <div className="delve-choice-copy">
-                      <PixelText
-                        text={`${def.name}${isEquipped ? ' · equipped' : ` · ${stock} in stock`}`}
-                        color={isEquipped ? C.moss1 : C.paper1}
-                        pixelScale={2}
-                        wrap={22}
-                      />
-                    </div>
-                    <PixelButton
-                      variant="secondary"
-                      disabled={delve.busy || (!isEquipped && (stock < 1 || full))}
-                      onClick={() =>
-                        void (isEquipped ? delve.unequip(def.id) : delve.equip(def.id))
-                      }
-                    >
-                      <PixelText
-                        text={isEquipped ? 'Unequip' : full && stock > 0 ? 'Slots full' : 'Equip'}
-                        color={C.paper0}
-                        pixelScale={2}
-                      />
-                    </PixelButton>
-                  </div>
-                );
-              })}
-            </div>
-          </PixelPanel>
-        </>
-      )}
+      {tab === 'kit' && <BagPanel board={bag} delve={delve} busy={delve.busy} />}
 
       {tab === 'capsules' && (
         <>
@@ -751,7 +804,13 @@ export function DelveWorkshop() {
               ),
             )}
           </div>
-          <MovesetPanel board={moves} buildId={buildId} delve={delve} busy={delve.busy} />
+          <MovesetPanel
+            board={moves}
+            buildId={buildId}
+            level={snapshot.companionLevel}
+            delve={delve}
+            busy={delve.busy}
+          />
         </>
       )}
 

@@ -1,47 +1,179 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useState } from 'react';
 import { C } from '../../art/palette';
+import { enemyFrames } from '../../art/critters';
 import {
-  BOSSES,
   codexProgress,
-  ELITES,
-  ENEMIES,
   masteryDamagePct,
-  masteryLevel,
   MASTERY_XP_PER_KILL,
   MAX_MASTERY_LEVEL,
   type DelveMeta,
-  type EnemyDef,
 } from '../../core/delve';
 import { CODEX_COSMETIC_ID } from '../../core/cosmetics';
 import { claimCodexCosmetic } from '../../data/cosmetics';
 import { AppHeader } from '../components/AppHeader';
 import { PixelButton } from '../components/PixelButton';
+import { PixelImage } from '../components/PixelImage';
 import { PixelPanel } from '../components/PixelPanel';
 import { PixelText } from '../components/PixelText';
 import { FatalPanel, LoadingPanel } from '../app/gates';
 import { useDelve } from '../app/delve';
 import { useSession } from '../app/session';
 import { skillLibrary, tierColor } from '../lib/delveCollection';
+import { dexBoard, type DexBoard, type DexEntry } from '../lib/delveMenus';
 import { say } from '../lib/toast';
-
-const GROUPS: { label: string; rows: readonly EnemyDef[] }[] = [
-  { label: 'Rootfall Warren', rows: ENEMIES.filter((e) => e.hollow === 1) },
-  { label: 'Cinder Vault', rows: ENEMIES.filter((e) => e.hollow === 2) },
-  { label: 'Umbral Deep', rows: ENEMIES.filter((e) => e.hollow === 3) },
-  { label: 'Elites', rows: ELITES },
-  { label: 'Bosses', rows: BOSSES },
-];
 
 const SHELF_TABS: readonly { id: 'species' | 'skills'; label: string }[] = [
   { id: 'species', label: 'Species' },
   { id: 'skills', label: 'Skills' },
 ];
 
+/** A page's window: the sprite once the species is sighted, a question mark until then. */
+function DexArt({ entry }: { entry: DexEntry }) {
+  const frames = entry.sighted ? enemyFrames(entry.id) : null;
+  return (
+    <span className="dex-art-slot">
+      {frames ? (
+        <PixelImage pixmap={frames.idle[0]!} scale={2} alt="" className="dex-art" />
+      ) : (
+        <PixelText text="?" color={C.paper2} pixelScale={3} />
+      )}
+    </span>
+  );
+}
+
+/**
+ * The species dex: one numbered tile per species, and the selected page above the grid.
+ *
+ * The whole shelf is visible, sighted or not — a tile the book has never met prints `???` and keeps
+ * its species name off the page and off its accessible name, so the shelf counts what is missing
+ * without handing out a list to farm.
+ */
+function PokedexPanel({
+  board,
+  selected,
+  onPick,
+}: {
+  board: DexBoard;
+  selected: DexEntry;
+  onPick: (id: string) => void;
+}) {
+  const unseen = board.total - board.seen;
+  return (
+    <>
+      <PixelPanel className="delve-panel" aria-labelledby="dex-detail-title">
+        <div className="panel-head">
+          <h2 id="dex-detail-title" className="panel-title">
+            <PixelText text={selected.label} color={C.paper0} pixelScale={3} />
+          </h2>
+          <span className="delve-badge">
+            <PixelText text={selected.group} color={C.paper2} pixelScale={2} />
+          </span>
+        </div>
+        <div className="dex-detail-head">
+          <DexArt entry={selected} />
+          <div className="dex-detail-copy">
+            <PixelText
+              text={selected.name}
+              color={selected.sighted ? C.amber1 : C.paper3}
+              pixelScale={2}
+              wrap={20}
+            />
+            {selected.sighted && (
+              <span className="delve-badge">
+                <PixelText text={`M${selected.masteryLevel}`} color={C.amber2} pixelScale={2} />
+              </span>
+            )}
+            <PixelText text={selected.detail} color={C.paper3} pixelScale={2} wrap={32} />
+            {selected.sighted && (
+              <PixelText
+                text={`Mastery ${selected.masteryLevel}/${MAX_MASTERY_LEVEL}. Level 2 reveals its weakness, level 3 its lore.`}
+                color={C.paper2}
+                pixelScale={2}
+                wrap={32}
+              />
+            )}
+            {selected.studied && (
+              <PixelText
+                text="Studied: its phases and tells are recorded."
+                color={C.cyan2}
+                pixelScale={2}
+                wrap={32}
+              />
+            )}
+          </div>
+        </div>
+      </PixelPanel>
+
+      <PixelPanel className="delve-panel" aria-labelledby="dex-grid-title">
+        <div className="panel-head">
+          <h2 id="dex-grid-title" className="panel-title">
+            <PixelText text="Species" color={C.paper0} pixelScale={3} />
+          </h2>
+          <span className="delve-badge">
+            <PixelText text={`${board.seen}/${board.total}`} color={C.amber2} pixelScale={2} />
+          </span>
+        </div>
+        {unseen > 0 && (
+          <p className="panel-note">
+            <PixelText
+              text={`${unseen} not sighted yet. Each page fills in the first time you meet its species.`}
+              color={C.paper3}
+              pixelScale={2}
+              wrap={36}
+            />
+          </p>
+        )}
+        {board.groups.map((group) => (
+          <section className="dex-group" key={group.key} aria-label={group.label}>
+            <div className="dex-group-head">
+              <h3 className="dex-group-title">
+                <PixelText text={group.label} color={C.paper1} pixelScale={2} />
+              </h3>
+              <span className="delve-badge">
+                <PixelText text={`${group.seen}/${group.total}`} color={C.paper2} pixelScale={2} />
+              </span>
+            </div>
+            <div className="dex-grid">
+              {group.entries.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={[
+                    'dex-cell',
+                    entry.sighted ? 'on' : '',
+                    selected.id === entry.id ? 'picked' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  aria-pressed={selected.id === entry.id}
+                  aria-label={entry.aria}
+                  onClick={() => onPick(entry.id)}
+                >
+                  <PixelText text={entry.label} color={C.paper2} pixelScale={2} />
+                  <DexArt entry={entry} />
+                  {entry.sighted ? (
+                    <span className="delve-badge">
+                      <PixelText text={entry.badge} color={C.amber2} pixelScale={2} />
+                    </span>
+                  ) : (
+                    <PixelText text="???" color={C.paper3} pixelScale={2} />
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </PixelPanel>
+    </>
+  );
+}
+
 export function DelveCodex() {
   const delve = useDelve();
   const { db } = useSession();
   const [tab, setTab] = useState<'species' | 'skills'>('species');
+  const [picked, setPicked] = useState<string | null>(null);
   const owned = useLiveQuery(async () => {
     const companion = await db.companions.toCollection().first();
     return companion?.cosmetics ?? [];
@@ -55,6 +187,11 @@ export function DelveCodex() {
   const meta = snapshot.meta;
   const progress = codexProgress(meta);
   const keepsakeOwned = (owned ?? []).includes(CODEX_COSMETIC_ID);
+  const dex = dexBoard(meta);
+  const selected =
+    dex.entries.find((entry) => entry.id === picked) ??
+    dex.entries.find((entry) => entry.id === dex.firstId) ??
+    dex.entries[0]!;
 
   const claim = async () => {
     const result = await claimCodexCosmetic(db);
@@ -120,66 +257,7 @@ export function DelveCodex() {
         ))}
       </div>
 
-      {tab === 'species' &&
-        GROUPS.map((group) => (
-          <PixelPanel
-            className="delve-panel"
-            key={group.label}
-            aria-labelledby={`codex-${group.label}`}
-          >
-            <h2 id={`codex-${group.label}`} className="panel-title">
-              <PixelText text={group.label} color={C.paper0} pixelScale={3} />
-            </h2>
-            {group.rows.map((def) => {
-              const xp = meta.mastery?.[def.id] ?? 0;
-              const level = masteryLevel(xp);
-              const seen = meta.codex?.includes(def.id) === true;
-              const studied = meta.bossKnowledge?.includes(def.id) === true;
-              if (!seen) return null;
-              return (
-                <div className="codex-row" key={def.id}>
-                  <div className="delve-choice-copy">
-                    <PixelText text={def.name} color={C.paper1} pixelScale={2} />
-                    <PixelText
-                      text={
-                        level >= 3
-                          ? `${def.lore} Weak to ${def.weakness}, resists ${def.resistance}.`
-                          : level >= 2
-                            ? `Weak to ${def.weakness}, resists ${def.resistance}. Mastery ${level}/${MAX_MASTERY_LEVEL}.`
-                            : `Sighted. Mastery ${level}/${MAX_MASTERY_LEVEL} — ${xp} XP. Stats still hidden.`
-                      }
-                      color={C.paper3}
-                      pixelScale={2}
-                      wrap={36}
-                    />
-                    {studied && (
-                      <PixelText
-                        text="Studied: its phases and tells are recorded."
-                        color={C.cyan2}
-                        pixelScale={2}
-                        wrap={34}
-                      />
-                    )}
-                  </div>
-                  <span className="delve-badge">
-                    <PixelText text={`M${level}`} color={C.amber2} pixelScale={2} />
-                  </span>
-                </div>
-              );
-            })}
-            {/* One line for the whole shelf of ???: identical filler made the page unreadable. */}
-            {group.rows.some((def) => meta.codex?.includes(def.id) !== true) && (
-              <p className="panel-note">
-                <PixelText
-                  text={`${group.rows.filter((def) => meta.codex?.includes(def.id) !== true).length} not sighted yet. Each appears here the first time you meet it.`}
-                  color={C.paper3}
-                  pixelScale={2}
-                  wrap={36}
-                />
-              </p>
-            )}
-          </PixelPanel>
-        ))}
+      {tab === 'species' && <PokedexPanel board={dex} selected={selected} onPick={setPicked} />}
       {tab === 'skills' && <SkillShelves meta={meta} />}
     </main>
   );
