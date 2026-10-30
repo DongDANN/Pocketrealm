@@ -46,6 +46,32 @@ test('cold-launches offline with the book intact and keeps logging entries', asy
   await context.setOffline(false);
 });
 
+test('the offline strip clears itself when the network comes back', async ({ page, context }) => {
+  await completeOnboarding(page, { income: '1000' });
+  await waitForOfflinePack(page);
+
+  await context.setOffline(true);
+  await expect(page.locator('.offline-strip')).toBeVisible();
+
+  await context.setOffline(false);
+  await expect(page.locator('.offline-strip')).toHaveCount(0);
+});
+
+test('a tab that booted while offline notices the network coming back', async ({
+  page,
+  context,
+}) => {
+  await completeOnboarding(page, { income: '1000' });
+  await waitForOfflinePack(page);
+
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('.offline-strip')).toBeVisible();
+
+  await context.setOffline(false);
+  await expect(page.locator('.offline-strip')).toHaveCount(0);
+});
+
 test('a fresh tab sees the same book on this device', async ({ page, context }) => {
   await completeOnboarding(page, { income: '500' });
   const fresh = await context.newPage();

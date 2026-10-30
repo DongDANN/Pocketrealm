@@ -1,222 +1,164 @@
 # Pocketrealm
 
-A calm, private, offline-first budgeting PWA with a lantern-lit dungeon. The budget comes first:
-safe-to-spend today, a three-tap expense pad, envelopes, savings goals, weekly reviews, month
-summaries, and a JSON backup file. The Delve is a second layer; no budgeting screen is gated behind
-it, and missing a day costs nothing.
+**A budget app that keeps a dungeon in the basement.**
 
-Philippine peso (PHP) is the default. The Settings currency field changes how amounts are displayed;
-it never converts or rewrites stored amounts (money is kept as integer minor units).
+You open it to find out how much you can safely spend today. Three taps, a peso amount, done. The
+lantern-lit Hollow you can descend afterwards is the reward for having a life outside the app: habits
+you kept, money you logged, a week you reviewed. Miss a day and the dungeon waits politely. Nothing
+in here judges you.
 
-Built with Vite 8, React 19, strict TypeScript, Dexie 4 and vite-plugin-pwa. There are no accounts,
-no server, no analytics, no remote fonts, and no bank linking.
+Money first, game second. No budgeting screen is hidden behind a fight, no streak is load-bearing, and
+nothing in the app is purchasable with real money.
 
-## Requirements
+Everything below runs offline, on your device, with no account, no server, no analytics, no remote
+fonts, no bank linking, and no phone home. Data is IndexedDB; the only way to move it to another
+device is the JSON backup you download.
 
-- Node.js 22.12 or newer (last verified on Node 22.23.1 with npm 10.9.8).
-- Chromium for Playwright. `npm run lighthouse` also needs a local Chrome or Chromium.
-- No environment variables, API keys, or database are required.
+Vite 8, React 19, strict TypeScript, Dexie 4, Workbox service worker, procedurally generated pixel
+art and chiptune.
 
-## Install and run
+## Try it
 
 ```bash
 npm install
-npm run dev          # Vite dev server, http://localhost:5173
+npm run dev          # http://localhost:5173
 ```
 
-The development server does not enable the service worker. Offline behavior is exercised against a
-production build by the e2e suite and `npm run preview`.
+The dev server has no service worker — offline is a production-build behavior, and the e2e suite
+proves it there.
 
-## Verify
+## The house rules
+
+These are not marketing lines; they are the invariants the tests defend.
+
+- **Score never comes from money.** Embers, quests and achievements track habits kept and rooms
+  cleared, never account balances. Being rich in real life buys nothing here.
+- **Nothing is purchasable with real money.** No store, no IAP, no ads, no subscription.
+- **No compulsion mechanics.** No countdowns, no loss aversion, no "your streak is dying!" guilt.
+- **No shame.** Getting knocked out in the Delve costs that run, not your progress, your materials
+  bank, or your history. A faint is a beat, not a punishment.
+- **Offline is the default state.** Airplane mode changes nothing except the strip that says so.
+- **Deterministic.** Same seed, same floor, same fight, same numbers — which is why there is a
+  10,000-seed fuzz suite and a set of golden runs whose hashes are pinned in the tests.
+- **Peso by default.** The currency setting changes how amounts are displayed. It never converts or
+  rewrites stored money, because money is stored as integer minor units.
+
+## Commands
 
 | Command                | What it checks                                                                |
 | ---------------------- | ----------------------------------------------------------------------------- |
 | `npm run typecheck`    | `tsc --noEmit`, strict TypeScript                                             |
 | `npm run lint`         | ESLint over `src`, `scripts`, `tests`, `e2e`                                  |
-| `npm run format:check` | Prettier formatting                                                           |
-| `npm test`             | Vitest: core math, Delve engine, data layer, art, audio, 10,000-seed fuzz     |
-| `npm run test:e2e`     | Playwright (Chromium): onboarding, entry, offline, update, install, a11y, CSP |
-| `npm run art:validate` | Palette, canvas size, frame counts and exported art sheets                    |
-| `npm run sim:delve`    | Headless balance simulation with four personas plus the Breaker               |
-| `npm run lighthouse`   | Lighthouse CI through the Vercel policy emulator (builds first)               |
+| `npm run format:check` | Prettier                                                                      |
+| `npm test`             | Vitest: money math, Delve engine, data layer, migrations, art, audio, fuzz    |
+| `npm run test:e2e`     | Playwright (Chromium): journeys, offline, update, install, a11y, CSP, visuals |
+| `npm run art:validate` | Palette, canvas size, frame counts, exported sheets                           |
+| `npm run sim:delve`    | Headless balance simulation: four personas plus the Breaker                   |
+| `npm run sim:golden`   | Prints the golden-run state hashes pinned in the tests                        |
+| `npm run lighthouse`   | Lighthouse CI against the local Vercel policy emulator (builds first)         |
 
-Last measured on 2026-10-26: typecheck, lint and formatting clean; **667/667 Vitest tests across 66
-files**; **61/61 Playwright tests** in Chromium against the production build; art validation PASS for
-**121 assets / 309 frames** (plus 16 preview PNGs, 12 GIFs and 44 UI PNGs). See
-[docs/FINAL_REPORT.md](docs/FINAL_REPORT.md) for Lighthouse and bundle numbers and for what was not
-verified.
-
-The fuzz and golden tests are part of the default Vitest run. To run only the expensive ones:
+Want the slow, paranoid stuff on its own:
 
 ```bash
 npx vitest run tests/delve-fuzz.test.ts tests/delve-golden.test.ts
 ```
 
-## Build and inspect production
+Current counts and the honest list of what has _not_ been verified live in
+[docs/PROGRESS.md](docs/PROGRESS.md) and [docs/FINAL_REPORT.md](docs/FINAL_REPORT.md) rather than
+rotting at the top of this file.
+
+## Production, and the little emulator
 
 ```bash
 npm run build        # tsc --noEmit && vite build -> dist/
-npm run preview      # plain Vite preview of dist/
-node scripts/serve-vercel.mjs   # http://127.0.0.1:4174 with vercel.json rewrites/headers applied
+npm run preview      # plain Vite preview
+node scripts/serve-vercel.mjs   # http://127.0.0.1:4174 with vercel.json rewrites + headers
 ```
 
-The production build emits a Workbox service worker. The build currently precaches **89 entries,
-about 1.0 MiB** — the whole shell, every lazy chunk (including the Delve worker and Canvas scenes),
-the manifest and the icons. There are no audio files; music and SFX are synthesized at runtime.
+The build emits a Workbox worker that precaches the whole shell — every lazy chunk, the Delve engine,
+the Canvas scenes, the art, the icons. `scripts/serve-vercel.mjs` exists so the CSP, cache rules and
+manifest content type get tested against a real build instead of being trusted by eyeballing a JSON
+file. There are no audio files to precache: music and SFX are synthesized at runtime.
 
-`scripts/serve-vercel.mjs` is a small local emulator for the deployment policy: it reads
-`vercel.json`, applies the SPA rewrite and headers, serves `dist/`, and gzip-compresses text
-responses the way Vercel does. It exists so the CSP, cache rules and manifest content type can be
-tested against a real production build rather than trusted by inspection.
+## How the Delve works
 
-## Deploy to Vercel
+A run is a seeded descent through a Hollow: rows of rooms across several floors — skirmish, elite,
+treasure, rest, shop, event, boss. Oil buys the run start, not each room. Fights are **yours to play**:
+the room opens, waits, and takes exactly one order per round — a swing, one of your four slotted
+skills, a brace, or an item. The number the menu prints is the number the engine computes; both read
+the same snapshot, which is a contract several tests exist to enforce.
 
-Deployment is intentionally left to the project owner. Two paths work; neither needs a token from
-this project.
+Each floor carries one rule out of ten (skills cost more energy, elements invert, guard reflects,
+crits heal the enemy, the leader is shielded by its escort, the market flips, and so on). A boss does
+not just hit harder as it degrades; each phase **adds a behaviour**. After the run, Embers bank,
+materials get a provenance ledger, capsules roll into a moveset, and Skill Dust climbs a level ladder.
 
-### 1. Git integration (recommended)
+The design and its gate-by-gate build log are the real documentation:
+[docs/DELVE_REDESIGN.md](docs/DELVE_REDESIGN.md) and [docs/PROGRESS.md](docs/PROGRESS.md).
 
-1. Push the repository to GitHub/GitLab/Bitbucket.
-2. In Vercel, **Add New → Project** and import the repository.
-3. Use the detected **Vite** framework preset with:
-   - Install Command: `npm install`
-   - Build Command: `npm run build`
-   - Output Directory: `dist`
-   - Node.js: 22.x (Vite 8 requires Node 20.19+ or 22.12+)
-4. Add no environment variables. There is no server, database or secret.
-5. Deploy.
+## Your data
 
-`vercel.json` is picked up automatically. It supplies:
+- **Export** — Settings → Download backup: one JSON file, schema and app version included, every
+  table (book, Delve state, Forge, cosmetics, achievements).
+- **Import** — validated with zod, previewed with counts and dates, backed up automatically, then
+  merged or replaced (replace needs an explicit checkbox). One transaction; a failed import writes
+  nothing.
+- **Delete everything** — type the confirmation word, and it offers an export first.
+- **Durability** — the app requests persistent storage once and reports the result in Settings.
+  Browsers can still evict site data, so install to the Home Screen and keep a backup off-device.
 
-- an SPA rewrite to `/index.html` that excludes real files under `/assets/`, `/ui/` and `/icons/`;
-- `Cache-Control: public, max-age=31536000, immutable` for hashed assets and the Workbox runtime;
-- `no-cache` for `/sw.js`, `/index.html`, the manifest and extensionless routes;
-- `Content-Type: application/manifest+json` for `manifest.webmanifest`;
-- a self-only CSP (`script-src 'self'`; `style-src 'self' 'unsafe-inline'` because React sets inline
-  style attributes), plus `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` and
-  `X-Frame-Options`.
-
-The manifest uses `start_url: "/"` and `scope: "/"`, so deploy at a domain root, not a subpath.
-
-### 2. Vercel CLI
-
-```bash
-npx vercel          # first run links the project; accept the detected Vite settings
-npx vercel --prod   # production deployment
-```
-
-Log in through the browser when the CLI asks. Keep the same build settings as above.
-
-### After deploying
-
-- Open the URL over HTTPS, then open DevTools → Application → Manifest and Service Workers. A
-  service worker should activate after the first visit; the manifest should be recognised.
-- Reload once online so the offline pack is written, then use the app with the network disabled.
-- Run Lighthouse from DevTools. Lighthouse 12 has no separate PWA category; installability is covered
-  by the manifest and install tests in this repository and by the manual checklist.
-- Change something and redeploy to see the in-app "A new build is ready" banner; the update reload
-  must keep the book intact.
-- Check headers with `curl -I https://your-domain/` if you want to confirm the CSP and cache rules at
-  the edge. The local verifier is evidence for the policy file, not for Vercel itself.
-
-## How offline works
-
-`vite-plugin-pwa` uses Workbox `generateSW` with `registerType: 'prompt'`. The first online visit
-installs the service worker and precaches the entire build — the budgeting shell, every lazy route,
-the Delve worker, the art and the icons. Navigation falls back to `index.html`, so deep links and the
-thumb bar work with no network. The first-visit strip ("Preparing the offline pack…") stays visible
-until the controller takes over, with a 30-second patience fallback; the app is usable the whole time.
-
-Data lives in IndexedDB on this device. The service worker never stores or uploads user data. Updates
-are offered in-app; clicking Update posts `SKIP_WAITING`, reloads on `controllerchange`, and keeps a
-4-second fallback. The schema migrates on open after an update; nothing is cleared.
-
-When a browser reports no network, a thin strip says "Working offline. Everything is saved on this
-device." It is a status, not an alarm.
-
-## Your data and backups
-
-- **Export:** Settings → **Download backup** produces one JSON file with a schema version, app
-  version and every table, including Delve state, Forge progress, cosmetics and achievements.
-- **Import:** the file is validated with zod and previewed (counts and dates) before anything is
-  written. A backup of the current book is created automatically; then choose **Merge: keep what I
-  have** or **Replace: clear this book first** (replace requires an explicit confirmation
-  checkbox). Import is one Dexie transaction; a failed import writes nothing.
-- **Delete everything:** requires typing the confirmation word and offers an export first.
-- **Storage durability:** the app asks for persistent storage once and shows the result in Settings.
-  Browsers can still evict site data. Installing to the Home Screen and keeping an exported backup
-  off-device are the reliable safeguards, especially on iOS Safari.
-
-There is no sync and no cloud copy. The backup file is the only way to move the book to another device.
+No sync, no cloud copy, no server-side anything. That is the point.
 
 ## Art and audio
 
-All art is original and generated in code (`src/art`): a master palette with named ramps, a
-palette-indexed pixmap toolkit, a bitmap font authored as data, and Canvas 2D scenes at 320×180
-logical resolution, integer-scaled in device pixels. This is **procedurally authored pixel art**, not
-hand-drawn art; no claim of hand-drawn quality is made. Contact sheets and animated previews are in
-`docs/art-preview/`, and the palette/size/frame rules are enforced by `npm run art:validate` and the
-art tests.
+All art is original and generated in code (`src/art`): one master palette with named ramps, a
+palette-indexed pixmap toolkit, a bitmap font authored as data, Canvas 2D scenes at 320×180 logical
+resolution integer-scaled into device pixels. Call it **procedurally authored pixel art** — no claim of
+hand-drawn authorship is made, and the palette/size/frame rules are machine-enforced. Contact sheets
+and animated previews: [docs/art-preview/](docs/art-preview/).
 
-Audio is an original four-channel WebAudio synth with tracks and SFX stored as data. There are no
-audio files, and audio starts only after a user gesture. Volume and mute live in Settings.
+Audio is an original four-channel WebAudio synth with tracks and SFX stored as data. Nothing plays
+until you touch something.
 
-To replace an asset, edit the corresponding module and re-run `npm run art:validate` and the visual
-tests. There is no Aseprite/PNG importer yet; that remains a toolchain gap for a human artist.
+Replacing an asset means editing the module and re-running `npm run art:validate` plus the visual
+tests. There is no Aseprite/PNG importer yet; that is a real toolchain gap for a human artist.
 
 ## Accessibility
 
-- Every screen is keyboard reachable with a visible pixel focus ring; touch targets are at least
-  44×44 CSS pixels.
-- Canvas text exposes an accessible name; decorative canvases are hidden from assistive technology.
-- **Readable text** switches the bitmap face for the system face without changing layout.
-- **High contrast** remaps bitmap text to the lightest tones of its ramp on the dark shell (measured
-  at ≥7:1) while keeping panel framing; standard mode targets AA and money labels target AAA.
-- Reduced motion is respected globally and by both Canvas scenes; charts provide labels and a data
-  table, and no meaning relies on colour alone.
-- Playwright audits visible controls and names on seven screens; Lighthouse accessibility is **1.0**.
-  A real screen-reader pass is still a manual item.
+Keyboard reachable everywhere, with a visible pixel focus ring and targets of at least 44×44 CSS
+pixels. Canvas text carries an accessible name; decorative canvases are hidden from assistive
+technology. **Readable text** swaps the bitmap face for the system face without moving layout.
+**High contrast** remaps bitmap text to the lightest tones of its ramp (measured ≥7:1 on the dark
+shell) while keeping the framing. Reduced motion is honoured globally and by both Canvas scenes;
+charts ship labels and a data table, and no meaning is carried by colour alone. A real screen-reader
+pass is still a manual item.
 
-## Performance and bundle measurements
+## Deploy it yourself
 
-Measured on the production build (2026-10-26, local Vercel policy emulator, desktop Chromium):
+Deployment is left to the owner, and it is genuinely simple: import the repo in Vercel, accept the
+detected **Vite** preset, set Build Command `npm run build` and Output Directory `dist`, pick Node.js
+22.x (Vite 8 wants 20.19+ or 22.12+), and add **zero** environment variables. Or `npx vercel` then
+`npx vercel --prod`.
 
-| Metric                 | `/`           | `/add`        |
-| ---------------------- | ------------- | ------------- |
-| Lighthouse performance | 0.93          | 0.94          |
-| Accessibility          | 1.00          | 1.00          |
-| Best practices         | 1.00          | 1.00          |
-| FCP / LCP              | 2.3 s / 2.9 s | 2.3 s / 2.7 s |
-| TBT / CLS              | 50 ms / 0.01  | 0 ms / 0.00   |
-| Total transfer         | 240 KiB       | 239 KiB       |
+`vercel.json` is read automatically and carries the SPA rewrite (excluding real files under
+`/assets/`, `/ui/`, `/icons/`), immutable caching for hashed assets, `no-cache` for `/sw.js` and
+`index.html`, the manifest content type, and a self-only CSP plus the usual header set. The manifest
+uses `start_url: "/"` and `scope: "/"`, so **deploy at a domain root**, not a subpath.
 
-Initial JS is **190.6 kB gzipped (≈186 KiB)** plus 7.3 kB gzipped CSS. That is above the soft
-~150 KB initial-shell budget; React + React Router (78.5 kB) and Dexie (33.9 kB) account for most of
-it. All game code is lazy: the remaining JS totals 110.1 kB gzipped across every on-demand chunk,
-including the Delve engine/worker/scene and the lazy zod validator — well under the ~450 KB Delve
-budget. The precache is ~1.0 MiB including art, under the ~6 MB art+audio budget. These numbers are
-recorded honestly rather than hidden; see the final report for the trade-off.
+After deploying: open it over HTTPS, check Application → Manifest and Service Workers, reload once
+online so the offline pack is written, then turn the network off and keep entering expenses. Push a
+change to see the "A new build is ready" banner and confirm the reload keeps the book intact. The
+checklist with real statuses is [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md).
 
-## Known limitations
+## What this app will not do
 
-- The project is **not deployed** by its author. Live HTTPS install prompts, the real Vercel edge and
-  the production update flow are unverified.
-- Android/desktop install prompts and iOS Safari Add to Home Screen have only been simulated in
-  Chromium; real-device behavior is not verified. Storage-persistence grants depend on browser
-  engagement rules and are not verified.
-- Lighthouse runs locally against the policy emulator; scores vary by machine. Lighthouse 12.6.1 has
-  no PWA category.
-- Real-phone FPS, haptics, catch-up wall-clock time and screen-reader behavior are not measured. The
-  catch-up timing and rendering smoke tests are desktop/Node evidence only.
-- SHOULD items not built: allies and party, story chapters, Endless Hollow, Heat 6–10, weekly
-  mutators, app lock, CSV export, multiple companions and seasonal themes. Undo, transaction
-  search/filter, envelope rollover options and install shortcuts are present.
-- The Aseprite/PNG override importer from the art direction is not implemented; art is replaced by
-  editing code.
-- There is no sync, no push notifications, no background progress while the app is closed, and no
-  financial advice. The Delve catches up on open, capped at 12 hours.
+Give financial advice. Sync. Send push notifications. Earn while closed. Hide a limitation: the
+author has not deployed it, so live install prompts, the real Vercel edge, real-phone FPS and haptics,
+and iOS Add-to-Home-Screen behavior are unverified — documented as such rather than waved at. Not yet
+built: allies and party, story chapters, Endless Hollow, Heat 6–10, weekly mutators, app lock, CSV
+export, multiple companions, seasonal themes.
 
-## Project layout
+## Layout
 
 ```
 src/core       pure TypeScript: money, periods, budgets, rewards, quests, streaks, Delve engine
@@ -228,17 +170,17 @@ src/pwa        service-worker registration, install prompt, update flow, storage
 scripts        art sheets/validator, Delve simulation, golden hashes, Vercel policy emulator
 tests          Vitest unit/property/fuzz/migration/art tests and fixtures
 e2e            Playwright journeys: app, offline, update, install, a11y, security, visuals
-docs           SPEC, PROGRESS, MANUAL_TEST, FINAL_REPORT, ART_NOTES, art previews
+docs           SPEC, DELVE_REDESIGN, PROGRESS, MANUAL_TEST, FINAL_REPORT, ART_NOTES, art previews
 ```
 
 ## Docs
 
 - [docs/SPEC.md](docs/SPEC.md) — product and engineering specification.
+- [docs/DELVE_REDESIGN.md](docs/DELVE_REDESIGN.md) — the Delve's redesign: player turns, the rule
+  floors, the patience economy, and the gates that build it.
 - [docs/PROGRESS.md](docs/PROGRESS.md) — gate-by-gate build log, decisions and evidence.
-- [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md) — real-device and deployment checklist, with honest
-  statuses.
-- [docs/FINAL_REPORT.md](docs/FINAL_REPORT.md) — acceptance matrix, Lighthouse and bundle numbers,
-  known limitations, suggested next features.
+- [docs/MANUAL_TEST.md](docs/MANUAL_TEST.md) — real-device and deployment checklist.
+- [docs/FINAL_REPORT.md](docs/FINAL_REPORT.md) — acceptance matrix, Lighthouse and bundle numbers.
 - [docs/ART_NOTES.md](docs/ART_NOTES.md) — art review passes and known visual compromises.
 
-Pocketrealm is a tracking tool, not financial advice.
+Pocketrealm is a tracking tool, not financial advice. Budget responsibly; delve cheerfully.
